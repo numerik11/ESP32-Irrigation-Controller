@@ -245,9 +245,11 @@ Download Kincony PCF8574 library:
 ## 📡 First-Run Wi-Fi
 
 1. Connect to **ESPIrrigationAP**
-2. Or browse to: [http://192.168.4.1]
+2. Then browse to: [http://192.168.4.1]
 3. Enter Wi-Fi credentials
 4. Device reboots and joins your network
+5. Goto espirrigation.local or ip displayed on startup.
+6. setup timezone and weather location and gps coordinates, zone pins and number of ect.   
 
 ---
 
