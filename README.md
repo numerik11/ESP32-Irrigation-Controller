@@ -160,12 +160,12 @@ Manual zone activation **respects the same rules**.
 
 ### Rain Delay Behaviour 
 
-* scheduled watering cancelled if triggered while condition says raining, "cooldown" meaning period after eg. If rainfall is 5mm all watering is cancelled for 48 hrs.
-
+* Scheduled watering cancelled if triggered while condition says raining or cooldown.
+* Eg- Cancelled if currently raining or if rainfall threshold mm is met, all watering is delayed for set hrs.
 
 ### Wind Delay Behaviour
 
-* Scheduled watering waits while wind exceeds threshold and resumes once wind drops below limit.
+* If wind threshold is above set m/s it will delay watering and resume once wind drops below threshold.
 
 ---
 
