@@ -1,10 +1,8 @@
 # 🌱 ESP32 1–16 Zone Smart Irrigation Controller
 
-**ESP32-based irrigation controller** designed to manage **1–16 solenoid zones**, with automatic **tank / mains water source selection**, **live weather integration**, and a modern **local web interface**:
+**ESP32-based irrigation solenoid controller** designed to manage **1–16 solenoids/zones**, with automatic **tank/mains water source selection**, **live weather integration**, and a modern **local web interface**:
 
-👉 **[http://espirrigation.local](http://espirrigation.local)**
-
-Built for **reliability, flexibility, and real-world garden setups** — from small residential systems to large multi-zone installations.
+Built for **reliability, flexibility, and real-world garden/irrigation setups** — from small residential systems to large multi-zone installations.
 
 ---
 
