@@ -12,6 +12,7 @@ Built for **reliability, flexibility, and real-world garden/irrigation setups** 
 * **Automatic Tank ↔ Mains water source selection (Optional)**
 * **Rain & wind-aware scheduling (Optional)**
 * **Modern web UI**
+* **Worldwide Timezone Setup**
 * **Weather Display**
 * **Optional TFT / OLED / LCD displays**
 * **ESP32/ESP32-S3 recommended (KC868-A6/A8 also supported)**
