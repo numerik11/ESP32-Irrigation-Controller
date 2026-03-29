@@ -293,6 +293,6 @@ Download Kincony PCF8574 library:
 
 <img width="403" height="249" alt="image" src="https://github.com/user-attachments/assets/63f053da-0656-4761-a37d-9579fe1d955f" />
 
--Esp32-s3 w/TFT 6 Relay 24v AC 
+-Esp32-s3 w/SPI TFT OLCD, 6 Zone, 24v AC Solenoids 
 <img width="490" height="340" alt="image" src="https://github.com/user-attachments/assets/55f58a6f-606e-4aac-9061-a2c1fe721f88" />
 
