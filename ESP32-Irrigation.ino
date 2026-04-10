@@ -170,13 +170,23 @@ bool gpioActiveLow   = false;
 bool relayActiveHigh = true;
 bool tankEnabled     = true;
 
+#if defined(CONFIG_IDF_TARGET_ESP32)
 int zonePins[MAX_ZONES] = {
-  15, 16, 17, 18, 4, 5,  // defaults: first 4 use PCF, keep P4/P5 free for mains/tank
-  6, 7, -1, -1, -1, -1, -1, -1, -1, -1   // spare slots up to 16
+  15, 16, 17, 18, 4, 5,
+  25, 26, -1, -1, -1, -1, -1, -1, -1, -1
 };
-int mainsPin = 10;
-int tankPin  = 11;
+int mainsPin = 32;
+int tankPin  = 33;
+int tankLevelPin = 34; // ADC1 input on classic ESP32 (works while Wi-Fi is active)
+#else
+int zonePins[MAX_ZONES] = {
+  15, 16, 17, 18, 6, 7,
+  10, 11, -1, -1, -1, -1, -1, -1, -1, -1
+};
+int mainsPin = 39;
+int tankPin  = 40;
 int tankLevelPin = 19; // ADC input (ESP32-S3: GPIO1..20 are ADC)
+#endif
 
 const int LED_PIN  = -1;
 
@@ -243,6 +253,7 @@ bool runZonesConcurrent = false;
 bool enableStartTime2[MAX_ZONES] = {false};
 bool days[MAX_ZONES][7] = {{false}};
 bool zoneActive[MAX_ZONES] = {false};
+bool zoneManualHold[MAX_ZONES] = {false}; // true when started manually; ignore duration timeout
 bool pendingStart[MAX_ZONES] = {false};
 uint8_t lastStartSlot[MAX_ZONES] = {1}; // 1=primary, 2=secondary
 
@@ -317,6 +328,17 @@ static float last24hActualRain(); // forward
 float rain1hNow = 0.0f;  // mm from current precipitation (Open-Meteo)
 float rain3hNow = 0.0f;  // kept for compatibility
 
+// Decoded current-weather snapshot (avoids repeated JSON parsing in hot paths)
+float curTempC = NAN;
+float curFeelsC = NAN;
+float curPressureHpa = NAN;
+float curWindMs = NAN;
+float curGustMs = NAN;
+int   curHumidityPct = -1;
+int   curWeatherCode = -1;
+int   curUtcOffsetSec = 0;
+bool  curWeatherValid = false;
+
 // ---------- NEW: guard to avoid fetching while serving HTTP ----------
 volatile bool g_inHttp = false;
 struct HttpScope {
@@ -363,6 +385,7 @@ void printCurrentTime();
 int    tankPercent();
 bool   isTankLow();
 String sourceModeText();
+bool refreshCurrentWeatherSnapshotFromCache();
 void initManualButtons();
 void tickManualButtons();
 void showManualSelection();
@@ -490,7 +513,9 @@ void mqttPublishStatus(){
     z["name"] = zoneNames[i];
     z["active"] = zoneActive[i];
   }
-  String out; serializeJson(d,out);
+  String out;
+  out.reserve(900);
+  serializeJson(d, out);
   _mqtt.publish( (mqttBase + "/status").c_str(), out.c_str(), true);
 }
 
@@ -710,7 +735,11 @@ int tankPercent() {
   if (!isValidAdcPin(tankLevelPin)) {
     static bool warned = false;
     if (!warned) {
+      #if defined(CONFIG_IDF_TARGET_ESP32)
+      Serial.printf("[TANK] Invalid ADC pin %d. Set tankLevelPin to GPIO32-39 for ESP32.\n", tankLevelPin);
+      #else
       Serial.printf("[TANK] Invalid ADC pin %d. Set tankLevelPin to GPIO1-20 for ESP32-S3.\n", tankLevelPin);
+      #endif
       warned = true;
     }
     return 0;
@@ -728,15 +757,15 @@ bool isTankLow() {
 }
 
 String sourceModeText() {
-  if (!tankEnabled) return "TankDisabled";
-  if (justUseTank)  return "Force:Tank";
-  if (justUseMains) return "Force:Mains";
-  return isTankLow() ? "Auto:Mains" : "Auto:Tank";
+  if (!tankEnabled) return "Tank Disabled";
+  if (justUseTank)  return "Force: Tank";
+  if (justUseMains) return "Force: Mains";
+  return isTankLow() ? "Auto: Mains" : "Auto: Tank";
 }
 
 static inline void chooseWaterSource(const char*& src, bool& mainsOn, bool& tankOn) {
   mainsOn = false; tankOn = false;
-  if (!tankEnabled) { src = "TankDisabled"; mainsOn = true; return; }
+  if (!tankEnabled) { src = "Tank Disabled"; mainsOn = true; return; }
   if (justUseTank)  { src = "Tank";  tankOn  = true; return; }
   if (justUseMains) { src = "Mains"; mainsOn = true; return; }
   if (isTankLow())  { src = "Mains"; mainsOn = true; return; }
@@ -886,8 +915,13 @@ static inline unsigned long durationForSlot(int z, int slot) {
 }
 
 inline bool isValidAdcPin(int pin) {
+  #if defined(CONFIG_IDF_TARGET_ESP32)
+  // Classic ESP32: use ADC1 only so readings still work while Wi-Fi is active.
+  return (pin >= 32 && pin <= 39);
+  #else
   // ESP32-S3 ADC pins: GPIO1..20 (ADC1: 1-10, ADC2: 11-20)
   return (pin >= 1 && pin <= 20);
+  #endif
 }
 
 inline bool isValidGpioPin(int pin) {
@@ -940,7 +974,11 @@ static void sanitizePinConfig() {
   clampGpio(manualStartPin);
 
   // ADC-only pins
-  if (!isValidAdcPin(tankLevelPin)) tankLevelPin = 1; // safe default
+  #if defined(CONFIG_IDF_TARGET_ESP32)
+  if (!isValidAdcPin(tankLevelPin)) tankLevelPin = 34; // safe default on classic ESP32
+  #else
+  if (!isValidAdcPin(tankLevelPin)) tankLevelPin = 1;  // safe default on ESP32-S3
+  #endif
   if (!isValidAdcPin(photoPin)) photoPin = -1;
 
   // TFT pins: fall back to safe defaults if invalid/unsafe
@@ -1242,6 +1280,14 @@ void setup() {
 
   bootMillis = millis();
 
+  // Pre-size hot Strings to reduce heap churn over long runtimes.
+  meteoLocation.reserve(64);
+  meteoModel.reserve(24);
+  cachedWeatherData.reserve(4096);
+  cachedForecastData.reserve(16384);
+  lastWeatherError.reserve(96);
+  lastForecastError.reserve(96);
+
   // LittleFS
   if (!LittleFS.begin()) {
     Serial.println("LittleFS mount failed; formatting...");
@@ -1450,6 +1496,9 @@ void setup() {
   doc["sourceMode"]      = sourceModeText();
   doc["rssi"]            = WiFi.RSSI();
   doc["uptimeSec"]       = (millis() - bootMillis) / 1000;
+  doc["heapFree"]        = ESP.getFreeHeap();
+  doc["heapMin"]         = ESP.getMinFreeHeap();
+  doc["heapMaxAlloc"]    = ESP.getMaxAllocHeap();
   float chipTemp = NAN;
   if (readChipTempC(chipTemp)) doc["chipTempC"] = chipTemp;
   else                         doc["chipTempC"] = nullptr;
@@ -1486,17 +1535,25 @@ void setup() {
     if (deltaMin >  12*60) deltaMin -= 24*60;
     if (deltaMin < -12*60) deltaMin += 24*60;
 
-    auto hhmm = [](time_t t){
-      char b[6]; struct tm tt; localtime_r(&t,&tt);
-      strftime(b,sizeof(b),"%H:%M",&tt); return String(b);
-    };
+    char sunriseLocal[6] = "--:--";
+    char sunsetLocal[6] = "--:--";
+    if (todaySunrise > 0) {
+      struct tm tsr;
+      localtime_r(&todaySunrise, &tsr);
+      strftime(sunriseLocal, sizeof(sunriseLocal), "%H:%M", &tsr);
+    }
+    if (todaySunset > 0) {
+      struct tm tss;
+      localtime_r(&todaySunset, &tss);
+      strftime(sunsetLocal, sizeof(sunsetLocal), "%H:%M", &tss);
+    }
 
     doc["deviceEpoch"]  = (uint32_t)nowEpoch;
     doc["utcOffsetMin"] = deltaMin;
     doc["isDST"]        = (ltm.tm_isdst > 0);
     doc["tzAbbrev"]     = (ltm.tm_isdst>0) ? "DST" : "STD";
-    doc["sunriseLocal"] = hhmm((time_t)todaySunrise);
-    doc["sunsetLocal"]  = hhmm((time_t)todaySunset);
+    doc["sunriseLocal"] = sunriseLocal;
+    doc["sunsetLocal"]  = sunsetLocal;
     doc["weatherHttp"]  = lastWeatherHttpCode;
     doc["forecastHttp"] = lastForecastHttpCode;
     if (lastWeatherError.length())  doc["weatherError"]  = lastWeatherError;
@@ -1530,33 +1587,17 @@ void setup() {
       z["totalSec"]  = total;
     }
 
-    // Current weather pass-through (no fetch, just decode cache)
-    {
-      JsonDocument js;
-      if (deserializeJson(js, cachedWeatherData) == DeserializationError::Ok) {
-        JsonObject cur = js["current"].as<JsonObject>();
-        doc["temp"]       = cur["temperature_2m"]        | 0.0f;
-        doc["feels_like"] = cur["apparent_temperature"]  | 0.0f;
-        doc["humidity"]   = cur["relative_humidity_2m"]  | 0;
-        float pmsl = cur["pressure_msl"] | NAN;
-        float psfc = cur["surface_pressure"] | NAN;
-        float pval = isfinite(pmsl) ? pmsl : psfc;
-        doc["pressure"]   = isfinite(pval) ? pval : 0.0f;
-        doc["wind"]       = cur["wind_speed_10m"]        | 0.0f;
-        doc["gustNow"]    = cur["wind_gusts_10m"]        | 0.0f;
-        int code = cur["weather_code"] | -1;
-        doc["condMain"]   = (code >= 0) ? meteoCodeToMain(code) : "";
-        doc["condDesc"]   = (code >= 0) ? meteoCodeToDesc(code) : "";
-        doc["icon"]       = "";
-        doc["cityName"]   = meteoLocationLabel();
-        doc["meteoModel"] = meteoModel;
-        if (isValidLatLon(meteoLat, meteoLon)) {
-          doc["lat"] = meteoLat;
-          doc["lon"] = meteoLon;
-        }
-        doc["owmTzSec"]   = js["utc_offset_seconds"] | 0;
-      }
-    }
+    // Current weather pass-through from decoded snapshot.
+    doc["temp"]       = isfinite(curTempC) ? curTempC : 0.0f;
+    doc["feels_like"] = isfinite(curFeelsC) ? curFeelsC : 0.0f;
+    doc["humidity"]   = (curHumidityPct >= 0) ? curHumidityPct : 0;
+    doc["pressure"]   = isfinite(curPressureHpa) ? curPressureHpa : 0.0f;
+    doc["wind"]       = isfinite(curWindMs) ? curWindMs : 0.0f;
+    doc["gustNow"]    = isfinite(curGustMs) ? curGustMs : 0.0f;
+    doc["condMain"]   = (curWeatherCode >= 0) ? meteoCodeToMain(curWeatherCode) : "";
+    doc["condDesc"]   = (curWeatherCode >= 0) ? meteoCodeToDesc(curWeatherCode) : "";
+    doc["icon"]       = "";
+    doc["owmTzSec"]   = curUtcOffsetSec;
     // Always expose location for UI
     doc["cityName"] = meteoLocationLabel();
     doc["meteoModel"] = meteoModel;
@@ -1590,7 +1631,9 @@ void setup() {
     // NEW: actual rolling 24h rainfall
     doc["rain24hActual"] = last24hActualRain();
 
-    String out; serializeJsonPretty(doc, out);
+    String out;
+    out.reserve(2200);
+    serializeJson(doc, out);
     server.send(200, "application/json", out);
   });
 
@@ -1607,7 +1650,9 @@ void setup() {
     strftime(buf,sizeof(buf),"%Y-%m-%d %H:%M:%S",&gt); d["utc"]   = buf;
     d["isDST"] = (lt.tm_isdst>0);
     d["tz"]    = (lt.tm_isdst>0) ? "DST" : "STD";
-    String out; serializeJson(d,out);
+    String out;
+    out.reserve(180);
+    serializeJson(d, out);
     server.send(200,"application/json",out);
   });
 
@@ -2343,6 +2388,47 @@ static float last24hActualRain() {
   return total;
 }
 
+bool refreshCurrentWeatherSnapshotFromCache() {
+  curTempC = NAN;
+  curFeelsC = NAN;
+  curPressureHpa = NAN;
+  curWindMs = NAN;
+  curGustMs = NAN;
+  curHumidityPct = -1;
+  curWeatherCode = -1;
+  curUtcOffsetSec = 0;
+  curWeatherValid = false;
+  rain1hNow = 0.0f;
+  rain3hNow = 0.0f;
+
+  if (!cachedWeatherData.length()) return false;
+
+  JsonDocument js;
+  if (deserializeJson(js, cachedWeatherData) != DeserializationError::Ok) {
+    return false;
+  }
+
+  JsonObject cur = js["current"].as<JsonObject>();
+  curTempC = cur["temperature_2m"] | NAN;
+  curFeelsC = cur["apparent_temperature"] | NAN;
+  curHumidityPct = cur["relative_humidity_2m"] | -1;
+  float pmsl = cur["pressure_msl"] | NAN;
+  float psfc = cur["surface_pressure"] | NAN;
+  curPressureHpa = isfinite(pmsl) ? pmsl : psfc;
+  curWindMs = cur["wind_speed_10m"] | NAN;
+  curGustMs = cur["wind_gusts_10m"] | NAN;
+  curWeatherCode = cur["weather_code"] | -1;
+  curUtcOffsetSec = js["utc_offset_seconds"] | 0;
+
+  float r1 = cur["precipitation"] | 0.0f;
+  if (!isfinite(r1) || r1 < 0.0f) r1 = 0.0f;
+  rain1hNow = r1;
+  rain3hNow = 0.0f;
+
+  curWeatherValid = true;
+  return true;
+}
+
 
 
 void updateCachedWeather() {
@@ -2353,28 +2439,22 @@ void updateCachedWeather() {
   bool needCur = (cachedWeatherData == "" ||
                   (nowms - lastWeatherUpdate >= weatherUpdateInterval));
   bool haveCoord = isValidLatLon(meteoLat, meteoLon);
+  bool weatherChanged = false;
 
   if (needCur) {
     String fresh = fetchWeather();
     if (fresh.length() > 0) {
+      weatherChanged = (fresh != cachedWeatherData);
       cachedWeatherData = fresh;
       lastWeatherUpdate = nowms;
     }
   }
 
-  // Extract 1h rain from current conditions
-  {
-    JsonDocument js;
-    if (deserializeJson(js, cachedWeatherData) == DeserializationError::Ok) {
-      JsonObject cur = js["current"].as<JsonObject>();
-      float r1 = cur["precipitation"] | 0.0f;
-      if (!isfinite(r1) || r1 < 0.0f) r1 = 0.0f;
-      rain1hNow = r1;
-      rain3hNow = 0.0f;
-    } else {
-      rain1hNow = 0.0f;
-      rain3hNow = 0.0f;
-    }
+  // Decode once when weather payload changes (or first run).
+  static bool snapshotReady = false;
+  if (!snapshotReady || weatherChanged || !curWeatherValid) {
+    refreshCurrentWeatherSnapshotFromCache();
+    snapshotReady = true;
   }
 
   // ---- Forecast fetch / parse ----
@@ -2436,14 +2516,10 @@ void updateCachedWeather() {
     }
   }
 
-  // Fallback min/max from current weather
-  JsonDocument cur;
-  if (deserializeJson(cur, cachedWeatherData) == DeserializationError::Ok) {
-    float tcur = cur["current"]["temperature_2m"] | NAN;
-    if (isfinite(tcur)) {
-      if (!isfinite(todayMin_C) || tcur < todayMin_C) todayMin_C = tcur;
-      if (!isfinite(todayMax_C) || tcur > todayMax_C) todayMax_C = tcur;
-    }
+  // Fallback min/max from current weather snapshot
+  if (isfinite(curTempC)) {
+    if (!isfinite(todayMin_C) || curTempC < todayMin_C) todayMin_C = curTempC;
+    if (!isfinite(todayMax_C) || curTempC > todayMax_C) todayMax_C = curTempC;
   }
 
   // Roll hourly history
@@ -2483,37 +2559,22 @@ bool checkWindRain() {
   bool newSensorRainActual  = false;   // raw sensor state
   bool newWindActual        = false;   // raw wind above threshold
 
-  // --- 1) Parse cached weather JSON (Open-Meteo) ---
-  JsonDocument js;
-  DeserializationError err = deserializeJson(js, cachedWeatherData);
-
-  if (!err) {
-    JsonObject cur = js["current"].as<JsonObject>();
-
-    // ----- RAIN BY WEATHER (instant, use precipitation / weather_code) -----
-    float rainNow = cur["precipitation"] | 0.0f;
+  // --- 1) Use decoded current-weather snapshot (no JSON parse in fast loop) ---
+  if (curWeatherValid) {
+    float rainNow = rain1hNow;
     if (!isfinite(rainNow) || rainNow < 0.0f) rainNow = 0.0f;
     const float MAX_RAIN1H_FOR_LOGIC = 20.0f;  // mm
     if (rainNow > MAX_RAIN1H_FOR_LOGIC) rainNow = MAX_RAIN1H_FOR_LOGIC;
+
     if (rainNow > 0.0f) {
       newWeatherRainActual = true;
-    } else {
-      int wcode = cur["weather_code"] | -1;
-      if (wcode >= 0 && meteoCodeIsWet(wcode)) {
-        newWeatherRainActual = true;
-      }
+    } else if (curWeatherCode >= 0 && meteoCodeIsWet(curWeatherCode)) {
+      newWeatherRainActual = true;
     }
 
-    // ----- WIND DELAY (raw) -----
-    float windSpeed = cur["wind_speed_10m"] | 0.0f;  // m/s
-    if (windSpeedThreshold > 0.0f) {
-      newWindActual = (windSpeed >= windSpeedThreshold);
-    } else {
-      newWindActual = false;
+    if (windSpeedThreshold > 0.0f && isfinite(curWindMs)) {
+      newWindActual = (curWindMs >= windSpeedThreshold);
     }
-  } else {
-    newWeatherRainActual = false;
-    newWindActual        = false;
   }
 
   // --- 2) Physical rain sensor (raw state) ---
@@ -2599,16 +2660,11 @@ bool checkWindRain() {
 // ---------- Event log ----------
 void logEvent(int zone, const char* eventType, const char* source, bool rainDelayed) {
   updateCachedWeather(); // safe early-out if g_inHttp==true, keeps details recent enough
-  JsonDocument js;
-  float temp=NAN, wind=NAN; int hum=0; String cond="?", cname=meteoLocationLabel();
-  if (deserializeJson(js,cachedWeatherData)==DeserializationError::Ok) {
-    JsonObject cur = js["current"].as<JsonObject>();
-    temp = cur["temperature_2m"] | NAN;
-    hum  = cur["relative_humidity_2m"] | 0;
-    wind = cur["wind_speed_10m"] | NAN;
-    int code = cur["weather_code"] | -1;
-    cond = (code >= 0) ? meteoCodeToMain(code) : "?";
-  }
+  float temp = curTempC;
+  float wind = curWindMs;
+  int hum = (curHumidityPct >= 0) ? curHumidityPct : 0;
+  String cond = (curWeatherCode >= 0) ? meteoCodeToMain(curWeatherCode) : "?";
+  String cname = meteoLocationLabel();
 
   File f = LittleFS.open("/events.csv","a");
   if (!f) return;
@@ -2892,12 +2948,7 @@ void RainScreen(){
   const int text2H = 18;
   const int text1H = 10;
 
-  float windNow = NAN;
-  {
-    JsonDocument js;
-    DeserializationError derr = deserializeJson(js, cachedWeatherData);
-    if (!derr) windNow = js["wind"]["speed"] | NAN;
-  }
+  float windNow = curWindMs;
 
   char r1buf[12];
   char r24buf[12];
@@ -3069,11 +3120,8 @@ void RainScreen(){
 
 void HomeScreen() {
   if (!displayUseTft) {
-    JsonDocument jsOled;
-    (void)deserializeJson(jsOled, cachedWeatherData);
-    JsonObject curOled = jsOled["current"].as<JsonObject>();
-    float tempOled = curOled["temperature_2m"] | NAN;
-    int   humOled  = curOled["relative_humidity_2m"] | -1;
+    float tempOled = curTempC;
+    int   humOled  = curHumidityPct;
     int   pctOled  = tankPercent();
     time_t nowOled = time(nullptr);
     struct tm* tOled = localtime(&nowOled);
@@ -3118,13 +3166,9 @@ void HomeScreen() {
     return;
   }
 
-  JsonDocument js;
-  (void)deserializeJson(js, cachedWeatherData);
-
-  JsonObject cur = js["current"].as<JsonObject>();
-  float temp = cur["temperature_2m"] | NAN;
-  int   hum  = cur["relative_humidity_2m"] | -1;
-  float windNow = cur["wind_speed_10m"] | NAN;
+  float temp = curTempC;
+  int   hum  = curHumidityPct;
+  float windNow = curWindMs;
   int   pct  = tankPercent();
 
   time_t now = time(nullptr);
@@ -3654,6 +3698,7 @@ bool shouldStartZone(int zone) {
 }
 
 bool hasDurationCompleted(int zone) {
+  if (zone >= 0 && zone < (int)MAX_ZONES && zoneManualHold[zone]) return false;
   unsigned long elapsed=(millis()-zoneStartMs[zone])/1000;
   unsigned long total = zoneRunTotalSec[zone];
   if (total == 0) total = durationForSlot(zone, 1);
@@ -3693,6 +3738,7 @@ void turnOnZone(int z) {
 
   zoneStartMs[z] = millis();
   zoneActive[z] = true;
+  zoneManualHold[z] = false;
   unsigned long total = durationForSlot(z, lastStartSlot[z]);
   if (total == 0) total = durationForSlot(z, 1);
   zoneRunTotalSec[z] = total;
@@ -3755,6 +3801,7 @@ void turnOffZone(int z) {
   }
 
   zoneActive[z] = false;
+  zoneManualHold[z] = false;
   zoneRunTotalSec[z] = 0;
   zoneRunTotalSec[z] = 0;
 
@@ -3819,6 +3866,7 @@ void turnOnValveManual(int z) {
 
   zoneStartMs[z] = millis();
   zoneActive[z] = true;
+  zoneManualHold[z] = true;
   lastStartSlot[z] = 1;
   zoneRunTotalSec[z] = durationForSlot(z,1);
   const char* src = "None";
@@ -3867,6 +3915,7 @@ void turnOffValveManual(int z) {
   }
 
   zoneActive[z] = false;
+  zoneManualHold[z] = false;
 
   bool anyStillOn = false;
   for (int i = 0; i < (int)zonesCount; i++) {
@@ -3966,20 +4015,13 @@ void handleRoot() {
 
   // Keep this - it respects the g_inHttp guard
   updateCachedWeather();
-  JsonDocument js;
-  DeserializationError werr = deserializeJson(js, cachedWeatherData);
 
-  // Safe reads
-  float temp = NAN, hum = NAN, ws = NAN, feels = NAN;
-  if (!werr) {
-    JsonObject cur = js["current"].as<JsonObject>();
-    if (cur["temperature_2m"].is<float>())       temp  = cur["temperature_2m"].as<float>();
-    if (cur["apparent_temperature"].is<float>()) feels = cur["apparent_temperature"].as<float>();
-    if (cur["relative_humidity_2m"].is<float>()) hum   = cur["relative_humidity_2m"].as<float>();
-    if (cur["wind_speed_10m"].is<float>())       ws    = cur["wind_speed_10m"].as<float>();
-  }
-
-  int wcode = werr ? -1 : (js["current"]["weather_code"] | -1);
+  // Safe reads from decoded snapshot
+  float temp = curTempC;
+  float hum = (curHumidityPct >= 0) ? (float)curHumidityPct : NAN;
+  float ws = curWindMs;
+  float feels = curFeelsC;
+  int wcode = curWeatherCode;
   String cond = (wcode >= 0) ? String(meteoCodeToDesc(wcode)) : String("-");
   if (cond == "") cond = "-";
   String cityName = meteoLocationLabel();
@@ -3987,6 +4029,58 @@ void handleRoot() {
 
   const int    tankPct   = tankPercent();
   const String causeText = rainDelayCauseText();
+  const bool   pausedNow = isPausedNow();
+  int activeZoneCount = 0;
+  for (int i = 0; i < (int)zonesCount; ++i) {
+    if (zoneActive[i]) activeZoneCount++;
+  }
+  NextWaterInfo nextWater = computeNextWatering();
+  char nextWaterTime[6] = "--:--";
+  char nextWaterDay[20] = "--";
+  String nextWaterLabel = String("--");
+  String nextWaterSub = rainActive ? String("Waiting for rain delay to clear") : String("No queued run");
+  if (nextWater.epoch > 0 && nextWater.zone >= 0 && nextWater.zone < (int)zonesCount) {
+    struct tm nextTm;
+    localtime_r(&nextWater.epoch, &nextTm);
+    strftime(nextWaterTime, sizeof(nextWaterTime), "%H:%M", &nextTm);
+    if (ti) {
+      struct tm todayTm = *ti;
+      todayTm.tm_hour = 0; todayTm.tm_min = 0; todayTm.tm_sec = 0;
+      struct tm nextDayTm = nextTm;
+      nextDayTm.tm_hour = 0; nextDayTm.tm_min = 0; nextDayTm.tm_sec = 0;
+      time_t todayEpoch = mktime(&todayTm);
+      time_t targetEpoch = mktime(&nextDayTm);
+      long dayDiff = (todayEpoch > 0 && targetEpoch > 0) ? (long)((targetEpoch - todayEpoch) / 86400L) : 9999L;
+      if (dayDiff == 0) {
+        strncpy(nextWaterDay, "Today", sizeof(nextWaterDay));
+        nextWaterDay[sizeof(nextWaterDay) - 1] = '\0';
+      } else if (dayDiff == 1) {
+        strncpy(nextWaterDay, "Tomorrow", sizeof(nextWaterDay));
+        nextWaterDay[sizeof(nextWaterDay) - 1] = '\0';
+      } else {
+        strftime(nextWaterDay, sizeof(nextWaterDay), "%a %d %b", &nextTm);
+      }
+    } else {
+      strftime(nextWaterDay, sizeof(nextWaterDay), "%a %d %b", &nextTm);
+    }
+    nextWaterLabel = String(nextWaterDay) + String(" ") + String(nextWaterTime);
+    nextWaterSub = zoneNames[nextWater.zone];
+    if (nextWater.durSec > 0) {
+      char durBuf[16];
+      fmtMMSS(durBuf, sizeof(durBuf), nextWater.durSec);
+      nextWaterSub += " - ";
+      nextWaterSub += durBuf;
+    }
+  }
+  String heroSystemValue = pausedNow ? String("Paused")
+                          : (systemMasterEnabled ? String("Master On") : String("Master Off"));
+  String heroSystemSub = pausedNow ? String("Schedules are temporarily suspended")
+                        : (systemMasterEnabled
+                           ? (activeZoneCount > 0
+                              ? String(activeZoneCount) + String(activeZoneCount == 1 ? " zone running" : " zones running")
+                              : String("Automation ready"))
+                           : String("Outputs are blocked"));
+  String heroWeatherValue = isnan(temp) ? String("--") : String(temp, 1) + " C";
 
   // --- HTML ---
   String html; html.reserve(6000);
@@ -4000,17 +4094,18 @@ void handleRoot() {
   };
   html += F("<!doctype html><html lang='en' data-theme='light'><head>");
   html += F("<meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'>");
+  html += F("<meta name='theme-color' content='#145b63'><meta name='color-scheme' content='light dark'>");
   html += F("<title>ESP32 Irrigation</title>");
   html += F("<style>");
   html += F("@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@500;700&family=Sora:wght@400;600;700;800&display=swap');");
   html += F(".center{max-width:1280px;margin:0 auto}");
-  html += F(":root[data-theme='light']{--bg:#ecf1f8;--bg2:#f6f8fc;--glass:rgba(255,255,255,.55);--glass-brd:rgba(140,158,190,.35);--panel:#fff;--line:#d5dfef;");
-  html += F("--card:#ffffff;--ink:#0f172a;--muted:#667084;--primary:#1c74d9;--primary-2:#1160b6;--ok:#16a34a;--warn:#d97706;--bad:#dc2626;");
-  html += F("--chip:#eef4ff;--chip-brd:#cfe1ff;--ring:#dfe8fb;--ring2:#a4c6ff;--shadow:0 18px 40px rgba(19,33,68,.15)}");
-  html += F(":root[data-theme='dark']{--bg:#0a0f18;--bg2:#0e1624;--glass:rgba(16,26,39,.6);--glass-brd:rgba(96,120,155,.28);--panel:#101826;--line:#223a5e;");
-  html += F("--card:#101826;--ink:#e8eef6;--muted:#9fb0ca;--primary:#52a7ff;--primary-2:#2f7fe0;--ok:#22c55e;--warn:#f59e0b;--bad:#ef4444;");
-  html += F("--chip:#0f2037;--chip-brd:#223a5e;--ring:#172a46;--ring2:#2c4f87;--shadow:0 18px 40px rgba(0,0,0,.45)}");
-  html += F("*{box-sizing:border-box}html,body{margin:0;padding:0;");
+  html += F(":root[data-theme='light']{--bg:#edf3ef;--bg2:#f8fbf8;--glass:rgba(255,255,255,.58);--glass-brd:rgba(122,149,140,.32);--panel:#ffffff;--line:#d3dfd9;");
+  html += F("--card:#ffffff;--ink:#14232b;--muted:#5f736f;--primary:#1f8a70;--primary-2:#145b63;--ok:#2f9e44;--warn:#c97a1a;--bad:#d9485f;");
+  html += F("--chip:#edf7f2;--chip-brd:#c9ddd4;--ring:#dcebe5;--ring2:#b4d4cb;--shadow:0 18px 40px rgba(20,47,45,.14)}");
+  html += F(":root[data-theme='dark']{--bg:#081315;--bg2:#0d1d21;--glass:rgba(12,28,31,.62);--glass-brd:rgba(84,123,118,.3);--panel:#0f1e22;--line:#214147;");
+  html += F("--card:#0f1e22;--ink:#e6f0ec;--muted:#9ab4ad;--primary:#46c6a3;--primary-2:#1f8a86;--ok:#52c266;--warn:#f0ae4d;--bad:#ff6b7d;");
+  html += F("--chip:#10272b;--chip-brd:#24444a;--ring:#123036;--ring2:#1d5152;--shadow:0 18px 40px rgba(0,0,0,.42)}");
+  html += F("*{box-sizing:border-box}html{scroll-behavior:smooth}html,body{margin:0;padding:0;");
   html += F("background:radial-gradient(1200px 600px at 10% -5%,var(--bg2),transparent),");
   html += F("radial-gradient(1200px 700px at 100% 0%,var(--ring),transparent),");
   html += F("radial-gradient(900px 500px at -10% 80%,var(--ring2),transparent),var(--bg);");
@@ -4024,11 +4119,41 @@ void handleRoot() {
   html += F("box-shadow:0 16px 36px rgba(0,0,0,.25)}");
   html += F(".nav .in{max-width:1280px;margin:0 auto;display:flex;align-items:center;justify-content:space-between;gap:12px;color:#fff;flex-wrap:wrap}");
   html += F(".brand{display:flex;align-items:center;gap:8px;font-weight:800;letter-spacing:.2px;font-size:1.12rem}");
+  html += F(".brand-copy{display:flex;flex-direction:column;gap:2px}");
+  html += F(".brand-title{text-transform:uppercase;letter-spacing:.9px;font-size:1rem;line-height:1}");
+  html += F(".brand-sub{font-size:.74rem;font-weight:650;color:rgba(255,255,255,.8);letter-spacing:.08em;text-transform:uppercase}");
   html += F(".dot{width:12px;height:12px;border-radius:999px;background:#84ffb5;box-shadow:0 0 14px #84ffb5}");
   html += F(".nav .meta{display:flex;gap:8px;flex-wrap:wrap;align-items:center;font-weight:650;font-size:.88rem}");
   html += F(".pill{background:rgba(255,255,255,.16);border:1px solid rgba(255,255,255,.28);border-radius:999px;padding:7px 12px}");
   html += F(".btn-ghost{background:rgba(255,255,255,.14);border:1px solid rgba(255,255,255,.35);color:#fff;");
   html += F("border-radius:10px;padding:8px 14px;font-weight:700;cursor:pointer;font-size:.92rem}");
+  html += F(".hero-shell{position:relative;overflow:hidden;padding:clamp(18px,3vw,30px);margin:18px 0 18px}");
+  html += F(".hero-shell::before,.hero-shell::after{content:'';position:absolute;border-radius:999px;pointer-events:none;filter:blur(8px)}");
+  html += F(".hero-shell::before{width:220px;height:220px;right:-50px;top:-40px;background:radial-gradient(circle,rgba(233,173,73,.2),transparent 68%)}");
+  html += F(".hero-shell::after{width:260px;height:260px;left:-90px;bottom:-100px;background:radial-gradient(circle,rgba(70,198,163,.2),transparent 68%)}");
+  html += F(".hero-grid{display:grid;grid-template-columns:minmax(0,1.15fr) minmax(320px,.85fr);gap:18px;align-items:stretch}");
+  html += F(".hero-copy,.hero-mini-grid{position:relative;z-index:1}");
+  html += F(".hero-copy{display:flex;flex-direction:column;justify-content:center;gap:14px}");
+  html += F(".hero-kicker{text-transform:uppercase;letter-spacing:.22em;font-size:.72rem;font-weight:800;color:var(--primary)}");
+  html += F(".hero-title{margin:0;font-size:clamp(1.95rem,4vw,3.2rem);line-height:1.02;max-width:11ch}");
+  html += F(".hero-text{margin:0;max-width:60ch;color:var(--muted);font-size:1rem}");
+  html += F(".hero-actions{display:flex;gap:10px;flex-wrap:wrap}");
+  html += F(".dash-nav{display:flex;gap:10px;flex-wrap:wrap;align-items:center;padding:10px 12px;margin:-2px 0 18px;position:sticky;top:74px;z-index:9}");
+  html += F(".dash-nav a{display:inline-flex;align-items:center;justify-content:center;padding:9px 14px;border-radius:999px;border:1px solid var(--chip-brd);background:rgba(255,255,255,.34);font-size:.84rem;font-weight:800;letter-spacing:.04em;text-transform:uppercase;color:var(--ink);transition:transform .08s ease,background .12s ease,border-color .12s ease,box-shadow .12s ease}");
+  html += F(".dash-nav a:hover{transform:translateY(-1px);background:rgba(31,138,112,.12);border-color:rgba(31,138,112,.28);box-shadow:0 10px 22px rgba(20,91,99,.12)}");
+  html += F(".hero-mini-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}");
+  html += F(".hero-mini{min-height:132px;padding:16px;border-radius:18px;border:1px solid var(--glass-brd);");
+  html += F("background:linear-gradient(180deg,rgba(255,255,255,.58),rgba(255,255,255,.14));box-shadow:0 14px 30px rgba(19,33,68,.12);");
+  html += F("display:flex;flex-direction:column;justify-content:space-between;backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px)}");
+  html += F(".hero-mini.hero-mini-strong{background:linear-gradient(135deg,rgba(31,138,112,.2),rgba(82,194,102,.1))}");
+  html += F(".hero-mini-label{text-transform:uppercase;letter-spacing:.16em;font-size:.74rem;font-weight:800;color:var(--muted)}");
+  html += F(".hero-mini-value{font-size:1.72rem;font-weight:800;line-height:1.02;font-variant-numeric:tabular-nums}");
+  html += F(".hero-mini-value.weather-value{display:inline-flex;align-items:center;gap:8px}");
+  html += F(".hero-mini-sub{color:var(--muted);font-size:.92rem}");
+  html += F(".section-head{display:flex;align-items:flex-end;justify-content:space-between;gap:14px;max-width:1280px;margin:0 auto 14px;padding:0 2px}");
+  html += F(".section-kicker{text-transform:uppercase;letter-spacing:.18em;font-size:.72rem;font-weight:800;color:var(--primary)}");
+  html += F(".section-head h2{margin:4px 0 0;font-size:1.35rem;line-height:1.08}");
+  html += F(".section-note{margin:0;max-width:42ch;color:var(--muted);font-size:.92rem;text-align:right}");
 
   // Cards and grids
   html += F(".wrap{max-width:1280px;margin:20px auto;padding:0 16px}");
@@ -4040,15 +4165,39 @@ void handleRoot() {
   html += F("padding-bottom:6px;border-bottom:2px solid var(--primary);display:flex;align-items:center;gap:8px}");
   html += F(".card h4{margin:6px 0 6px 0;font-size:.95rem;color:var(--muted);font-weight:700;letter-spacing:.2px}");
   html += F(".chip{display:inline-flex;align-items:center;gap:6px;background:var(--chip);border:1px solid var(--chip-brd);border-radius:999px;padding:8px 14px;font-weight:650;white-space:nowrap;font-size:.95rem;color:var(--ink)}");
-  html += F(".big{font-weight:800;font-size:1.3rem}.hint{color:var(--muted);font-size:.9rem;margin-top:4px}.sub{color:var(--muted);font-size:.88rem}");
+  html += F(".big{font-weight:800;font-size:1.3rem;font-variant-numeric:tabular-nums}.hint{color:var(--muted);font-size:.9rem;margin-top:4px}.sub{color:var(--muted);font-size:.88rem}");
   html += F(".meter{position:relative;height:18px;border-radius:999px;background:linear-gradient(180deg,rgba(0,0,0,.12),transparent);border:1px solid var(--glass-brd);overflow:hidden;margin-top:6px}");
-  html += F(".fill{position:absolute;inset:0 0 0 0;width:0%;height:100%;background:linear-gradient(90deg,#30d1ff,#4da3ff,#1c74d9);");
-  html += F("box-shadow:0 0 30px rgba(77,163,255,.35) inset;transition:width .4s ease}");
+  html += F(".fill{position:absolute;inset:0 0 0 0;width:0%;height:100%;background:linear-gradient(90deg,#56d2c0,#7ecb71,#1f8a70);");
+  html += F("box-shadow:0 0 30px rgba(86,210,192,.28) inset;transition:width .4s ease}");
   html += F(".badge{display:inline-flex;align-items:center;gap:6px;padding:8px 13px;border-radius:999px;border:1px solid var(--glass-brd);font-size:.9rem}");
-  html += F(".b-ok{background:rgba(34,197,94,.12);border-color:rgba(13, 46, 230, 0.42)}");
+  html += F(".b-ok{background:rgba(34,197,94,.12);border-color:rgba(34,197,94,.3)}");
   html += F(".b-warn{background:rgba(245,158,11,.12);border-color:rgba(245,158,11,.35)}");
   html += F(".b-bad{background:rgba(239,68,68,.12);border-color:rgba(239,68,68,.38)}");
+  html += F(".summary-grid{align-items:stretch}");
+  html += F(".summary-card{display:flex;flex-direction:column;gap:14px;min-height:178px;background:linear-gradient(180deg,var(--card),rgba(255,255,255,.42))}");
+  html += F(".summary-card h3{margin-bottom:0}");
+  html += F(".summary-link{display:flex;flex-direction:column;justify-content:center;gap:8px;min-height:120px;padding:16px;border-radius:18px;");
+  html += F("background:linear-gradient(135deg,var(--chip),rgba(255,255,255,.72));border:1px solid var(--chip-brd)}");
+  html += F(".summary-k{font-size:.75rem;letter-spacing:.16em;text-transform:uppercase;color:var(--muted);font-weight:800}");
+  html += F(".summary-value{font-size:clamp(1.45rem,2.5vw,2.15rem);line-height:1.02;font-weight:800;letter-spacing:-.03em;font-variant-numeric:tabular-nums}");
+  html += F(".summary-support{color:var(--muted);font-size:.92rem}");
+  html += F(".summary-row{display:flex;align-items:flex-end;justify-content:space-between;gap:12px;flex-wrap:wrap}");
+  html += F(".summary-meta{display:flex;gap:8px;flex-wrap:wrap}");
+  html += F(".mini-chip{display:inline-flex;align-items:center;gap:6px;padding:7px 11px;border-radius:999px;border:1px solid var(--chip-brd);background:var(--chip);font-size:.82rem;font-weight:700;color:var(--ink)}");
+  html += F(".summary-metric-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:10px}");
+  html += F(".summary-subhead{font-size:.76rem;letter-spacing:.16em;text-transform:uppercase;color:var(--muted);font-weight:800;margin-top:2px}");
+  html += F(".metric-tile{display:flex;flex-direction:column;justify-content:space-between;gap:8px;min-height:92px;padding:12px 13px;border-radius:16px;");
+  html += F("border:1px solid var(--chip-brd);background:linear-gradient(180deg,rgba(255,255,255,.55),rgba(255,255,255,.15))}");
+  html += F(".metric-tile.metric-wide{grid-column:span 2}");
+  html += F(".metric-split{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}");
+  html += F(".metric-split-item{display:flex;align-items:flex-end;justify-content:center;min-height:44px}");
+  html += F(".metric-k{font-size:.74rem;letter-spacing:.14em;text-transform:uppercase;color:var(--muted);font-weight:800}");
+  html += F(".metric-v{font-size:1.08rem;font-weight:800;color:var(--ink)}");
+  html += F(".metric-v.big-metric{font-size:1.45rem;line-height:1.05;font-variant-numeric:tabular-nums}");
+  html += F(".metric-v .metric-unit{font-size:.88rem;font-weight:700;color:var(--muted);margin-left:4px}");
+  html += F(".summary-note{padding:12px 14px;border-radius:16px;border:1px solid rgba(31,138,112,.2);background:linear-gradient(180deg,rgba(31,138,112,.1),rgba(31,138,112,.03));color:var(--muted);font-size:.9rem}");
   html += F(".toolbar{display:flex;gap:var(--gap);flex-wrap:wrap;margin:14px 0 0}");
+  html += F(".section-block,.summary-shell,.sched-shell,.zones-shell,.controls-shell{scroll-margin-top:140px}");
   html += F(".btn{background:linear-gradient(180deg,var(--primary),var(--primary-2));color:#fff;border:1px solid rgba(0,0,0,.08);border-radius:13px;padding:11px 16px;font-weight:800;cursor:pointer;");
   html += F("box-shadow:0 8px 20px rgba(0,0,0,.22);font-size:1.02rem}");
   html += F(".btn-secondary{background:transparent;color:var(--ink);border:1px solid var(--line);box-shadow:none}");
@@ -4062,7 +4211,11 @@ void handleRoot() {
   html += F(".zone-actions{margin-top:8px;justify-content:flex-end;align-items:center}");
   html += F(".zones{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:var(--gap);justify-content:center;justify-items:stretch}");
   html += F(".zone-card{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius-sm);padding:var(--pad);");
-  html += F("display:flex;flex-direction:column;gap:12px;min-height:140px}");
+  html += F("display:flex;flex-direction:column;gap:12px;min-height:140px;position:relative;overflow:hidden;");
+  html += F("background:linear-gradient(160deg,var(--panel),rgba(70,198,163,.08));transition:transform .14s ease,box-shadow .14s ease,border-color .14s ease}");
+  html += F(".zone-card::before{content:'';position:absolute;left:0;top:0;bottom:0;width:4px;background:transparent;transition:background .14s ease}");
+  html += F(".zone-card.is-active{border-color:rgba(34,197,94,.42);box-shadow:0 20px 40px rgba(22,163,74,.14)}");
+  html += F(".zone-card.is-active::before{background:linear-gradient(180deg,#34d399,#22c55e)}");
   html += F(".zone-head{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:2px}");
   html += F(".zone-title{display:flex;align-items:center;gap:8px;font-weight:700;font-size:1.08rem;min-width:0}");
   html += F(".zone-index{width:26px;height:26px;border-radius:999px;display:flex;align-items:center;justify-content:center;");
@@ -4073,7 +4226,7 @@ void handleRoot() {
   html += F(".zone-timer{display:flex;align-items:center;gap:10px;margin-top:4px}");
   html += F(".zone-rem-wrap{min-width:90px}");
   html += F(".zone-rem-label{font-size:.8rem;letter-spacing:.4px;text-transform:uppercase;color:var(--muted);display:block;margin-bottom:2px}");
-  html += F(".zone-rem{font-size:1.05rem;font-weight:700;color:var(--ink)}");
+  html += F(".zone-rem{font-size:1.05rem;font-weight:700;color:var(--ink);font-variant-numeric:tabular-nums}");
   html += F(".zone-meter{flex:1;display:flex;flex-direction:column;gap:3px}");
   html += F(".zone-meter .meter{margin-top:0}");
   html += F(".zone-bar-label{font-size:.82rem;letter-spacing:.3px;color:var(--muted);font-weight:600}");
@@ -4090,7 +4243,14 @@ void handleRoot() {
 
   // Schedules styles (collapsible, mobile-friendly)
   html += F(".sched{margin-top:var(--gap)}");
+  html += F(".sched-shell{padding:0;overflow:hidden}");
+  html += F(".sched-top{display:flex;align-items:flex-end;justify-content:space-between;gap:16px;flex-wrap:wrap;padding:18px 18px 14px;border-bottom:1px solid var(--line);background:linear-gradient(180deg,rgba(255,255,255,.05),transparent)}");
+  html += F(".sched-top-copy{display:flex;flex-direction:column;gap:6px;max-width:58ch}");
+  html += F(".sched-top-copy h3{margin:0;font-size:1.2rem}");
+  html += F(".sched-top-copy p{margin:0;color:var(--muted);font-size:.92rem}");
+  html += F(".sched-tools{display:flex;gap:10px;flex-wrap:wrap;align-items:center}");
   html += F(".sched-ctr{--schedW:360px;--gap:var(--gap);max-width:100%;margin:0 auto}");
+  html += F(".sched-body{padding:18px}");
   html += F(".sched-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:var(--gap)}");
   html += F(".sched-card{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius-sm);padding:var(--pad)}");
   html += F(".sched-card h4{margin:0 0 10px 0;font-size:1.05rem;font-weight:800;color:var(--ink);display:flex;align-items:center;gap:8px}");
@@ -4101,10 +4261,17 @@ void handleRoot() {
   html += F(".field.inline .in{width:72px}");
   html += F(".field .sep{color:var(--muted);font-weight:700}");
   html += F(".field .unit{color:var(--muted);font-size:.85rem}");
-  html += F(".toggle-inline{display:inline-flex;align-items:center;gap:6px;font-size:.85rem;color:var(--muted)}");
+  html += F(".toggle-inline{display:inline-flex;align-items:center;gap:6px;font-size:.85rem;color:var(--muted);padding:7px 11px;border-radius:999px;border:1px solid var(--chip-brd);background:transparent}");
+  html += F(".sched-card input[type=checkbox]{appearance:none;-webkit-appearance:none;width:18px;height:18px;margin:0;flex:0 0 18px;display:inline-grid;place-content:center;cursor:pointer;");
+  html += F("border:1.6px solid rgba(230,240,236,.78);border-radius:6px;background:transparent;box-shadow:none;transition:border-color .12s ease,box-shadow .12s ease,transform .06s ease}");
+  html += F(".sched-card input[type=checkbox]::before{content:'';display:block;width:5px;height:9px;border-right:2px solid #fff;border-bottom:2px solid #fff;transform:rotate(45deg) scale(0);margin-top:-1px;transition:transform .12s ease}");
+  html += F(".sched-card input[type=checkbox]:checked{border-color:#ffffff;background:transparent;box-shadow:none}");
+  html += F(".sched-card input[type=checkbox]:checked::before{transform:rotate(45deg) scale(1)}");
+  html += F(".sched-card input[type=checkbox]:focus-visible{outline:none;border-color:#ffffff;box-shadow:0 0 0 3px rgba(31,138,112,.18)}");
+  html += F(".sched-card input[type=checkbox]:active{transform:translateY(1px)}");
   html += F(".in{border:1px solid var(--line);border-radius:10px;padding:8px 10px;background:transparent;color:var(--ink);font-size:.9rem}");
   html += F(".days-grid{display:flex;flex-wrap:wrap;gap:8px;justify-content:center}");
-  html += F(".day{display:inline-flex;gap:6px;align-items:center;border:1px solid var(--line);border-radius:999px;padding:7px 12px;font-size:.85rem;background:var(--chip);border-color:var(--chip-brd)}");
+  html += F(".day{display:inline-flex;gap:6px;align-items:center;border:1px solid var(--chip-brd);border-radius:999px;padding:7px 12px;font-size:.85rem;background:transparent}");
   html += F(".day input{margin:0}");
   html += F("@media(max-width:720px){.nav .in{flex-direction:column;align-items:flex-start}.zones{grid-template-columns:1fr}.sched-grid{grid-template-columns:1fr}.rowx{grid-template-columns:1fr}.rowx label{margin-bottom:4px}}");
   html += F(".collapse{cursor:pointer;user-select:none;display:flex;align-items:center;justify-content:space-between;font-size:1.05rem}");
@@ -4125,28 +4292,40 @@ void handleRoot() {
   html += F("html,body{font-family:'Sora','Avenir Next','Trebuchet MS',sans-serif}");
   html += F("body{position:relative;min-height:100vh}");
   html += F("body::before,body::after{content:'';position:fixed;z-index:-1;pointer-events:none;filter:blur(28px);opacity:.42}");
-  html += F("body::before{width:340px;height:340px;right:-120px;top:56px;background:radial-gradient(circle,#2f7fe0,transparent 68%);animation:floatbg 14s ease-in-out infinite}");
-  html += F("body::after{width:290px;height:290px;left:-110px;bottom:36px;background:radial-gradient(circle,#22c55e,transparent 66%);animation:floatbg 16s ease-in-out infinite reverse}");
+  html += F("body::before{width:340px;height:340px;right:-120px;top:56px;background:radial-gradient(circle,#1f8a86,transparent 68%);animation:floatbg 14s ease-in-out infinite}");
+  html += F("body::after{width:290px;height:290px;left:-110px;bottom:36px;background:radial-gradient(circle,#52c266,transparent 66%);animation:floatbg 16s ease-in-out infinite reverse}");
   html += F("@keyframes floatbg{0%,100%{transform:translateY(0)}50%{transform:translateY(-14px)}}");
   html += F(".nav{border-bottom:1px solid rgba(255,255,255,.2);backdrop-filter:blur(7px);-webkit-backdrop-filter:blur(7px)}");
-  html += F(".brand span:last-child{text-transform:uppercase;letter-spacing:.8px;font-size:1.02rem}");
   html += F(".pill,#btn-master{font-weight:700}");
   html += F("#clock{font-family:'JetBrains Mono','Consolas',monospace;font-size:.84rem}");
   html += F(".card{position:relative;overflow:hidden}");
-  html += F(".card::before{content:'';position:absolute;left:0;right:0;top:0;height:3px;background:linear-gradient(90deg,var(--primary),#22c55e);opacity:.85}");
-  html += F(".zone-card{background:linear-gradient(155deg,var(--panel),rgba(47,127,224,.08))}");
+  html += F(".card::before{content:'';position:absolute;left:0;right:0;top:0;height:3px;background:linear-gradient(90deg,var(--primary),#52c266);opacity:.85}");
   html += F(".summary-grid .card{animation:rise .45s ease both}");
   html += F(".summary-grid .card:nth-child(2){animation-delay:.05s}.summary-grid .card:nth-child(3){animation-delay:.1s}.summary-grid .card:nth-child(4){animation-delay:.15s}");
   html += F("@keyframes rise{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:translateY(0)}}");
   html += F(".btn{font-weight:760;letter-spacing:.15px}");
   html += F(".chip b,.badge b{font-weight:800}");
-  html += F("@media(max-width:720px){.brand span:last-child{letter-spacing:.55px}.nav{padding-top:8px}.chip{font-size:.88rem}}");
+  html += F("html[data-theme='dark'] .dash-nav a{background:transparent;border-color:var(--chip-brd)}");
+  html += F("html[data-theme='dark'] .hero-mini{background:linear-gradient(180deg,rgba(15,30,34,.96),rgba(15,30,34,.9));box-shadow:0 14px 30px rgba(0,0,0,.22)}");
+  html += F("html[data-theme='dark'] .hero-mini.hero-mini-strong{background:linear-gradient(135deg,rgba(31,138,112,.18),rgba(16,39,43,.94))}");
+  html += F("html[data-theme='dark'] .summary-card{background:var(--card)}");
+  html += F("html[data-theme='dark'] .summary-link{background:var(--chip)}");
+  html += F("html[data-theme='dark'] .metric-tile{background:#102327}");
+  html += F("html[data-theme='dark'] .sched-top{background:transparent}");
+  html += F("html[data-theme='dark'] .action-card{background:var(--card)}");
+  html += F(".summary-grid .weather-card,.summary-grid .next-card{grid-column:span 2}");
+  html += F(".action-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:var(--gap);margin:12px auto 24px}");
+  html += F(".action-card{min-height:180px;display:flex;flex-direction:column;justify-content:space-between;background:linear-gradient(180deg,var(--card),rgba(255,255,255,.32))}");
+  html += F(".action-copy p{margin:8px 0 0;color:var(--muted)}");
+  html += F("#clock,.hero-mini-value{font-variant-numeric:tabular-nums}");
+  html += F("@media(max-width:980px){.hero-grid{grid-template-columns:1fr}.section-head{flex-direction:column;align-items:flex-start}.section-note{text-align:left}.summary-grid .weather-card,.summary-grid .next-card{grid-column:auto}.metric-tile.metric-wide{grid-column:auto}.dash-nav{top:68px}}");
+  html += F("@media(max-width:720px){.nav{padding-top:8px}.chip{font-size:.88rem}.hero-shell{padding:18px}.hero-title{max-width:none;font-size:1.95rem}.hero-mini-grid{grid-template-columns:1fr}.zone-actions{justify-content:stretch}.zone-actions .btn{flex:1 1 140px}.brand-title{letter-spacing:.55px}.summary-card{min-height:auto}.summary-link{min-height:0}.summary-metric-grid{grid-template-columns:1fr 1fr}.dash-nav{top:120px;overflow:auto;flex-wrap:nowrap;padding-bottom:8px}.dash-nav a{white-space:nowrap}.sched-top{padding:16px}.sched-body{padding:16px}.sched-tools .btn{flex:1 1 140px}}");
   html += F("</style></head><body>");
   flush();
 
   // --- Nav ---
   html += F("<div class='nav'><div class='in'>");
-  html += F("<div class='brand'><span class='dot'></span><span>ESP32 Irrigation</span></div>");
+  html += F("<div class='brand'><span class='dot'></span><div class='brand-copy'><span class='brand-title'>ESP32 Irrigation</span><span class='brand-sub'>Weather-aware watering control</span></div></div>");
   html += F("<div class='meta'>");
   html += F("<span class='pill' id='clock'>"); html += timeStr; html += F("</span>");
   html += F("<span class='pill'>"); html += dateStr; html += F("</span>");
@@ -4162,67 +4341,101 @@ void handleRoot() {
   html += F("<button id='themeBtn' class='btn-ghost' title='Toggle theme'>Theme</button>");
   html += F("</div></div></div>");
 
+  // --- Hero ---
+  html += F("<div class='wrap'><div class='hero-shell glass'><div class='hero-grid'>");
+  html += F("<div class='hero-copy'><div class='hero-kicker'>Smart dashboard</div>");
+  html += F("<h1 class='hero-title'>ESP32 Irrigation.</h1>");
+  html += F("<p class='hero-text'></p>");
+  html += F("<div class='hero-actions'><a class='btn' href='/setup'>Setup</a><a class='btn btn-secondary' href='/events'>Events</a><a class='btn btn-secondary' href='/status'>Status JSON</a></div></div>");
+  html += F("<div class='hero-mini-grid'>");
+  html += F("<div class='hero-mini hero-mini-strong'><span class='hero-mini-label'>System</span><span class='hero-mini-value' id='heroMasterState'>");
+  html += heroSystemValue;
+  html += F("</span><span class='hero-mini-sub' id='heroMasterSub'>");
+  html += heroSystemSub;
+  html += F("</span></div>");
+  html += F("<div class='hero-mini'><span class='hero-mini-label'>Tank Reserve</span><span class='hero-mini-value' id='heroTankValue'>");
+  html += String(tankPct);
+  html += F("%</span><span class='hero-mini-sub' id='heroTankSub'>");
+  html += sourceModeText();
+  html += F("</span></div>");
+  html += F("<div class='hero-mini'><span class='hero-mini-label'>Next Start</span><span class='hero-mini-value' id='heroNextValue'>");
+  html += nextWaterLabel;
+  html += F("</span><span class='hero-mini-sub' id='heroNextSub'>");
+  html += nextWaterSub;
+  html += F("</span></div>");
+  html += F("<div class='hero-mini'><span class='hero-mini-label'>Weather</span><span class='hero-mini-value weather-value'><span id='heroWeatherValue'>");
+  html += heroWeatherValue;
+  html += F("</span><span id='heroWeatherTrend' style='font-weight:900;'>&rarr;</span></span><span class='hero-mini-sub' id='heroWeatherSub'>");
+  html += cond;
+  html += F("</span></div>");
+  html += F("</div></div></div></div>");
+  html += F("<div class='wrap'><div class='dash-nav glass'><a href='#summary-section'>Summary</a><a href='#schedules-section'>Schedules</a><a href='#zones-section'>Zones</a><a href='#controls-section'>Controls</a></div></div>");
+
   // --- Summary cards ---
-  html += F("<div class='wrap'><div class='glass section'><div class='grid summary-grid'>");
+  html += F("<div class='wrap section-block' id='summary-section'><div class='section-head'><div><div class='section-kicker'>Overview</div><h2>Controller summary</h2></div>");
+  html += F("<p class='section-note'></p></div>");
+  html += F("<div class='glass section summary-shell'><div class='grid summary-grid'>");
 
   // Location card with Open-Meteo link
-  html += F("<div class='card'><h3>Location</h3>"
-            "<a class='chip' id='meteoLink' href='https://open-meteo.com/en/docs?latitude=-35.1076&longitude=138.5573' target='_blank' rel='noopener'>"
-            "<b id='cityName'>");
-html += cityName;   // initial label; JS will overwrite from /status
-html += F("</b></a></div>");
+  html += F("<div class='card summary-card'><h3>Location</h3><a class='summary-link' id='meteoLink' href='https://open-meteo.com/en/docs?latitude=-35.1076&longitude=138.5573' target='_blank' rel='noopener'>");
+  html += F("<span class='summary-k'>Weather source</span><span class='summary-value' id='cityName'>");
+  html += cityName;
+  html += F("</span><span class='summary-support'>Click here to goto Open-Meteo site.</span></a></div>");
 
+  html += F("<div class='card summary-card'><h3>Local Time</h3><div class='summary-k'>Device clock</div><div id='upChip' class='summary-value'>--:--:--</div><div class='summary-support'>Controller timezone and DST-aware local time.</div></div>");
 
+  html += F("<div class='card summary-card'><h3>WiFi Signal</h3><div class='summary-k'>Wireless health</div><div id='rssiChip' class='summary-value'>");
+  html += String(WiFi.RSSI()); html += F(" dBm</div></div>");
 
-  html += F("<div class='card'><h3>Local Time</h3><div id='upChip' class='big'>--:--:--</div><div class='hint'>Device timezone</div></div>");
+  html += F("<div class='card summary-card'><h3>Tank Level</h3><div class='summary-row'><div><div class='summary-k'>Available reserve</div><div class='summary-value'><span id='tankPctLabel'>");
+  html += String(tankPct);
+  html += F("%</span></div></div><div id='srcChip' class='mini-chip'>");
+  html += sourceModeText();
+  html += F("</div></div><div class='meter'><div id='tankFill' class='fill' style='width:");
+  html += String(tankPct);
+  html += F("%'></div></div></div>");
 
-  html += F("<div class='card'><h3>Wifi Signal</h3><div id='rssiChip' class='big'>");
-  html += String(WiFi.RSSI()); html += F(" dBm</div><div class='hint'>Wi-Fi RSSI</div></div>");
-
-  html += F("<div class='card'><h3>Tank Level</h3><div class='zone-head'>");
-  html += F("<div class='big'><span id='tankPctLabel'>"); html += String(tankPct); html += F("%</span></div>");
-  html += F("<div id='srcChip' class='sub'>"); html += sourceModeText(); html += F("</div></div>");
-  html += F("<div class='meter'><div id='tankFill' class='fill' style='width:"); html += String(tankPct); html += F("%'></div></div></div>");
-
-  html += F("<div class='card'><h3>Current Weather</h3>");
-  html += F("<div class='grid' style='grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:8px'>");
-  html += F("<div class='chip'>Temp <span id='tempChip'>"); html += (isnan(temp) ? String("--") : String(temp,1)+" C"); html += F("</span> <span id='tempTrend' style='font-weight:900;'>→</span></div>");
-  html += F("<div class='chip'>Feels <span id='feelsChip'>"); html += (isnan(feels) ? String("--") : String(feels,1)+" C"); html += F("</span></div>");
-  html += F("<div class='chip'>Humidity <span id='humChip'>");  html += (isnan(hum)  ? String("--") : String((int)hum)+" %"); html += F("</span></div>");
-  html += F("<div class='chip'>Wind <span id='windChip'>"); html += (isnan(ws)   ? String("--") : String(ws,1)+" m/s"); html += F("</span></div>");
-  html += F("<div class='chip'>Condition <b id='cond'>");
-  html += cond.length() ? cond : String("--");
-  html += F("</b></div></div></div>");
-
-  html += F("<div class='card'><h3>Weather Today</h3>");
-  html += F("<div class='grid' style='grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:6px'>");
-  html += F("<div class='chip'><b>Low</b>&nbsp;<b id='tmin'>---</b> C</div>");
-  html += F("<div class='chip'><b>High</b>&nbsp;<b id='tmax'>---</b> C</div>");
-  html += F("<div class='chip'><b>Pressure</b>&nbsp;<b id='press'>--</b> hPa</div>");
-  html += F("<div class='chip'><span class='sub'>Sunrise</span>&nbsp;<b id='sunr'>--:--</b></div>");
-  html += F("<div class='chip'><span class='sub'>Sunset</span>&nbsp;<b id='suns'>--:--</b></div>");
+  html += F("<div class='card summary-card weather-card'><h3>Current Weather</h3><div class='summary-metric-grid'>");
+  html += F("<div class='metric-tile'><span class='metric-k'>Temperature</span><div class='metric-v big-metric'><span id='tempChip'>");
+  html += (isnan(temp) ? String("--") : String(temp,1)+" C");
+  html += F("</span> <span id='tempTrend' style='font-weight:900;'>&rarr;</span></div></div>");
+  html += F("<div class='metric-tile'><span class='metric-k'>Feels Like</span><div class='metric-v' id='feelsChip'>");
+  html += (isnan(feels) ? String("--") : String(feels,1)+" C");
   html += F("</div></div>");
+  html += F("<div class='metric-tile'><span class='metric-k'>Humidity</span><div class='metric-v' id='humChip'>");
+  html += (isnan(hum) ? String("--") : String((int)hum)+" %");
+  html += F("</div></div>");
+  html += F("<div class='metric-tile'><span class='metric-k'>Wind</span><div class='metric-v' id='windChip'>");
+  html += (isnan(ws) ? String("--") : String(ws,1)+" m/s");
+  html += F("</div></div>");
+  html += F("<div class='metric-tile metric-wide'><span class='metric-k'>Condition</span><div class='metric-v' id='cond'>");
+  html += cond.length() ? cond : String("--");
+  html += F("</div></div></div>");
+  html += F("<div class='summary-subhead'>Today</div><div class='summary-metric-grid'>");
+  html += F("<div class='metric-tile'><span class='metric-k'>Low / High</span><div class='metric-split'>");
+  html += F("<div class='metric-split-item'><div class='metric-v'><span id='tmin'>---</span><span class='metric-unit'>C</span></div></div>");
+  html += F("<div class='metric-split-item'><div class='metric-v'><span id='tmax'>---</span><span class='metric-unit'>C</span></div></div>");
+  html += F("</div></div>");
+  html += F("<div class='metric-tile'><span class='metric-k'>Pressure</span><div class='metric-v'><span id='press'>--</span><span class='metric-unit'>hPa</span></div></div>");
+  html += F("<div class='metric-tile'><span class='metric-k'>Sunrise</span><div class='metric-v' id='sunr'>--:--</div></div>");
+  html += F("<div class='metric-tile'><span class='metric-k'>Sunset</span><div class='metric-v' id='suns'>--:--</div></div></div></div>");
 
-  // Delays / status
-  html += F("<div class='card'><h3>Delays</h3><div class='grid' style='grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:6px'>");
+  // Delays + Next Water
+  html += F("<div class='card summary-card next-card'><h3>Delays & Next Water</h3><div class='summary-meta'>");
   html += F("<div id='rainBadge' class='badge "); html += (rainActive ? "b-bad" : "b-ok"); html += F("'>Rain: <b>");
   html += (rainActive?"Active":"Off"); html += F("</b></div>");
   html += F("<div id='windBadge' class='badge "); html += (windActive ? "b-warn" : "b-ok"); html += F("'>Wind: <b>");
-  html += (windActive?"Active":"Off"); html += F("</b></div>");
-  html += F("<div class='badge'>Cause: <b id='rainCauseBadge'>"); html += causeText; html += F("</b></div>");
-  html += F("<div class='badge'>1h (Now): <b id='acc1h'>--</b> mm</div>");
-  html += F("<div class='badge'>24h (Total): <b id='acc24'>--</b> mm</div>");
-  html += F("</div></div>");
-
-  // Next Water
-  html += F("<div class='card'><h3>Next Water</h3>");
-  html += F("<div class='grid' style='grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:6px'>");
-  html += F("<div class='chip'>Zone: <b id='nwZone'>--</b></div>");
-  html += F("<div class='chip'>Start: <b id='nwTime'>--:--</b></div>");
-  html += F("<div class='chip'>ETA: <b id='nwETA'>--</b></div>");
-  html += F("<div class='chip'>Duration: <b id='nwDur'>--</b></div>");
-  html += F("</div><div class='hint'>Active Rain cancels watering, Active Wind postpones until windspeed drops.</div></div>");
-
+  html += (windActive?"Active":"Off"); html += F("</b></div></div>");
+  html += F("<div class='summary-metric-grid'>");
+  html += F("<div class='metric-tile metric-wide'><span class='metric-k'>Delay Cause</span><div class='metric-v' id='rainCauseBadge'>"); html += causeText; html += F("</div></div>");
+  html += F("<div class='metric-tile'><span class='metric-k'>Rain 1h</span><div class='metric-v'><span id='acc1h'>--</span><span class='metric-unit'>mm</span></div></div>");
+  html += F("<div class='metric-tile'><span class='metric-k'>Rain 24h</span><div class='metric-v'><span id='acc24'>--</span><span class='metric-unit'>mm</span></div></div>");
+  html += F("<div class='metric-tile metric-wide'><span class='metric-k'>Zone & Start</span><div class='metric-v' id='nwTime'>");
+  html += nextWaterLabel;
+  html += F("</div><div class='summary-support'>Zone <span id='nwZone'>--</span></div></div>");
+  html += F("<div class='metric-tile'><span class='metric-k'>ETA</span><div class='metric-v' id='nwETA'>--</div></div>");
+  html += F("<div class='metric-tile'><span class='metric-k'>Duration</span><div class='metric-v' id='nwDur'>--</div></div>");
+  html += F("</div><div class='summary-note'>During Rain:Active watering will be stopped, if rain mm threshold is met watering will stop for set hours. If Wind:Active watering will be postponed until wind conditions drop below set threshold.</div></div>");
   html += F("</div></div>"); // end glass / grid
   flush();
 
@@ -4237,14 +4450,11 @@ html += F("</b></a></div>");
     }
     return String(v);
   };
-  html += F("<div class='center'><div class='card sched'>");
-  html += F("<h3 class='collapse' onclick=\"const b=document.getElementById('schedBody');"
-            "const a=this.querySelector('.arr');"
-            "const open=b.style.display!=='none';"
-            "b.style.display=open?'none':'block';"
-            "a.textContent=open?'>':'v';\">");
-  html += F("<span class='sched-title'><span>Schedules</span><span class='sched-sub'>Edit by zone</span></span><span class='arr'>></span></h3>");
-  html += F("<div id='schedBody' class='sched-ctr' style='display:none'>");
+  html += F("<div class='wrap section-block' id='schedules-section'><div class='section-head'><div><div class='section-kicker'>Scheduling</div><h2>Zone schedules</h2></div>");
+  html += F("<p class='section-note'></p></div>");
+  html += F("<div class='card sched sched-shell'><div class='sched-top'><div class='sched-top-copy'><div class='section-kicker'>Planner</div><h3>Weekly schedule editor</h3><p></p></div>");
+  html += F("<div class='sched-tools'><button class='btn btn-secondary' type='button' id='schedToggle'>Show Schedules</button><button class='btn' id='btn-save-all' title='Save all zone schedules'>Save All</button></div></div>");
+  html += F("<div id='schedBody' class='sched-ctr sched-body' style='display:none'>");
   html += F("<div class='sched-grid'>");
 
   for (int z=0; z<(int)zonesCount; ++z) {
@@ -4320,14 +4530,13 @@ html += F("</b></a></div>");
   }
 
   html += F("</div>"); // .sched-grid
-  html += F("<div class='toolbar' style='margin-top:10px;justify-content:flex-end'>"
-            "<button class='btn' id='btn-save-all' title='Save all zone schedules'>Save All</button>"
-            "</div>");
-  html += F("</div></div></div>"); // #schedBody, .card.sched, .center
+  html += F("</div></div></div>"); // #schedBody, .card.sched, .wrap
   flush();
 
     // --- Live Zones ---
-  html += F("<div class='center' style='margin-top:12px'><div class='card'>");
+  html += F("<div class='wrap section-block' id='zones-section'><div class='section-head'><div><div class='section-kicker'>Live Control</div><h2>Zones</h2></div>");
+  html += F("<p class='section-note'></p></div>");
+  html += F("<div class='card zones-shell'>");
   html += F("<h3>Zones</h3><div class='zones'>");
 
   for (int z=0; z<(int)zonesCount; z++) {
@@ -4348,7 +4557,11 @@ html += F("</b></a></div>");
     unsigned int durM = durSec / 60;
     unsigned int durS = durSec % 60;
 
-    html += F("<div class='zone-card'>");
+    html += F("<div class='zone-card ");
+    html += (zoneActive[z] ? "is-active" : "");
+    html += F("' id='zone-");
+    html += String(z);
+    html += F("-card'>");
 
     // Header: index + name + state badge
     html += F("<div class='zone-head'>");
@@ -4456,19 +4669,13 @@ html += F("</b></a></div>");
   html += F("</div></div></div>"); // Close zones block
   flush();
 
-  // --- Tools / System Controls ---
-  html += F("<div class='grid center' style='margin:12px auto 20px'><div class='card' style='grid-column:1/-1'>");
-  html += F("<h3>Tools</h3><div class='toolbar'>");
-  html += F("<a class='btn' href='/setup'>Setup</a>");
-  html += F("<a class='btn btn-secondary' href='/events'>Events</a>");
-  html += F("<a class='btn btn-secondary' href='/status'>Status JSON</a>");
-  html += F("</div></div></div>");
-  flush();
-
-  html += F("<div class='grid center' style='margin:0 auto 24px'><div class='card' style='grid-column:1/-1'>");
-  html += F("<h3>System Controls</h3><div class='toolbar'>");
-  html += F("<button class='btn btn-danger' id='rebootBtn'>Reboot</button>");
-  html += F("</div></div></div>");
+  // --- System Controls ---
+  html += F("<div class='wrap section-block controls-shell' id='controls-section'><div class='section-head'><div><div class='section-kicker'>Actions</div><h2>Controller controls</h2></div>");
+  html += F("<p class='section-note'></p></div>");
+  html += F("<div class='action-grid'>");
+  html += F("<div class='card action-card'><div class='action-copy'><h3>Quick Actions</h3><p>Clear active delays, resume automation, or restart the controller.</p></div><div class='toolbar'><button class='btn btn-secondary' id='btn-clear-delays'>Clear Delays</button><button class='btn btn-secondary' id='btn-resume'>Resume</button><button class='btn btn-danger' id='rebootBtn'>Reboot</button></div></div>");
+  html += F("<div class='card action-card'><div class='action-copy'><h3>Deeper Setup</h3><p>Jump into configuration or event history when you need wiring, forecast, timezone.</p></div><div class='toolbar'><a class='btn' href='/setup'>Open Setup</a><a class='btn btn-secondary' href='/events'>View Events</a></div></div>");
+  html += F("</div></div>");
   flush();
 
   // --- JS ---
@@ -4526,6 +4733,11 @@ html += F("</b></a></div>");
   html += F("const nxt=(cur==='dark')?'light':'dark';applyTheme(nxt);localStorage.setItem('theme',nxt);});");
 
   html += F("function toLocalHHMM(epoch){if(!epoch||epoch===0)return'--:--'; const d=new Date(epoch*1000); return pad(d.getHours())+':'+pad(d.getMinutes());}");
+  html += F("function nextWaterDayLabel(epoch){if(!epoch||epoch===0)return'--'; const d=new Date(epoch*1000); const now=new Date();");
+  html += F("const start=new Date(now.getFullYear(),now.getMonth(),now.getDate()); const target=new Date(d.getFullYear(),d.getMonth(),d.getDate());");
+  html += F("const diff=Math.round((target-start)/86400000); if(diff===0) return 'Today'; if(diff===1) return 'Tomorrow';");
+  html += F("return d.toLocaleDateString(undefined,{weekday:'short', day:'2-digit', month:'short'});}"); 
+  html += F("function nextWaterStartLabel(epoch){if(!epoch||epoch===0)return'--'; return nextWaterDayLabel(epoch)+' '+toLocalHHMM(epoch);}");
   html += F("async function refreshStatus(){try{const r=await fetch('/status');const st=await r.json();");
   html += F("if(typeof st.deviceEpoch==='number' && st.deviceEpoch>0 && _devEpoch===null){ startDeviceClock(st.deviceEpoch); }");
   html += F("const rb=document.getElementById('rainBadge');const wb=document.getElementById('windBadge');");
@@ -4535,6 +4747,8 @@ html += F("</b></a></div>");
   html += F("const pct=st.tankPct||0; const tf=document.getElementById('tankFill'); const tl=document.getElementById('tankPctLabel');");
   html += F("if(tf) tf.style.width=Math.max(0,Math.min(100,pct))+'%'; if(tl) tl.textContent=pct+'%';");
   html += F("const src=document.getElementById('srcChip'); if(src) src.textContent=st.sourceMode||'';");
+  html += F("const heroTank=document.getElementById('heroTankValue'); const heroTankSub=document.getElementById('heroTankSub');");
+  html += F("if(heroTank) heroTank.textContent=pct+'%'; if(heroTankSub) heroTankSub.textContent=st.sourceMode||'';");
   html += F("const up=document.getElementById('upChip'); if(up) up.textContent=fmtClock12(st.deviceEpoch, st.utcOffsetMin);");
   html += F("const rssi=document.getElementById('rssiChip'); if(rssi) rssi.textContent=(st.rssi)+' dBm';");
   // Location chip + Open-Meteo link
@@ -4557,9 +4771,9 @@ html += F("</b></a></div>");
   html += F("if(acc1h){var v=(typeof st.rain1hNow==='number')?st.rain1hNow:NaN;acc1h.textContent=isNaN(v)?'--':v.toFixed(1);}");
   html += F("const acc24=document.getElementById('acc24'); if(acc24){ const v=(typeof st.rain24hActual==='number')?st.rain24hActual:(typeof st.rain24h==='number'?st.rain24h:NaN); acc24.textContent=isNaN(v)?'--':v.toFixed(1);} ");
 
-  html += F("if(Array.isArray(st.zones)){ st.zones.forEach((z,idx)=>{");
-  html += F("const stateEl=document.getElementById('zone-'+idx+'-state'); const remEl=document.getElementById('zone-'+idx+'-rem'); const barEl=document.getElementById('zone-'+idx+'-bar'); const dotEl=document.getElementById('zone-'+idx+'-dot');");
-  html += F("if(stateEl){stateEl.className='badge '+(z.active?'b-ok':'');stateEl.innerHTML=z.active?'Running':'Off';} if(dotEl){dotEl.className='zone-dot'+(z.active?' on':'');}");
+  html += F("let activeCount=0; if(Array.isArray(st.zones)){ st.zones.forEach((z,idx)=>{");
+  html += F("if(z.active) activeCount++; const stateEl=document.getElementById('zone-'+idx+'-state'); const remEl=document.getElementById('zone-'+idx+'-rem'); const barEl=document.getElementById('zone-'+idx+'-bar'); const dotEl=document.getElementById('zone-'+idx+'-dot'); const cardEl=document.getElementById('zone-'+idx+'-card');");
+  html += F("if(stateEl){stateEl.className='badge '+(z.active?'b-ok':'');stateEl.innerHTML=z.active?'Running':'Off';} if(dotEl){dotEl.className='zone-dot'+(z.active?' on':'');} if(cardEl){cardEl.classList.toggle('is-active',!!z.active);}");
   html += F("if(remEl){ if(z.active){ const r=z.remaining||0; const rm=Math.floor(r/60),rs=r%60; remEl.textContent=pad(rm)+'m '+pad(rs)+'s left'; } else remEl.textContent='--'; }");
   html += F("if(barEl){ let p=0; const total=z.totalSec||0; const rem=z.remaining||0; p=total>0?Math.max(0,Math.min(100,Math.round(100*(total-rem)/total))):0; barEl.style.width=p+'%'; }");
   html += F("const onBtn=document.getElementById('zone-'+idx+'-on'); const offBtn=document.getElementById('zone-'+idx+'-off');");
@@ -4574,6 +4788,7 @@ html += F("</b></a></div>");
   html += F("if(suns) suns.textContent = st.sunsetLocal  || '--:--';");
   html += F("if(press){ const p=st.pressure; press.textContent=(typeof p==='number' && p>0)?p.toFixed(0):'--'; }");
   html += F("const tempEl=document.getElementById('tempChip'); const trendEl=document.getElementById('tempTrend');");
+  html += F("const heroWeather=document.getElementById('heroWeatherValue'); const heroWeatherTrend=document.getElementById('heroWeatherTrend'); const heroWeatherSub=document.getElementById('heroWeatherSub');");
   html += F("if(tempEl){ const v=st.temp;");
   html += F("  if(typeof v==='number'){");
   html += F("    tempEl.textContent=v.toFixed(1)+' C';");
@@ -4581,29 +4796,39 @@ html += F("</b></a></div>");
   html += F("    _lastTemp=v;");
   html += F("  } else { tempEl.textContent='--'; _lastTemp=null; _lastTempTrend='\\u2192'; }");
   html += F("  if(trendEl){ trendEl.textContent=_lastTempTrend; trendEl.style.color=(_lastTempTrend==='\\u2191')?'#16a34a':(_lastTempTrend==='\\u2193')?'#dc2626':'inherit'; }");
+  html += F("  if(heroWeatherTrend){ heroWeatherTrend.textContent=_lastTempTrend; heroWeatherTrend.style.color=(_lastTempTrend==='\\u2191')?'#16a34a':(_lastTempTrend==='\\u2193')?'#dc2626':'inherit'; }");
   html += F("}");
   html += F("const feelsEl=document.getElementById('feelsChip'); if(feelsEl){ const v=st.feels_like; feelsEl.textContent=(typeof v==='number')?v.toFixed(1)+' C':'--'; }");
   html += F("const humEl=document.getElementById('humChip'); if(humEl){ const v=st.humidity; humEl.textContent=(typeof v==='number')?Math.round(v)+' %':'--'; }");
   html += F("const windEl=document.getElementById('windChip'); if(windEl){ const v=st.wind; windEl.textContent=(typeof v==='number')?v.toFixed(1)+' m/s':'--'; }");
-  html += F("const condEl=document.getElementById('cond'); if(condEl){");
-  html += F("  const cd=(typeof st.condDesc==='string' && st.condDesc.length)?st.condDesc:'';");
-  html += F("  const cm=(typeof st.condMain==='string' && st.condMain.length)?st.condMain:'';");
-  html += F("  condEl.textContent=cd||cm||'--'; }");
+  html += F("const condEl=document.getElementById('cond');");
+  html += F("const cd=(typeof st.condDesc==='string' && st.condDesc.length)?st.condDesc:'';");
+  html += F("const cm=(typeof st.condMain==='string' && st.condMain.length)?st.condMain:'';");
+  html += F("const condText=cd||cm||'--'; if(condEl){ condEl.textContent=condText; }");
+  html += F("if(heroWeather){ const v=st.temp; heroWeather.textContent=(typeof v==='number')?v.toFixed(1)+' C':'--'; }");
+  html += F("if(heroWeatherSub) heroWeatherSub.textContent=(condText!=='--')?condText:'Weather data syncing';");
 
   // keep master pill synced
   html += F("const bm=document.getElementById('btn-master'); const ms=document.getElementById('master-state');");
   html += F("if(bm && ms && typeof st.masterOn==='boolean'){ bm.setAttribute('aria-pressed', st.masterOn?'true':'false'); ms.textContent = st.masterOn?'On':'Off'; }");
+  html += F("const hm=document.getElementById('heroMasterState'); const hms=document.getElementById('heroMasterSub');");
+  html += F("if(hm){ if(st.systemPaused){ hm.textContent='Paused'; if(hms) hms.textContent='Schedules are temporarily suspended'; }");
+  html += F("else if(st.masterOn){ hm.textContent='Master On'; if(hms) hms.textContent=activeCount?(activeCount+' zone'+(activeCount===1?'':'s')+' running'):'Automation ready'; }");
+  html += F("else { hm.textContent='Master Off'; if(hms) hms.textContent='Outputs are blocked'; } }");
 
   // Next Water
   html += F("(function(){ const zEl=document.getElementById('nwZone'); const tEl=document.getElementById('nwTime'); const eEl=document.getElementById('nwETA'); const dEl=document.getElementById('nwDur');");
+  html += F("const hv=document.getElementById('heroNextValue'); const hs=document.getElementById('heroNextSub');");
   html += F("const epoch=st.nextWaterEpoch|0; const zone=st.nextWaterZone; const name=st.nextWaterName||(Number.isInteger(zone)?('Z'+(zone+1)):'--'); const dur=st.nextWaterDurSec|0;");
   html += F("function fmtDur(s){ if(s<=0) return '--'; const m=Math.floor(s/60), sec=s%60; return pad(m)+'m '+pad(sec)+'s'; }");
   html += F("function fmtETA(delta){ if(delta<=0) return 'now'; const h=Math.floor(delta/3600), m=Math.floor((delta%3600)/60); if(h>0) return h+'h '+m+'m'; return m+'m'; }");
-  html += F("if(zEl) zEl.textContent=(zone>=0&&zone<255)?name:'--'; if(tEl) tEl.textContent=toLocalHHMM(epoch); if(dEl) dEl.textContent=fmtDur(dur);");
+  html += F("if(zEl) zEl.textContent=(zone>=0&&zone<255)?name:'--'; if(tEl) tEl.textContent=nextWaterStartLabel(epoch); if(dEl) dEl.textContent=fmtDur(dur);");
   html += F("let nowEpoch=(typeof st.deviceEpoch==='number'&&st.deviceEpoch>0&&_devEpoch!=null)?_devEpoch:Math.floor(Date.now()/1000);");
-  html += F("if(eEl) eEl.textContent=epoch?fmtETA(epoch-nowEpoch):'--'; })();");
+  html += F("if(eEl) eEl.textContent=epoch?fmtETA(epoch-nowEpoch):'--';");
+  html += F("if(hv) hv.textContent=nextWaterStartLabel(epoch);");
+  html += F("if(hs) hs.textContent=epoch?(name+(dur>0?(' - '+fmtDur(dur)):'')):(st.rainDelayActive?'Waiting for rain delay to clear':'No queued run'); })();");
 
-  html += F("}catch(e){} } setInterval(refreshStatus,1300); refreshStatus();");
+  html += F("}catch(e){} } setInterval(refreshStatus,2500); refreshStatus();");
 
   // expose zonesCount & Save All
   html += F("const ZC="); html += String(zonesCount); html += F(";");
@@ -4619,6 +4844,9 @@ html += F("</b></a></div>");
   html += F("  try{ await fetch('/submit',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:fd.toString()}); location.reload(); }catch(e){ console.error(e); }");
   html += F("} ");
   html += F("document.getElementById('btn-save-all')?.addEventListener('click', saveAll);");
+  html += F("const schedBody=document.getElementById('schedBody'); const schedToggle=document.getElementById('schedToggle');");
+  html += F("if(schedBody && schedToggle){ const syncSched=()=>{ const open=schedBody.style.display!=='none'; schedToggle.textContent=open?'Hide Schedules':'Show Schedules'; };");
+  html += F("schedToggle.addEventListener('click',()=>{ const open=schedBody.style.display!=='none'; schedBody.style.display=open?'none':'block'; syncSched(); }); syncSched(); }");
   // Toggle Duration 2 rows when Start 2 is enabled
   html += F("for(let z=0; z<ZC; z++){");
   html += F("  const cb=document.querySelector(`[name='enableStartTime2${z}']`);");
@@ -4646,30 +4874,56 @@ void handleSetupPage() {
   String html; html.reserve(26000);
   String latStr = isfinite(meteoLat) ? String(meteoLat, 6) : String("");
   String lonStr = isfinite(meteoLon) ? String(meteoLon, 6) : String("");
+  String setupWeatherLabel = meteoLocation.length() ? meteoLocation : String("Open-Meteo ready");
+  String setupDisplayLabel = displayUseTft ? String("TFT display") : String("OLED display");
+  String setupTankLabel = tankEnabled ? String("Tank enabled") : String("Tank disabled");
+  String setupTzLabel = (tzMode == TZ_FIXED) ? String("Fixed offset") : String("POSIX timezone");
 
   html += F("<!DOCTYPE html><html><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'>");
+  html += F("<meta name='theme-color' content='#145b63'><meta name='color-scheme' content='light dark'>");
   html += F("<title>Setup - ESP32 Irrigation</title>");
   html += F("<style>");
   html += F("@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@500;700&family=Sora:wght@400;600;700;800&display=swap');");
-  html += F("body{margin:0;font-family:'Trebuchet MS','Candara','Segoe UI',sans-serif;background:#0e1726;color:#e8eef6;font-size:15px;line-height:1.4}");
+  html += F("html{scroll-behavior:smooth}body{margin:0;font-family:'Trebuchet MS','Candara','Segoe UI',sans-serif;background:#0d1718;color:#e7f1ec;font-size:15px;line-height:1.4}");
   html += F(".wrap{max-width:1100px;margin:28px auto;padding:0 16px}");
   html += F("h1{margin:0 0 16px 0;font-size:1.7em;letter-spacing:.3px;font-weight:800}");
   html += F(".page-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:16px}");
   html += F(".page-head h1{margin:0}");
-  html += F(".theme-switch{display:flex;align-items:center;gap:6px;font-weight:700;color:#d6e1f4}");
+  html += F(".page-head-copy{display:flex;flex-direction:column;gap:4px}");
+  html += F(".page-kicker{text-transform:uppercase;letter-spacing:.18em;font-size:.72rem;font-weight:800;color:#7fd2bd}");
+  html += F(".page-sub{color:#9ab4ad;font-size:.92rem}");
+  html += F(".setup-hero{display:grid;grid-template-columns:minmax(0,1.2fr) minmax(280px,.8fr);gap:14px;padding:18px;margin:16px 0 18px;border-radius:18px;");
+  html += F("background:linear-gradient(145deg,rgba(15,27,30,.86),rgba(20,69,68,.6));border:1px solid rgba(92,131,125,.24);box-shadow:0 16px 38px rgba(0,0,0,.28)}");
+  html += F(".setup-hero-copy{display:flex;flex-direction:column;justify-content:center;gap:10px}");
+  html += F(".setup-hero-copy h2{margin:0;font-size:1.55rem;line-height:1.08;max-width:14ch}");
+  html += F(".setup-hero-copy p{margin:0;color:#b4c8c2;max-width:60ch}");
+  html += F(".setup-badges{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}");
+  html += F(".setup-badge{padding:12px 13px;border-radius:15px;border:1px solid rgba(92,131,125,.24);background:linear-gradient(180deg,rgba(255,255,255,.08),rgba(127,210,189,.04))}");
+  html += F(".setup-badge-k{font-size:.73rem;letter-spacing:.14em;text-transform:uppercase;color:#9ab4ad;font-weight:800}");
+  html += F(".setup-badge-v{margin-top:6px;font-size:1rem;font-weight:760;color:#f0f8f3}");
+  html += F(".setup-nav{display:flex;gap:10px;flex-wrap:wrap;margin:0 0 16px;padding:8px;border-radius:16px;position:sticky;top:10px;z-index:8;");
+  html += F("background:rgba(12,22,24,.76);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);border:1px solid rgba(92,131,125,.2);box-shadow:0 10px 28px rgba(0,0,0,.16)}");
+  html += F(".setup-nav a{display:inline-flex;align-items:center;justify-content:center;padding:9px 14px;border-radius:999px;border:1px solid rgba(92,131,125,.24);");
+  html += F("background:rgba(10,23,25,.58);color:#e7f1ec;font-size:.86rem;font-weight:760;letter-spacing:.01em;transition:transform .08s ease,background .12s ease,border-color .12s ease,box-shadow .12s ease}");
+  html += F(".setup-nav a:hover{transform:translateY(-1px);background:rgba(31,138,112,.18);border-color:rgba(127,210,189,.36);box-shadow:0 10px 24px rgba(20,91,99,.16)}");
+  html += F(".setup-actions-top{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin:0 0 16px;padding:10px 12px;border-radius:16px;position:sticky;top:74px;z-index:7;background:rgba(13,23,24,.82);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);border:1px solid rgba(92,131,125,.2);box-shadow:0 12px 28px rgba(0,0,0,.18)}");
+  html += F(".setup-actions-top .btn,.setup-actions-top .btn-alt{margin:0}");
+  html += F(".setup-actions-top .btn[type=submit]{min-width:160px}");
+  html += F(".card-intro{margin:0 0 8px;color:#9ab4ad;font-size:.9rem;max-width:62ch}");
+  html += F(".theme-switch{display:flex;align-items:center;gap:6px;font-weight:700;color:#d5e4de}");
   html += F(".switch{position:relative;display:inline-block;width:42px;height:24px;min-width:unset}");
   html += F(".switch input{opacity:0;width:0;height:0}");
-  html += F(".slider{position:absolute;cursor:pointer;top:0;left:0;right:0;bottom:0;background:#1b2537;border:1px solid #2a3954;transition:.2s;border-radius:999px}");
-  html += F(".slider:before{position:absolute;content:'';height:18px;width:18px;left:3px;top:2px;background:#e8eef6;transition:.2s;border-radius:50%}");
-  html += F("input:checked + .slider{background:#1c74d9;border-color:#1c74d9}");
+  html += F(".slider{position:absolute;cursor:pointer;top:0;left:0;right:0;bottom:0;background:#16262a;border:1px solid #284449;transition:.2s;border-radius:999px}");
+  html += F(".slider:before{position:absolute;content:'';height:18px;width:18px;left:3px;top:2px;background:#e7f1ec;transition:.2s;border-radius:50%}");
+  html += F("input:checked + .slider{background:#1f8a70;border-color:#1f8a70}");
   html += F("input:checked + .slider:before{transform:translateX(18px);background:#fff}");
-  html += F(".card{background:#111927;border:1px solid #1f2a44;border-radius:16px;box-shadow:0 8px 34px rgba(0,0,0,.35);padding:18px 16px;margin-bottom:16px}");
+  html += F(".card{background:#101d20;border:1px solid #233d42;border-radius:16px;box-shadow:0 8px 34px rgba(0,0,0,.35);padding:18px 16px;margin-bottom:16px}");
   html += F(".card.narrow{max-width:960px;margin-left:auto;margin-right:auto}");
-  html += F(".card h3{margin:0 0 12px 0;font-size:1.1em;font-weight:850;letter-spacing:.35px;color:#f2f6ff;");
-  html += F("padding-bottom:6px;border-bottom:2px solid #1c74d9;display:flex;align-items:center;gap:8px}");
-  html += F("label{display:inline-block;min-width:200px;font-size:.95rem;font-weight:600;color:#d6e1f4;text-align:left}");
+  html += F(".card h3{margin:0 0 12px 0;font-size:1.1em;font-weight:850;letter-spacing:.35px;color:#f0f8f3;");
+  html += F("padding-bottom:6px;border-bottom:2px solid #1f8a70;display:flex;align-items:center;gap:8px}");
+  html += F("label{display:inline-block;min-width:200px;font-size:.95rem;font-weight:600;color:#d5e4de;text-align:left}");
   // Inputs + select share the same theme
-  html += F("input[type=text],input[type=number],select{background:#0b1220;color:#e8eef6;border:1px solid #233357;border-radius:12px;padding:9px 12px;font-size:.95rem;text-align:left}");
+  html += F("input[type=text],input[type=number],select{background:#0c1618;color:#e7f1ec;border:1px solid #29454a;border-radius:12px;padding:9px 12px;font-size:.95rem;text-align:left}");
   html += F("input[type=text],select{width:100%;max-width:520px}");
   html += F("input[type=number]{width:100%;max-width:200px}");
   html += F("input[type=text].in-wide,select.in-wide{max-width:600px}");
@@ -4677,9 +4931,10 @@ void handleSetupPage() {
   html += F("input[type=number].in-xs{max-width:120px}");
   html += F("input[type=number].in-sm{max-width:160px}");
   html += F("input[type=number].in-md{max-width:240px}");
-  html += F(".row{display:flex;align-items:center;gap:12px;margin:10px 0;flex-wrap:wrap}.row small{color:#9fb0ca;font-size:.85rem}");
-  html += F(".btn{background:linear-gradient(180deg,#1c74d9,#165fba);color:#fff;border:1px solid rgba(0,0,0,.18);border-radius:12px;padding:10px 14px;font-weight:700;cursor:pointer;box-shadow:0 6px 16px rgba(25,118,210,.25);font-size:.95rem}");
-  html += F(".btn-alt{background:#1b2537;color:#e8eef6;border:1px solid #2a3954;border-radius:12px;padding:10px 14px;font-size:.95rem}");
+  html += F(".row{display:flex;align-items:center;gap:12px;margin:10px 0;padding-top:10px;border-top:1px solid rgba(41,69,74,.7);flex-wrap:wrap}.row small{color:#9ab4ad;font-size:.85rem}");
+  html += F(".card h3 + .row{border-top:none;padding-top:0}");
+  html += F(".btn{background:linear-gradient(180deg,#1f8a70,#145b63);color:#fff;border:1px solid rgba(0,0,0,.18);border-radius:12px;padding:10px 14px;font-weight:700;cursor:pointer;box-shadow:0 6px 16px rgba(20,91,99,.28);font-size:.95rem}");
+  html += F(".btn-alt{background:#17272b;color:#e7f1ec;border:1px solid #29454a;border-radius:12px;padding:10px 14px;font-size:.95rem}");
   html += F(".btn-danger{background:linear-gradient(180deg,#ef4444,#b91c1c);border:1px solid rgba(185,28,28,.6)}");
   html += F(".btn,.btn-alt{transition:transform .06s ease,box-shadow .06s ease,filter .06s ease}");
   html += F(".btn:active,.btn-alt:active{transform:translateY(1px);box-shadow:inset 0 2px 6px rgba(0,0,0,.25)}");
@@ -4688,24 +4943,39 @@ void handleSetupPage() {
   html += F("@keyframes ripple{to{transform:scale(3.2);opacity:0;}}");
   html += F(".grid{display:grid;grid-template-columns:1fr;gap:14px}");
   html += F(".cols2{display:grid;grid-template-columns:1fr 1fr;gap:14px}");
+  html += F(".panel-split > div{padding:14px;border-radius:14px;border:1px solid rgba(92,131,125,.16);background:linear-gradient(180deg,rgba(255,255,255,.03),rgba(255,255,255,.015))}");
   html += F("@media(max-width:760px){.cols2{grid-template-columns:1fr}label{min-width:150px}input[type=text].in-wide,select.in-wide,input[type=text].in-med,select.in-med{max-width:100%}}");
   html += F(".switchline{display:flex;gap:12px;align-items:center;flex-wrap:wrap}");
+  html += F("input[type=checkbox]:not(#themeToggle),input[type=radio]{appearance:none;-webkit-appearance:none;width:18px;height:18px;margin:0;flex:0 0 18px;display:inline-grid;place-content:center;cursor:pointer;");
+  html += F("border:1.6px solid rgba(255,255,255,.78);background:transparent;box-shadow:none;transition:border-color .12s ease,background .12s ease,box-shadow .12s ease,transform .06s ease}");
+  html += F("input[type=checkbox]:not(#themeToggle){border-radius:6px}");
+  html += F("input[type=radio]{border-radius:999px}");
+  html += F("input[type=checkbox]:not(#themeToggle)::before,input[type=radio]::before{content:'';display:block;transform:scale(0);transition:transform .12s ease}");
+  html += F("input[type=checkbox]:not(#themeToggle)::before{width:5px;height:9px;border-right:2px solid #fff;border-bottom:2px solid #fff;transform:rotate(45deg) scale(0);margin-top:-1px}");
+  html += F("input[type=radio]::before{width:8px;height:8px;border-radius:999px;background:#fff}");
+  html += F("input[type=checkbox]:not(#themeToggle):checked,input[type=radio]:checked{border-color:#ffffff;background:transparent;box-shadow:none}");
+  html += F("input[type=checkbox]:not(#themeToggle):checked::before{transform:rotate(45deg) scale(1)}");
+  html += F("input[type=radio]:checked::before{transform:scale(1)}");
+  html += F("input[type=checkbox]:not(#themeToggle):focus-visible,input[type=radio]:focus-visible{outline:none;border-color:#ffffff;box-shadow:0 0 0 3px rgba(31,138,112,.2)}");
+  html += F("input[type=checkbox]:not(#themeToggle):active,input[type=radio]:active{transform:translateY(1px)}");
   html += F(".subhead{opacity:.85;margin:8px 0 6px 0;font-weight:700;font-size:.98rem}");
-  html += F(".hr{height:1px;background:#1f2a44;margin:10px 0 8px 0;border:none}");
+  html += F(".hr{height:1px;background:#233d42;margin:10px 0 8px 0;border:none}");
 
   // Chips + inline options for timezone mode
   html += F(".inline-options{display:flex;flex-wrap:wrap;gap:10px}");
-  html += F(".chip{display:inline-flex;align-items:center;gap:6px;padding:6px 12px;border-radius:999px;background:#0b1220;border:1px solid #233357;font-size:.85rem;color:#e8eef6}");
+  html += F(".chip{display:inline-flex;align-items:center;gap:6px;padding:6px 12px;border-radius:999px;background:#0c1618;border:1px solid #29454a;font-size:.85rem;color:#e7f1ec}");
   html += F(".chip input{margin:0}");
   html += F(".chip span{white-space:nowrap}");
 
   // Collapsible card styling
+  html += F(".card,.setup-nav,.setup-actions-top,[id$='-card']{scroll-margin-top:144px}");
   html += F("details.collapse{padding:0;margin:0}");
-  html += F("details.collapse summary{cursor:pointer;outline:none;list-style:none;font-weight:800;font-size:1.05rem;color:#e8eef6}");
+  html += F("details.collapse summary{cursor:pointer;outline:none;list-style:none;font-weight:800;font-size:1.05rem;color:#e7f1ec;padding:4px 0}");
   html += F("details.collapse summary::-webkit-details-marker{display:none}");
-  html += F("details.collapse summary:after{content:'▸';margin-left:8px;transition:transform .18s ease;display:inline-block}");
+  html += F("details.collapse summary:after{content:'▸';margin-left:8px;transition:transform .18s ease;display:inline-block;width:26px;height:26px;line-height:24px;text-align:center;border-radius:999px;border:1px solid rgba(92,131,125,.22);background:rgba(255,255,255,.04)}");
   html += F("details.collapse[open] summary:after{transform:rotate(90deg)}");
-  html += F(".collapse-body{margin-top:10px}");
+  html += F("details.collapse[open] summary:after{background:rgba(31,138,112,.16);border-color:rgba(127,210,189,.3)}");
+  html += F(".collapse-body{margin-top:10px;padding-top:4px}");
 
   // Help text row: let the text wrap nicely
   html += F(".helptext label{min-width:0}");
@@ -4713,30 +4983,51 @@ void handleSetupPage() {
 
   // Make native select look like themed dropdown with a chevron
   html += F("select{appearance:none;-webkit-appearance:none;-moz-appearance:none;padding-right:32px;");
-  html += F("background-image:linear-gradient(45deg,transparent 50%,#9aa6c2 50%),linear-gradient(135deg,#9aa6c2 50%,transparent 50%);");
+  html += F("background-image:linear-gradient(45deg,transparent 50%,#93aba4 50%),linear-gradient(135deg,#93aba4 50%,transparent 50%);");
   html += F("background-position:calc(100% - 18px) 50%,calc(100% - 13px) 50%;background-size:5px 5px,5px 5px;background-repeat:no-repeat;}");
   html += F("body{-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}");
   html += F(".card{transition:transform .12s ease,box-shadow .12s ease}");
   html += F(".card:hover{transform:translateY(-2px);box-shadow:0 12px 28px rgba(0,0,0,.22)}");
   html += F(".btn:hover,.btn-alt:hover{filter:brightness(1.06)}");
-  html += F("input:focus-visible,select:focus-visible{outline:2px solid #1c74d9;outline-offset:2px}");
+  html += F("input:focus-visible,select:focus-visible{outline:2px solid #1f8a70;outline-offset:2px}");
   html += F("a{text-decoration:none;color:inherit}");
   html += F("@media (prefers-reduced-motion: reduce){*{animation:none!important;transition:none!important}}");
 
   // Light theme overrides
-  html += F("html[data-theme='light'] body{background:#f4f6fb;color:#1b2430}");
-  html += F("html[data-theme='light'] .theme-switch{color:#2a3647}");
-  html += F("html[data-theme='light'] .card{background:#ffffff;border-color:#d7e0ee;box-shadow:0 10px 26px rgba(16,24,40,.08)}");
-  html += F("html[data-theme='light'] .card h3{color:#0f172a;border-bottom-color:#2b7be4}");
-  html += F("html[data-theme='light'] label{color:#1f2a3a}");
-  html += F("html[data-theme='light'] .row small{color:#6b7a90}");
-  html += F("html[data-theme='light'] input[type=text],html[data-theme='light'] input[type=number],html[data-theme='light'] select{background:#f6f8fc;color:#0f172a;border-color:#cfd8ea}");
-  html += F("html[data-theme='light'] .chip{background:#f0f4fb;border-color:#cfd8ea;color:#1f2a3a}");
-  html += F("html[data-theme='light'] .btn-alt{background:#e9eef7;color:#1f2a3a;border-color:#cfd8ea}");
-  html += F("html[data-theme='light'] .btn{background:linear-gradient(180deg,#2b7be4,#1f62c8)}");
+  html += F("html[data-theme='light'] body{background:#f1f5f1;color:#1c2b2c}");
+  html += F("html[data-theme='light'] .theme-switch{color:#314847}");
+  html += F("html[data-theme='light'] .card{background:#ffffff;border-color:#d4dfd8;box-shadow:0 10px 26px rgba(16,24,40,.08)}");
+  html += F("html[data-theme='light'] .card h3{color:#14232b;border-bottom-color:#1f8a70}");
+  html += F("html[data-theme='light'] label{color:#213433}");
+  html += F("html[data-theme='light'] .row small{color:#607571}");
+  html += F("html[data-theme='light'] input[type=text],html[data-theme='light'] input[type=number],html[data-theme='light'] select{background:#f7faf8;color:#14232b;border-color:#c9d9d0}");
+  html += F("html[data-theme='light'] .chip{background:#eef6f2;border-color:#c9d9d0;color:#213433}");
+  html += F("html[data-theme='light'] input[type=checkbox]:not(#themeToggle),html[data-theme='light'] input[type=radio]{border-color:#8aa59c;background:rgba(255,255,255,.78);box-shadow:inset 0 1px 0 rgba(255,255,255,.75)}");
+  html += F("html[data-theme='light'] input[type=checkbox]:not(#themeToggle)::before{border-right-color:#17666b;border-bottom-color:#17666b}");
+  html += F("html[data-theme='light'] input[type=radio]::before{background:#17666b}");
+  html += F("html[data-theme='light'] input[type=checkbox]:not(#themeToggle):checked,html[data-theme='light'] input[type=radio]:checked{border-color:#1f8a70;background:#ffffff;box-shadow:0 0 0 3px rgba(31,138,112,.12)}");
+  html += F("html[data-theme='light'] input[type=checkbox]:not(#themeToggle):focus-visible,html[data-theme='light'] input[type=radio]:focus-visible{border-color:#1f8a70;box-shadow:0 0 0 3px rgba(31,138,112,.14)}");
+  html += F("html[data-theme='light'] .btn-alt{background:#e8efeb;color:#213433;border-color:#c9d9d0}");
+  html += F("html[data-theme='light'] .btn{background:linear-gradient(180deg,#238b74,#17666b)}");
   html += F("html[data-theme='light'] .btn-danger{background:linear-gradient(180deg,#ef4444,#b91c1c)}");
-  html += F("html[data-theme='light'] .hr{background:#d7e0ee}");
-  html += F("html[data-theme='light'] select{background-image:linear-gradient(45deg,transparent 50%,#6b7a90 50%),linear-gradient(135deg,#6b7a90 50%,transparent 50%)}");
+  html += F("html[data-theme='light'] .hr{background:#d4dfd8}");
+  html += F("html[data-theme='light'] .setup-hero{background:linear-gradient(145deg,rgba(255,255,255,.88),rgba(235,245,240,.86));border-color:#d4dfd8;box-shadow:0 14px 34px rgba(16,24,40,.08)}");
+  html += F("html[data-theme='light'] .page-kicker{color:#1f8a70}");
+  html += F("html[data-theme='light'] .page-sub{color:#607571}");
+  html += F("html[data-theme='light'] .setup-hero-copy p{color:#607571}");
+  html += F("html[data-theme='light'] .setup-badge{background:linear-gradient(180deg,#ffffff,#f1f7f3);border-color:#d4dfd8}");
+  html += F("html[data-theme='light'] .setup-badge-k{color:#607571}");
+  html += F("html[data-theme='light'] .setup-badge-v{color:#14232b}");
+  html += F("html[data-theme='light'] .setup-nav{background:rgba(255,255,255,.8);border-color:#d4dfd8;box-shadow:0 10px 28px rgba(16,24,40,.08)}");
+  html += F("html[data-theme='light'] .setup-nav a{background:rgba(255,255,255,.88);border-color:#d4dfd8;color:#213433}");
+  html += F("html[data-theme='light'] .setup-nav a:hover{background:#edf6f1;border-color:#b7d5c8;box-shadow:0 10px 24px rgba(31,138,112,.08)}");
+  html += F("html[data-theme='light'] .card-intro{color:#607571}");
+  html += F("html[data-theme='light'] .row{border-top-color:#e4ece7}");
+  html += F("html[data-theme='light'] select{background-image:linear-gradient(45deg,transparent 50%,#607571 50%),linear-gradient(135deg,#607571 50%,transparent 50%)}");
+  html += F("html[data-theme='light'] .setup-actions-top{background:rgba(255,255,255,.84);border-color:#d4dfd8;box-shadow:0 12px 28px rgba(16,24,40,.08)}");
+  html += F("html[data-theme='light'] .panel-split > div{border-color:#dfe9e3;background:linear-gradient(180deg,#ffffff,#f7fbf8)}");
+  html += F("html[data-theme='light'] details.collapse summary:after{border-color:#d4dfd8;background:#f7fbf8}");
+  html += F("html[data-theme='light'] details.collapse[open] summary:after{background:#edf6f1;border-color:#b7d5c8}");
 
   // Desktop tuning
   html += F("@media(min-width:1024px){");
@@ -4749,32 +5040,43 @@ void handleSetupPage() {
   html += F("input[type=number]{max-width:220px;}");
   html += F("}");
   html += F("html,body{font-family:'Sora','Avenir Next','Trebuchet MS',sans-serif}");
-  html += F("body{position:relative;min-height:100vh;background:radial-gradient(900px 480px at 0% -10%,rgba(43,123,228,.2),transparent),radial-gradient(900px 500px at 110% 8%,rgba(34,197,94,.15),transparent),#0e1726}");
-  html += F(".page-head{padding:10px 14px;border-radius:15px;background:rgba(20,31,49,.45);backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);border:1px solid rgba(135,157,194,.22)}");
+  html += F("body{position:relative;min-height:100vh;background:radial-gradient(900px 480px at 0% -10%,rgba(31,138,112,.2),transparent),radial-gradient(900px 500px at 110% 8%,rgba(82,194,102,.14),transparent),#0d1718}");
+  html += F(".page-head{padding:10px 14px;border-radius:15px;background:rgba(16,27,30,.48);backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);border:1px solid rgba(92,131,125,.24)}");
   html += F(".page-head h1{text-transform:uppercase;font-size:1.35rem;letter-spacing:1px}");
   html += F(".theme-switch{font-size:.88rem}");
   html += F(".card{position:relative;overflow:hidden}");
-  html += F(".card::before{content:'';position:absolute;left:0;right:0;top:0;height:3px;background:linear-gradient(90deg,#2b7be4,#22c55e)}");
+  html += F(".card::before{content:'';position:absolute;left:0;right:0;top:0;height:3px;background:linear-gradient(90deg,#1f8a70,#52c266)}");
   html += F("input[type=text],input[type=number],select{font-family:'Sora','Trebuchet MS',sans-serif}");
-  html += F("input[type=text]:focus-visible,input[type=number]:focus-visible,select:focus-visible{outline:2px solid #2b7be4;outline-offset:1px;box-shadow:0 0 0 3px rgba(43,123,228,.2)}");
+  html += F("input[type=text]:focus-visible,input[type=number]:focus-visible,select:focus-visible{outline:2px solid #1f8a70;outline-offset:1px;box-shadow:0 0 0 3px rgba(31,138,112,.18)}");
   html += F(".btn,.btn-alt{font-weight:760;letter-spacing:.16px}");
   html += F(".chip{font-weight:620}");
   html += F("details.collapse summary{display:flex;align-items:center;justify-content:space-between}");
-  html += F("details.collapse summary:after{content:'>';font-weight:700}");
   html += F(".card{animation:rise .42s ease both}");
   html += F(".card:nth-of-type(2){animation-delay:.04s}.card:nth-of-type(3){animation-delay:.08s}.card:nth-of-type(4){animation-delay:.12s}");
   html += F("@keyframes rise{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}");
-  html += F("html[data-theme='light'] body{background:radial-gradient(900px 470px at 0% -10%,rgba(43,123,228,.18),transparent),radial-gradient(900px 450px at 110% 6%,rgba(22,163,74,.14),transparent),#f4f6fb}");
-  html += F("html[data-theme='light'] .page-head{background:rgba(255,255,255,.68);border-color:#d7e0ee}");
-  html += F("@media(max-width:760px){.page-head{padding:10px 12px}.page-head h1{font-size:1.2rem}}");
+  html += F("html[data-theme='light'] body{background:radial-gradient(900px 470px at 0% -10%,rgba(31,138,112,.18),transparent),radial-gradient(900px 450px at 110% 6%,rgba(82,194,102,.12),transparent),#f1f5f1}");
+  html += F("html[data-theme='light'] .page-head{background:rgba(255,255,255,.72);border-color:#d4dfd8}");
+  html += F("@media(max-width:760px){.page-head{padding:10px 12px}.page-head h1{font-size:1.2rem}.setup-hero{grid-template-columns:1fr}.setup-badges{grid-template-columns:1fr 1fr}.setup-nav{top:8px;flex-wrap:nowrap;overflow:auto;padding-bottom:6px}.setup-nav a{white-space:nowrap}.setup-actions-top{top:68px;z-index:9;padding:10px;border-radius:14px;background:rgba(13,23,24,.88);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);border:1px solid rgba(92,131,125,.2)}.row{padding-top:8px;flex-direction:column;align-items:stretch}.row label{min-width:0;width:100%}.row .btn,.row .btn-alt{width:100%}.switchline{align-items:flex-start}}");
   html += F("</style></head><body>");
 
-  html += F("<div class='wrap'><div class='page-head'><h1>Setup</h1>");
+  html += F("<div class='wrap'><div class='page-head'><div class='page-head-copy'><div class='page-kicker'>Controller setup</div><h1>Setup</h1><div class='page-sub'>Adjust weather, display, relay and automation settings from one screen.</div></div>");
   html += F("<div class='theme-switch'><span>Light</span><label class='switch'><input type='checkbox' id='themeToggle'><span class='slider'></span></label><span>Dark</span></div>");
+  html += F("</div>");
+  html += F("<div class='setup-hero'><div class='setup-hero-copy'><div class='page-kicker'>Quick overview</div><h2>Configure the controller without digging through separate pages.</h2><p>Save writes changes immediately, while pin, display and some hardware changes may require a reboot before they take effect.</p></div><div class='setup-badges'>");
+  html += F("<div class='setup-badge'><div class='setup-badge-k'>Zones</div><div class='setup-badge-v'>"); html += String(zonesCount); html += F(" configured</div></div>");
+  html += F("<div class='setup-badge'><div class='setup-badge-k'>Display</div><div class='setup-badge-v'>"); html += setupDisplayLabel; html += F("</div></div>");
+  html += F("<div class='setup-badge'><div class='setup-badge-k'>Water Source</div><div class='setup-badge-v'>"); html += setupTankLabel; html += F("</div></div>");
+  html += F("<div class='setup-badge'><div class='setup-badge-k'>Timezone</div><div class='setup-badge-v'>"); html += setupTzLabel; html += F("</div></div>");
+  html += F("<div class='setup-badge'><div class='setup-badge-k'>Weather</div><div class='setup-badge-v'>"); html += setupWeatherLabel; html += F("</div></div>");
+  html += F("<div class='setup-badge'><div class='setup-badge-k'>Forecast Model</div><div class='setup-badge-v'>"); html += meteoModel; html += F("</div></div>");
+  html += F("</div></div>");
+  html += F("<div class='setup-nav'>");
+  html += F("<a href='#zones-card'>Zones</a><a href='#tank-card'>Water</a><a href='#delays-card'>Delays</a><a href='#weather-card'>Weather</a><a href='#timezone-card'>Timezone</a><a href='#display-card'>Display</a><a href='#advanced-card'>Advanced</a><a href='#mqtt-card'>MQTT</a>");
   html += F("</div><form action='/configure' method='POST'>");
+  html += F("<div class='setup-actions-top'><button class='btn' type='submit'>Save Changes</button><button class='btn-alt' formaction='/' formmethod='GET'>Home</button><button class='btn-alt' type='button' onclick=\"fetch('/clear_cooldown',{method:'POST'})\">Clear Cooldown</button><button class='btn btn-danger' type='button' onclick=\"if(confirm('Reboot controller now?'))fetch('/reboot',{method:'POST'})\">Reboot</button></div>");
 
   // Zones
-  html += F("<div class='card narrow'><h3>Zones</h3>");
+  html += F("<div class='card narrow' id='zones-card'><h3>Zones</h3><p class='card-intro'>Set how many watering zones are available and whether they run one at a time or together.</p>");
   html += F("<div class='row'><label>Zone Count</label><input class='in-xs' type='number' min='1' max='");
   html += String(MAX_ZONES);
   html += F("' name='zonesMode' value='");
@@ -4790,7 +5092,7 @@ void handleSetupPage() {
   html += F("</div>");
 
   // Tank (available for all modes; water source switching works with any zone count)
-  html += F("<div class='card narrow'><h3>Tank & Water Source</h3>");
+  html += F("<div class='card narrow' id='tank-card'><h3>Tank & Water Source</h3><p class='card-intro'>Control how the controller chooses between tank and mains and where the tank sensor is connected.</p>");
   html += F("<div class='row switchline'><label>Enable Tank</label><input type='checkbox' name='tankEnabled' ");
   html += (tankEnabled ? "checked" : "");
   html += F("><small>Unchecked = ignore tank level and force mains</small></div>");
@@ -4822,15 +5124,20 @@ void handleSetupPage() {
   html += String(tankLowThresholdPct);
   html += F("'><small>Switch to mains if tank drops below this level</small></div>");
 
-  html += F("<div class='row'><label>Tank Sensor GPIO</label><input class='in-xs' type='number' min='1' max='20' name='tankLevelPin' value='");
-  html += String(tankLevelPin); html += F("'><small>ADC pin (ESP32-S3: GPIO1-20)</small></div>");
+  #if defined(CONFIG_IDF_TARGET_ESP32)
+    html += F("<div class='row'><label>Tank Sensor GPIO</label><input class='in-xs' type='number' min='32' max='39' name='tankLevelPin' value='");
+    html += String(tankLevelPin); html += F("'><small>ADC1 pin (ESP32: GPIO32-39)</small></div>");
+  #else
+    html += F("<div class='row'><label>Tank Sensor GPIO</label><input class='in-xs' type='number' min='1' max='20' name='tankLevelPin' value='");
+    html += String(tankLevelPin); html += F("'><small>ADC pin (ESP32-S3: GPIO1-20)</small></div>");
+  #endif
   html += F("<div class='row'><label></label><a class='btn-alt' href='/tank'>Calibrate Tank</a></div>");
   html += F("</div>"); // end tankCard
   html += F("</div>");
 
   // Delays & Pause + thresholds
-  html += F("<div class='card narrow'><h3>Delays & Pause</h3>");
-  html += F("<div class='cols2'>");
+  html += F("<div class='card narrow' id='delays-card'><h3>Delays & Pause</h3><p class='card-intro'>Weather locks and pause controls live here, including cooldown timing and wind thresholds.</p>");
+  html += F("<div class='cols2 panel-split'>");
 
   // Left column: toggles
   html += F("<div>");
@@ -4853,17 +5160,6 @@ void handleSetupPage() {
   }
   html += F("'></div>");
   html += F("</div>");
-  // LCD Brightness moved to SPI (TFT) card
-  html += F("</div>");
-
-    // Physical rain & forecast
-  html += F("<div class='card narrow'><h3>Rain Sources</h3>");
-  html += F("<div class='row switchline'><label>Disable Open-Meteo Rain</label><input type='checkbox' name='rainForecastDisabled' ");
-  html += (!rainDelayFromForecastEnabled ? "checked" : ""); html += F("><small>Checked = ignore Open-Meteo rain</small></div>");
-  html += F("<div class='row switchline'><label>Enable Rain Sensor</label><input type='checkbox' name='rainSensorEnabled' "); html += (rainSensorEnabled?"checked":""); html += F("></div>");
-  html += F("<div class='row'><label>Rain Sensor GPIO</label><input class='in-xs' type='number' min='0' max='39' name='rainSensorPin' value='"); html += String(rainSensorPin); html += F("'><small>e.g. 27</small></div>");
-  html += F("<div class='row switchline'><label>Invert Sensor</label><input type='checkbox' name='rainSensorInvert' "); html += (rainSensorInvert?"checked":""); html += F("><small>Use if board is NO</small></div>");
-  html += F("</div>");
   html += F("</div>");
 
   // Right column: numeric thresholds / timers
@@ -4871,26 +5167,33 @@ void handleSetupPage() {
   html += F("<div class='subhead'>Thresholds & Timers</div><hr class='hr'>");
   html += F("<div class='row'><label>Wind Threshold (m/s)</label><input class='in-sm' type='number' step='0.1' min='0' max='50' name='windSpeedThreshold' value='");
   html += String(windSpeedThreshold,1); html += F("'></div>");
-  html += F("<div class='row'><label>Rain Cooldown (hours)</label><input class='in-sm' type='number' min='0' max='720' name='rainCooldownHours' value='");
+  html += F("<div class='row'><label>After Rain Cooldown (hours)</label><input class='in-sm' type='number' min='0' max='720' name='rainCooldownHours' value='");
   html += String(rainCooldownMin / 60);
-  html += F("'><small>Cooldown period after rain stops</small></div>");
+  html += F("'><small>Delay period after rain stops</small></div>");
   html += F("<div class='row'><label>Rain Threshold 24h (mm)</label><input class='in-sm' type='number' min='0' max='200' name='rainThreshold24h' value='");
   html += String(rainThreshold24h_mm);
-  html += F("'><small>Delay if >= threshold (24h total)</small></div>");
+  html += F("'><small>Cancel watering if > threshold</small></div>");
   html += F("</div>");
 
   html += F("</div>"); // end cols2
   html += F("</div>"); // end Delays card
 
-  // Actions
-  html += F("<div class='card narrow'><h3>Actions</h3>");
-  html += F("<div class='row' style='gap:8px;flex-wrap:wrap'>");
-  html += F("<button class='btn' type='submit'>Save</button>");
-  html += F("<button class='btn-alt' formaction='/' formmethod='GET'>Home</button>");
-  html += F("</div></div>");
+  // Physical rain & forecast
+  html += F("<div class='card narrow'><h3>Rain Sources</h3><p class='card-intro'>Choose whether forecast rain, a physical sensor, or both can stop irrigation.</p>");
+  html += F("<div class='row switchline'><label>Disable Open-Meteo Rain</label><input type='checkbox' name='rainForecastDisabled' ");
+  html += (!rainDelayFromForecastEnabled ? "checked" : ""); html += F("><small>Checked = ignore Open-Meteo rain</small></div>");
+  html += F("<div class='row switchline'><label>Enable Rain Sensor</label><input type='checkbox' name='rainSensorEnabled' "); html += (rainSensorEnabled?"checked":""); html += F("></div>");
+  html += F("<div class='row'><label>Rain Sensor GPIO</label><input class='in-xs' type='number' min='0' max='39' name='rainSensorPin' value='"); html += String(rainSensorPin); html += F("'><small>e.g. 27</small></div>");
+  html += F("<div class='row switchline'><label>Invert Sensor</label><input type='checkbox' name='rainSensorInvert' "); html += (rainSensorInvert?"checked":""); html += F("><small>Use if board is NO</small></div>");
+  html += F("</div>");
 
   // Weather
-  html += F("<div class='card narrow'><h3>Weather (Open-Meteo)</h3>");
+  html += F("<div class='card narrow' id='weather-card'><h3>Weather (Open-Meteo)</h3><p class='card-intro'>Enter the site coordinates and choose the forecast model used for delay logic and dashboard weather.</p>");
+  html += F("<div class='row'><label>Open-Meteo</label><a class='btn-alt' id='setupMeteoLink' href='https://open-meteo.com/en/docs?latitude=");
+  html += (isfinite(meteoLat) ? String(meteoLat, 6) : String("-35.107600"));
+  html += F("&longitude=");
+  html += (isfinite(meteoLon) ? String(meteoLon, 6) : String("138.557300"));
+  html += F("' target='_blank' rel='noopener'>Open forecast page</a><small>Click to open Open-Meteo using the current coordinates.</small></div>");
   String modelSel = cleanMeteoModel(meteoModel);
   bool modelIsKnown = isKnownMeteoModel(modelSel);
   html += F("<div class='row'><label>Location Name</label><input class='in-wide' type='text' name='meteoLocation' value='"); html += meteoLocation; html += F("'><small>Optional label for UI/logs</small></div>");
@@ -4921,7 +5224,7 @@ void handleSetupPage() {
   html += F("</div>");
 
   // Timezone
-  html += F("<div class='card narrow'><h3>Timezone</h3>");
+  html += F("<div class='card narrow' id='timezone-card'><h3>Timezone</h3><p class='card-intro'>Use a POSIX timezone string or a fixed UTC offset so schedules and weather line up with local time.</p>");
 
   // Mode selector - cleaner row, better labels
   html += F("<div class='row switchline'>");
@@ -4974,7 +5277,7 @@ void handleSetupPage() {
   html += F("</div>"); // end Timezone card
 
   // Display / Auto backlight
-  html += F("<div class='card narrow'><h3>Display</h3>");
+  html += F("<div class='card narrow' id='display-card'><h3>Display</h3><p class='card-intro'>Choose the screen type, rotation, and light-sensor backlight behavior.</p>");
   html += F("<div class='row'><label>Display Type</label><select class='in-med' name='displayType'>");
   html += F("<option value='tft'");
   html += (displayUseTft ? " selected" : "");
@@ -4999,9 +5302,15 @@ void handleSetupPage() {
   if (photoRaw < 0) html += F("--");
   else html += String(photoRaw);
   html += F("</div><small>0-4095 ADC</small></div>");
-  html += F("<div class='row'><label>Photo GPIO</label><input class='in-xs' type='number' min='1' max='20' name='photoPin' value='");
-  html += String(photoPin);
-  html += F("'><small>ADC pin (ESP32-S3: GPIO1-20)</small></div>");
+  #if defined(CONFIG_IDF_TARGET_ESP32)
+    html += F("<div class='row'><label>Photo GPIO</label><input class='in-xs' type='number' min='32' max='39' name='photoPin' value='");
+    html += String(photoPin);
+    html += F("'><small>ADC1 pin (ESP32: GPIO32-39)</small></div>");
+  #else
+    html += F("<div class='row'><label>Photo GPIO</label><input class='in-xs' type='number' min='1' max='20' name='photoPin' value='");
+    html += String(photoPin);
+    html += F("'><small>ADC pin (ESP32-S3: GPIO1-20)</small></div>");
+  #endif
   html += F("<div class='row'><label>Dark Threshold</label><input class='in-sm' type='number' min='0' max='4095' name='photoThreshold' value='");
   html += String(photoThreshold);
   html += F("'><small>ADC raw value where screen turns off</small></div>");
@@ -5011,7 +5320,7 @@ void handleSetupPage() {
   html += F("</div>");
 
   // SPI (TFT) config
-  html += F("<div class='card narrow'><h3>SPI (TFT)</h3>");
+  html += F("<div class='card narrow' id='advanced-card'><details class='collapse'><summary>SPI (TFT)</summary><div class='collapse-body'><p class='card-intro'>Advanced screen pin mapping and backlight tools. Change these only if your display wiring differs from the defaults.</p>");
   html += F("<div class='row'><label>TFT Size</label><div class='chip'>");
   html += String(TFT_W); html += "x"; html += String(TFT_H);
   html += F("</div><small>Set in code</small></div>");
@@ -5043,25 +5352,16 @@ void handleSetupPage() {
   html += F("</div></div>");
   html += F("<div class='row helptext'><label></label><small id='tftStatusLine'>Backlight: --</small></div>");
   html += F("<div class='row helptext'><label></label><small>Changing TFT pins requires reboot. Use GPIO 1-48 excluding 19/20 (USB), 0/45/46 (strapping), 9-14 & 35-38 (flash/PSRAM).</small></div>");
-  html += F("</div>");
+  html += F("</div></details></div>");
 
   // I2C config
-  html += F("<div class='card narrow'><h3>I2C (PCF8574)</h3>");
+  html += F("<div class='card narrow'><details class='collapse'><summary>I2C (PCF8574)</summary><div class='collapse-body'><p class='card-intro'>Expander bus pins for the relay hardware. These normally only need changing during custom wiring.</p>");
   html += F("<div class='row'><label>SDA</label><input class='in-xs' type='number' min='0' max='48' name='i2cSda' value='");
   html += String(i2cSdaPin); html += F("'></div>");
   html += F("<div class='row'><label>SCL</label><input class='in-xs' type='number' min='0' max='48' name='i2cScl' value='");
   html += String(i2cSclPin); html += F("'></div>");
   html += F("<div class='row helptext'><label></label><small>Changing I2C pins requires reboot. Avoid strapping pins and SPI flash/PSRAM pins. 4/15 for KC868 </small></div>");
-  html += F("</div>");
-
-      // Actions
-  html += F("<div class='card narrow'><h3>Actions</h3>");
-  html += F("<div class='row' style='gap:8px;flex-wrap:wrap'>");
-  html += F("<button class='btn' type='submit'>Save</button>");
-  html += F("<button class='btn-alt' formaction='/' formmethod='GET'>Home</button>");
-  html += F("<button class='btn-alt' type='button' onclick=\"fetch('/clear_cooldown',{method:'POST'})\">Clear Cooldown</button>");
-  html += F("<button class='btn btn-danger' type='button' onclick=\"if(confirm('Reboot controller now?'))fetch('/reboot',{method:'POST'})\">Reboot</button>");
-  html += F("</div></div>");
+  html += F("</div></details></div>");
 
   // GPIO fallback pins
   html += F("<div class='card narrow'><details class='collapse' ");
@@ -5092,7 +5392,7 @@ void handleSetupPage() {
   html += F("</div></details></div>");
 
   // Manual buttons
-  html += F("<div class='card narrow'><h3>Manual Buttons</h3>");
+  html += F("<div class='card narrow'><details class='collapse'><summary>Manual Buttons</summary><div class='collapse-body'><p class='card-intro'>Optional physical buttons for cycling a zone and toggling it on or off without using the web UI.</p>");
   html += F("<div class='row switchline'><label>Select Button Pin</label><input class='in-xs' type='number' min='-1' max='39' name='manualSelectPin' value='");
   html += String(manualSelectPin);
   html += F("'><small>-1 to disable. Uses INPUT_PULLUP; press = LOW.</small></div>");
@@ -5102,19 +5402,19 @@ void handleSetupPage() {
   html += F("<div class='row'><label>Selected Zone</label><div class='sub'>Z");
   html += String(manualSelectedZone + 1);
   html += F(" (cycles with Select button)</div></div>");
-  html += F("</div>");
+  html += F("</div></details></div>");
 
   
 
   // MQTT
-  html += F("<div class='card narrow'><h3>MQTT (Home Assistant)</h3>");
+  html += F("<div class='card narrow' id='mqtt-card'><details class='collapse'><summary>MQTT (Home Assistant)</summary><div class='collapse-body'><p class='card-intro'>Publish controller status and accept simple commands from Home Assistant or another MQTT client.</p>");
   html += F("<div class='row switchline'><label>Enable MQTT</label><input type='checkbox' name='mqttEnabled' "); html += (mqttEnabled ? "checked" : ""); html += F("></div>");
   html += F("<div class='row'><label>Broker Host</label><input class='in-wide' type='text' name='mqttBroker' value='"); html += mqttBroker; html += F("'></div>");
   html += F("<div class='row'><label>Port</label><input class='in-xs' type='number' name='mqttPort' value='"); html += String(mqttPort); html += F("'></div>");
   html += F("<div class='row'><label>User</label><input class='in-med' type='text' name='mqttUser' value='"); html += mqttUser; html += F("'></div>");
   html += F("<div class='row'><label>Password</label><input class='in-med' type='text' name='mqttPass' value='"); html += mqttPass; html += F("'></div>");
   html += F("<div class='row'><label>Base Topic</label><input class='in-med' type='text' name='mqttBase' value='"); html += mqttBase; html += F("'><small>e.g. espirrigation</small></div>");
-  html += F("</div>");
+  html += F("</div></details></div>");
 
   html += F("</form>");
 
@@ -5434,7 +5734,11 @@ void handleTankCalibration() {
   html += F("<p>Raw: <b>"); html += String(raw); html += F("</b></p>");
   html += F("<p>Calibrated range: <b>"); html += String(tankEmptyRaw); html += F("</b> to <b>"); html += String(tankFullRaw); html += F("</b></p>");
   if (!isValidAdcPin(tankLevelPin)) {
-    html += F("<p style='color:#f59e0b'>Invalid ADC pin. Set tank sensor GPIO to 1-20 (ESP32-S3) in Setup.</p>");
+    #if defined(CONFIG_IDF_TARGET_ESP32)
+      html += F("<p style='color:#f59e0b'>Invalid ADC pin. Set tank sensor GPIO to 32-39 (ESP32) in Setup.</p>");
+    #else
+      html += F("<p style='color:#f59e0b'>Invalid ADC pin. Set tank sensor GPIO to 1-20 (ESP32-S3) in Setup.</p>");
+    #endif
   } else {
     html += F("<p>Level: <b>"); html += String(pct); html += F("%</b></p>");
   }
@@ -6103,6 +6407,15 @@ void handleConfigure() {
     // Reset derived metrics so /status & UI show clean values until next fetch
     rain1hNow           = 0.0f;
     rain3hNow           = 0.0f;
+    curTempC            = NAN;
+    curFeelsC           = NAN;
+    curPressureHpa      = NAN;
+    curWindMs           = NAN;
+    curGustMs           = NAN;
+    curHumidityPct      = -1;
+    curWeatherCode      = -1;
+    curUtcOffsetSec     = 0;
+    curWeatherValid     = false;
     rainNext12h_mm      = 0.0f;
     rainNext24h_mm      = 0.0f;
     popNext12h_pct      = -1;
