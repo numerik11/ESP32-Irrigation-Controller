@@ -4876,7 +4876,7 @@ void handleSetupPage() {
   String lonStr = isfinite(meteoLon) ? String(meteoLon, 6) : String("");
   String setupWeatherLabel = meteoLocation.length() ? meteoLocation : String("Open-Meteo ready");
   String setupDisplayLabel = displayUseTft ? String("TFT display") : String("OLED display");
-  String setupTankLabel = tankEnabled ? String("Tank enabled") : String("Tank disabled");
+  String setupTankLabel = tankEnabled ? String("Tank Enabled") : String("City Water");
   String setupTzLabel = (tzMode == TZ_FIXED) ? String("Fixed offset") : String("POSIX timezone");
 
   html += F("<!DOCTYPE html><html><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'>");
@@ -5103,7 +5103,7 @@ void handleSetupPage() {
   // Auto
   html += F("<label><input type='radio' name='waterMode' value='auto' ");
   if (!justUseTank && !justUseMains) html += F("checked");
-  html += F("> Auto (Tank + Mains)</label>");
+  html += F("> Auto (Tank + City Water)</label>");
 
   // Only Tank
   html += F("<label><input type='radio' name='waterMode' value='tank' ");
@@ -5113,22 +5113,22 @@ void handleSetupPage() {
   // Only Mains
   html += F("<label><input type='radio' name='waterMode' value='mains' ");
   if (justUseMains) html += F("checked");
-  html += F("> Only Mains</label>");
+  html += F("> Only City Water</label>");
 
   html += F("<small>");
-  html += "Tank/mains switching works with any zone count";
+  html += "Tank/City Water switching (USE BACKFLOW PREVENTION!)";
   html += F("</small></div>");
 
   html += F("<div class='row'><label>Tank Low Threshold (%)</label>"
             "<input class='in-xs' type='number' min='0' max='100' name='tankThresh' value='");
   html += String(tankLowThresholdPct);
-  html += F("'><small>Switch to mains if tank drops below this level</small></div>");
+  html += F("'><small>Switch to city water if tank drops below this level</small></div>");
 
   #if defined(CONFIG_IDF_TARGET_ESP32)
-    html += F("<div class='row'><label>Tank Sensor GPIO</label><input class='in-xs' type='number' min='32' max='39' name='tankLevelPin' value='");
+    html += F("<div class='row'><label>Tank Level Sensor GPIO</label><input class='in-xs' type='number' min='32' max='39' name='tankLevelPin' value='");
     html += String(tankLevelPin); html += F("'><small>ADC1 pin (ESP32: GPIO32-39)</small></div>");
   #else
-    html += F("<div class='row'><label>Tank Sensor GPIO</label><input class='in-xs' type='number' min='1' max='20' name='tankLevelPin' value='");
+    html += F("<div class='row'><label>Tank Level Sensor GPIO</label><input class='in-xs' type='number' min='1' max='20' name='tankLevelPin' value='");
     html += String(tankLevelPin); html += F("'><small>ADC pin (ESP32-S3: GPIO1-20)</small></div>");
   #endif
   html += F("<div class='row'><label></label><a class='btn-alt' href='/tank'>Calibrate Tank</a></div>");
