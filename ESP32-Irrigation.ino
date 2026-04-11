@@ -5387,10 +5387,10 @@ void handleSetupPage() {
     html += F("' value='"); html += String(zonePins[i]); html += F("'></div>");
   }
   html += F("<div class='row'><label></label><small>Use -1 to leave a zone unassigned. Zones above the 6 PCF channels use GPIO pins when set.</small></div>");
-  html += F("<div class='row'><label>Main Pin</label><input class='in-xs' type='number' min='0' max='39' name='mainsPin' value='");
-  html += String(mainsPin); html += F("'><small>GPIO relay for mains (used when GPIO mode or >4 zones)</small></div>");
+  html += F("<div class='row'><label>City Water Relay Pin</label><input class='in-xs' type='number' min='0' max='39' name='mainsPin' value='");
+  html += String(mainsPin); html += F("'><small>Relay for city water in (use check/backflow prevention device)</small></div>");
   html += F("<div class='row'><label>Tank Relay Pin</label><input class='in-xs' type='number' min='0' max='39' name='tankPin' value='");
-  html += String(tankPin); html += F("'><small>GPIO relay for tank (used when GPIO mode or >4 zones)</small></div>");
+  html += String(tankPin); html += F("'><small>Pump on low pressure (Relay on) and off at a higher pressure (Relay off).</small></div>");
 
   // NEW: GPIO active polarity
   html += F("<div class='row switchline'><label>GPIO Active Low</label>");
@@ -5701,6 +5701,8 @@ void handleLogPage() {
   html += F(".event-chip{display:inline-flex;align-items:center;justify-content:center;min-width:88px;padding:6px 10px;border-radius:999px;border:1px solid var(--chip-brd);font-size:.78rem;font-weight:800;letter-spacing:.08em;text-transform:uppercase}");
   html += F(".event-chip.start{background:rgba(34,197,94,.12);border-color:rgba(34,197,94,.3);color:var(--ok)}");
   html += F(".event-chip.stopped{background:rgba(217,72,95,.12);border-color:rgba(217,72,95,.32);color:var(--bad)}");
+  html += F(".event-chip.cancelled{background:rgba(245,158,11,.12);border-color:rgba(245,158,11,.34);color:var(--warn)}");
+  html += F(".event-chip.queued{background:rgba(70,198,163,.12);border-color:rgba(70,198,163,.32);color:var(--primary)}");
   html += F(".muted{color:var(--muted)}");
   html += F(".empty-state{padding:28px 22px;text-align:center;color:var(--muted)}");
   html += F(".ripple{position:absolute;border-radius:999px;transform:scale(0);background:rgba(255,255,255,.35);animation:ripple .5s ease-out;pointer-events:none}");
@@ -5720,6 +5722,7 @@ void handleLogPage() {
   int eventCount = 0;
   int startCount = 0;
   int stopCount = 0;
+  int weatherDelayCount = 0;
   String latestTs = "-";
 
   String eventRows;
@@ -5735,8 +5738,12 @@ void handleLogPage() {
     String ts   = line.substring(0,i1);
     String zone = line.substring(i1+1,i2);
     String ev   = line.substring(i2+1,i3);
-    if (ev != "START" && ev != "STOPPED") continue;
     String src  = line.substring(i3+1,i4);
+    const bool showEvent =
+      (ev == "START" || ev == "STOPPED" ||
+       (ev == "CANCELLED" && src == "RAIN") ||
+       (ev == "QUEUED" && src == "WIND"));
+    if (!showEvent) continue;
     String rd   = line.substring(i4+1,i5);
 
     String temp =(i6>i5)?line.substring(i5+1,i6):"";
@@ -5753,13 +5760,17 @@ void handleLogPage() {
     latestTs = ts;
     if (ev == "START") startCount++;
     else if (ev == "STOPPED") stopCount++;
+    else weatherDelayCount++;
 
     String row;
     row.reserve(320);
     row += F("<tr><td>"); row += ts;
     row += F("</td><td>"); row += zone;
     row += F("</td><td><span class='event-chip ");
-    row += (ev == "START") ? F("start'>Start") : F("stopped'>Stopped");
+    if (ev == "START") row += F("start'>Start");
+    else if (ev == "STOPPED") row += F("stopped'>Stopped");
+    else if (ev == "CANCELLED") row += F("cancelled'>Rain Delay");
+    else row += F("queued'>Wind Delay");
     row += F("</span>");
     row += F("</td><td>"); row += src;
     row += F("</td><td>"); row += rd;
@@ -5773,7 +5784,7 @@ void handleLogPage() {
   html += String(eventCount);
   html += F(" filtered events</span><button id='themeBtn' class='btn-ghost' title='Toggle theme'>Theme</button></div></div></nav>");
   html += F("<div class='wrap'>");
-  html += F("<section class='glass hero-shell'><div class='hero-grid'><div class='hero-copy'><div class='hero-kicker'>System History</div><h1 class='hero-title'>Irrigation event log</h1><p class='hero-text'>Review the latest START and STOPPED actions, export the CSV, or clear the log without leaving the dashboard visual style.</p><div class='hero-actions'><a class='btn' href='/'>Home</a><a class='btn btn-secondary' href='/setup'>Setup</a><a class='btn btn-secondary' href='/download/events.csv'>Download CSV</a></div></div>");
+  html += F("<section class='glass hero-shell'><div class='hero-grid'><div class='hero-copy'><div class='hero-kicker'>System History</div><h1 class='hero-title'>Irrigation event log</h1><p class='hero-text'>Review run starts, stops, and scheduled weather delays when rain or wind prevents a zone from starting on time.</p><div class='hero-actions'><a class='btn' href='/'>Home</a><a class='btn btn-secondary' href='/setup'>Setup</a><a class='btn btn-secondary' href='/download/events.csv'>Download CSV</a></div></div>");
   html += F("<div class='hero-mini-grid'><div class='hero-mini hero-mini-strong'><div class='hero-mini-label'>Latest Event</div><div class='hero-mini-value'>");
   html += latestTs;
   html += F("</div><div class='hero-mini-sub'>Most recent matching log timestamp</div></div>");
@@ -5782,13 +5793,15 @@ void handleLogPage() {
   html += F("</div><div class='hero-mini-sub'>Zone starts recorded in this filtered view</div></div>");
   html += F("<div class='hero-mini'><div class='hero-mini-label'>Stopped Events</div><div class='hero-mini-value'>");
   html += String(stopCount);
-  html += F("</div><div class='hero-mini-sub'>Stops and manual interruptions</div></div>");
-  html += F("<div class='hero-mini'><div class='hero-mini-label'>Actions</div><div class='hero-mini-sub'>Maintenance controls stay available here when you need them.</div></div></div></div></section>");
-  html += F("<div class='section-head'><div><div class='section-kicker'>Audit Trail</div><h2>Recent events</h2></div><p class='section-note'>The table keeps newest entries at the top and only shows START or STOPPED records for faster scanning.</p></div>");
+  html += F("</div><div class='hero-mini-sub'>Completed or interrupted watering runs</div></div>");
+  html += F("<div class='hero-mini'><div class='hero-mini-label'>Weather Delays</div><div class='hero-mini-value'>");
+  html += String(weatherDelayCount);
+  html += F("</div><div class='hero-mini-sub'>Scheduled starts blocked by rain or queued by wind</div></div></div></div></section>");
+  html += F("<div class='section-head'><div><div class='section-kicker'>Audit Trail</div><h2>Recent events</h2></div><p class='section-note'>Newest entries stay at the top, including scheduled rain and wind delay events alongside run starts and stops.</p></div>");
   html += F("<section class='card'><div class='toolbar'><form method='POST' action='/clearevents'><button class='btn btn-danger' type='submit'>Clear Events</button></form><form method='POST' action='/stopall'><button class='btn btn-warn' type='submit'>Stop All</button></form></div><div class='table-wrap'><table><thead><tr>");
   html += F("<th>Time</th><th>Zone</th><th>Event</th><th>Source</th><th>Rain Delay</th><th>Details</th></tr></thead><tbody>");
   if (eventCount == 0) {
-    html += F("<tr><td colspan='6' class='empty-state'>No START or STOPPED entries are available in the current event log.</td></tr>");
+    html += F("<tr><td colspan='6' class='empty-state'>No run or weather-delay entries are available in the current event log.</td></tr>");
   } else {
     html += eventRows;
   }
