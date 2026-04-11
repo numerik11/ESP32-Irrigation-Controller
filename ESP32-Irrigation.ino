@@ -253,6 +253,7 @@ bool runZonesConcurrent = false;
 bool enableStartTime2[MAX_ZONES] = {false};
 bool days[MAX_ZONES][7] = {{false}};
 bool zoneActive[MAX_ZONES] = {false};
+bool zoneStartedManual[MAX_ZONES] = {false};
 bool pendingStart[MAX_ZONES] = {false};
 uint8_t lastStartSlot[MAX_ZONES] = {1}; // 1=primary, 2=secondary
 
@@ -3736,6 +3737,7 @@ void turnOnZone(int z) {
 
   zoneStartMs[z] = millis();
   zoneActive[z] = true;
+  zoneStartedManual[z] = false;
   unsigned long total = durationForSlot(z, lastStartSlot[z]);
   if (total == 0) total = durationForSlot(z, 1);
   zoneRunTotalSec[z] = total;
@@ -3785,7 +3787,9 @@ void turnOffZone(int z) {
   bool wasDelayed = rainActive || windActive || isPausedNow() ||
                     !systemMasterEnabled ||
                     (rainCooldownUntilEpoch > time(nullptr));
-  logEvent(z, "STOPPED", src, wasDelayed);
+  if (!zoneStartedManual[z]) {
+    logEvent(z, "STOPPED", src, wasDelayed);
+  }
 
   const bool usePcf = useExpanderForZone(z);
 
@@ -3798,6 +3802,7 @@ void turnOffZone(int z) {
   }
 
   zoneActive[z] = false;
+  zoneStartedManual[z] = false;
   zoneRunTotalSec[z] = 0;
   zoneRunTotalSec[z] = 0;
 
@@ -3862,6 +3867,7 @@ void turnOnValveManual(int z) {
 
   zoneStartMs[z] = millis();
   zoneActive[z] = true;
+  zoneStartedManual[z] = true;
   lastStartSlot[z] = 1;
   zoneRunTotalSec[z] = durationForSlot(z,1);
   const char* src = "None";
@@ -3910,6 +3916,7 @@ void turnOffValveManual(int z) {
   }
 
   zoneActive[z] = false;
+  zoneStartedManual[z] = false;
   zoneRunTotalSec[z] = 0;
 
   bool anyStillOn = false;
