@@ -253,7 +253,6 @@ bool runZonesConcurrent = false;
 bool enableStartTime2[MAX_ZONES] = {false};
 bool days[MAX_ZONES][7] = {{false}};
 bool zoneActive[MAX_ZONES] = {false};
-bool zoneManualHold[MAX_ZONES] = {false}; // true when started manually; ignore duration timeout
 bool pendingStart[MAX_ZONES] = {false};
 uint8_t lastStartSlot[MAX_ZONES] = {1}; // 1=primary, 2=secondary
 
@@ -3698,7 +3697,6 @@ bool shouldStartZone(int zone) {
 }
 
 bool hasDurationCompleted(int zone) {
-  if (zone >= 0 && zone < (int)MAX_ZONES && zoneManualHold[zone]) return false;
   unsigned long elapsed=(millis()-zoneStartMs[zone])/1000;
   unsigned long total = zoneRunTotalSec[zone];
   if (total == 0) total = durationForSlot(zone, 1);
@@ -3738,7 +3736,6 @@ void turnOnZone(int z) {
 
   zoneStartMs[z] = millis();
   zoneActive[z] = true;
-  zoneManualHold[z] = false;
   unsigned long total = durationForSlot(z, lastStartSlot[z]);
   if (total == 0) total = durationForSlot(z, 1);
   zoneRunTotalSec[z] = total;
@@ -3801,7 +3798,6 @@ void turnOffZone(int z) {
   }
 
   zoneActive[z] = false;
-  zoneManualHold[z] = false;
   zoneRunTotalSec[z] = 0;
   zoneRunTotalSec[z] = 0;
 
@@ -3866,7 +3862,6 @@ void turnOnValveManual(int z) {
 
   zoneStartMs[z] = millis();
   zoneActive[z] = true;
-  zoneManualHold[z] = true;
   lastStartSlot[z] = 1;
   zoneRunTotalSec[z] = durationForSlot(z,1);
   const char* src = "None";
@@ -3915,7 +3910,7 @@ void turnOffValveManual(int z) {
   }
 
   zoneActive[z] = false;
-  zoneManualHold[z] = false;
+  zoneRunTotalSec[z] = 0;
 
   bool anyStillOn = false;
   for (int i = 0; i < (int)zonesCount; i++) {
