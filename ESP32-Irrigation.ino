@@ -4270,10 +4270,17 @@ void handleRoot() {
   html += F(".sched-card input[type=checkbox]:focus-visible{outline:none;border-color:#ffffff;box-shadow:0 0 0 3px rgba(31,138,112,.18)}");
   html += F(".sched-card input[type=checkbox]:active{transform:translateY(1px)}");
   html += F(".in{border:1px solid var(--line);border-radius:10px;padding:8px 10px;background:transparent;color:var(--ink);font-size:.9rem}");
-  html += F(".days-grid{display:flex;flex-wrap:wrap;gap:8px;justify-content:center}");
-  html += F(".day{display:inline-flex;gap:6px;align-items:center;border:1px solid var(--chip-brd);border-radius:999px;padding:7px 12px;font-size:.85rem;background:transparent}");
-  html += F(".day input{margin:0}");
-  html += F("@media(max-width:720px){.nav .in{flex-direction:column;align-items:flex-start}.zones{grid-template-columns:1fr}.sched-grid{grid-template-columns:1fr}.rowx{grid-template-columns:1fr}.rowx label{margin-bottom:4px}}");
+  html += F(".days-grid{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:8px;width:100%}");
+  html += F(".day{position:relative;display:block;min-width:0}");
+  html += F(".day input{position:absolute;inset:0;width:100%;height:100%;margin:0;opacity:0;cursor:pointer;z-index:2}");
+  html += F(".day span{display:flex;align-items:center;justify-content:center;min-height:44px;padding:10px 8px;border-radius:14px;border:1px solid var(--chip-brd);");
+  html += F("background:linear-gradient(180deg,rgba(255,255,255,.06),rgba(255,255,255,.02));font-size:.78rem;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);transition:border-color .12s ease,background .12s ease,box-shadow .12s ease,transform .06s ease}");
+  html += F(".day input:checked + span{border-color:rgba(31,138,112,.46);background:linear-gradient(180deg,rgba(31,138,112,.18),rgba(31,138,112,.05));color:var(--ink);box-shadow:0 10px 20px rgba(20,91,99,.12)}");
+  html += F(".day input:focus-visible + span{outline:2px solid var(--primary);outline-offset:2px}");
+  html += F(".day input:active + span{transform:translateY(1px)}");
+  html += F("@media(max-width:900px){.days-grid{grid-template-columns:repeat(4,minmax(0,1fr))}}");
+  html += F("@media(max-width:720px){.nav .in{flex-direction:column;align-items:flex-start}.zones{grid-template-columns:1fr}.sched-grid{grid-template-columns:1fr}.rowx{grid-template-columns:1fr}.rowx label{margin-bottom:4px}.days-grid{grid-template-columns:repeat(4,minmax(0,1fr))}.day span{min-height:42px}}");
+  html += F("@media(max-width:460px){.days-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}");
   html += F(".collapse{cursor:pointer;user-select:none;display:flex;align-items:center;justify-content:space-between;font-size:1.05rem}");
   html += F(".collapse .arr{font-size:1rem;opacity:.8;margin-left:6px}");
   html += F(".sched-title{display:flex;flex-direction:column;gap:2px}");
@@ -4313,6 +4320,10 @@ void handleRoot() {
   html += F("html[data-theme='dark'] .metric-tile{background:#102327}");
   html += F("html[data-theme='dark'] .sched-top{background:transparent}");
   html += F("html[data-theme='dark'] .action-card{background:var(--card)}");
+  html += F("html[data-theme='light'] .sched-card input[type=checkbox]{border-color:#8aa59c;background:rgba(255,255,255,.78);box-shadow:inset 0 1px 0 rgba(255,255,255,.75)}");
+  html += F("html[data-theme='light'] .sched-card input[type=checkbox]::before{border-right-color:#17666b;border-bottom-color:#17666b}");
+  html += F("html[data-theme='light'] .sched-card input[type=checkbox]:checked{border-color:#1f8a70;background:#ffffff;box-shadow:0 0 0 3px rgba(31,138,112,.12)}");
+  html += F("html[data-theme='light'] .sched-card input[type=checkbox]:focus-visible{border-color:#1f8a70;box-shadow:0 0 0 3px rgba(31,138,112,.14)}");
   html += F(".summary-grid .weather-card,.summary-grid .next-card{grid-column:span 2}");
   html += F(".action-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:var(--gap);margin:12px auto 24px}");
   html += F(".action-card{min-height:180px;display:flex;flex-direction:column;justify-content:space-between;background:linear-gradient(180deg,var(--card),rgba(255,255,255,.32))}");
@@ -4519,7 +4530,7 @@ void handleRoot() {
     html += F("<div class='rowx'><label>Days</label><div class='days-grid'>");
     for (int d=0; d<7; ++d) {
       html += F("<label class='day'><input type='checkbox' name='day"); html += String(z); html += "_"; html += String(d);
-      html += F("' "); html += (days[z][d] ? "checked" : ""); html += F("> "); html += DLBL[d]; html += F("</label>");
+      html += F("' "); html += (days[z][d] ? "checked" : ""); html += F("><span>"); html += DLBL[d]; html += F("</span></label>");
     }
     html += F("</div></div>");
 
@@ -5006,6 +5017,7 @@ void handleSetupPage() {
   html += F("html[data-theme='light'] input[type=checkbox]:not(#themeToggle)::before{border-right-color:#17666b;border-bottom-color:#17666b}");
   html += F("html[data-theme='light'] input[type=radio]::before{background:#17666b}");
   html += F("html[data-theme='light'] input[type=checkbox]:not(#themeToggle):checked,html[data-theme='light'] input[type=radio]:checked{border-color:#1f8a70;background:#ffffff;box-shadow:0 0 0 3px rgba(31,138,112,.12)}");
+  html += F("html[data-theme='light'] input[type=checkbox]:not(#themeToggle):checked::before{border-right-width:2.4px;border-bottom-width:2.4px}");
   html += F("html[data-theme='light'] input[type=checkbox]:not(#themeToggle):focus-visible,html[data-theme='light'] input[type=radio]:focus-visible{border-color:#1f8a70;box-shadow:0 0 0 3px rgba(31,138,112,.14)}");
   html += F("html[data-theme='light'] .btn-alt{background:#e8efeb;color:#213433;border-color:#c9d9d0}");
   html += F("html[data-theme='light'] .btn{background:linear-gradient(180deg,#238b74,#17666b)}");
@@ -5612,48 +5624,104 @@ void handleLogPage() {
     return;
   }
 
-  String html; html.reserve(9000);
-  html += F("<!DOCTYPE html><html><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'>");
-  html += F("<title>Event Log</title>");
+  String html; html.reserve(18000);
+  html += F("<!doctype html><html lang='en' data-theme='light'><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'>");
+  html += F("<meta name='theme-color' content='#145b63'><meta name='color-scheme' content='light dark'>");
+  html += F("<title>ESP32 Irrigation Events</title>");
   html += F("<style>");
   html += F("@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@500;700&family=Sora:wght@400;600;700;800&display=swap');");
-  html += F("body{font-family:'Sora','Avenir Next','Trebuchet MS',sans-serif;background:radial-gradient(900px 500px at 10% -10%,rgba(43,123,228,.2),transparent),#0f1522;color:#e8eef6;margin:0;font-size:15px}");
-  html += F("header{background:linear-gradient(145deg,#163057,#13213a);border-bottom:1px solid #264067;color:#fff;text-align:center;padding:20px 0 14px;font-size:1.25em;font-weight:800;letter-spacing:.8px;text-transform:uppercase}");
-  html += F(".wrap{max-width:1120px;margin:18px auto;padding:0 12px}");
-  html += F(".toolbar{margin:12px 0;display:flex;flex-wrap:wrap;gap:10px}");
-  html += F(".btn{padding:10px 14px;background:linear-gradient(180deg,#2b7be4,#1f62c8);border-radius:12px;text-decoration:none;color:#fff;font-size:.95rem;border:1px solid rgba(0,0,0,.15);cursor:pointer;display:inline-block;font-weight:700}");
-  html += F(".btn{transition:transform .06s ease,box-shadow .06s ease,filter .06s ease}");
-  html += F(".btn:active{transform:translateY(1px);box-shadow:inset 0 2px 6px rgba(0,0,0,.25)}");
-  html += F(".btn{position:relative;overflow:hidden}");
+  html += F(":root[data-theme='light']{--bg:#edf3ef;--bg2:#f8fbf8;--glass:rgba(255,255,255,.58);--glass-brd:rgba(122,149,140,.32);--panel:#ffffff;--line:#d3dfd9;");
+  html += F("--card:#ffffff;--ink:#14232b;--muted:#5f736f;--primary:#1f8a70;--primary-2:#145b63;--ok:#2f9e44;--warn:#c97a1a;--bad:#d9485f;");
+  html += F("--chip:#edf7f2;--chip-brd:#c9ddd4;--ring:#dcebe5;--ring2:#b4d4cb;--shadow:0 18px 40px rgba(20,47,45,.14)}");
+  html += F(":root[data-theme='dark']{--bg:#081315;--bg2:#0d1d21;--glass:rgba(12,28,31,.62);--glass-brd:rgba(84,123,118,.3);--panel:#0f1e22;--line:#214147;");
+  html += F("--card:#0f1e22;--ink:#e6f0ec;--muted:#9ab4ad;--primary:#46c6a3;--primary-2:#1f8a86;--ok:#52c266;--warn:#f0ae4d;--bad:#ff6b7d;");
+  html += F("--chip:#10272b;--chip-brd:#24444a;--ring:#123036;--ring2:#1d5152;--shadow:0 18px 40px rgba(0,0,0,.42)}");
+  html += F("*{box-sizing:border-box}html,body{margin:0;padding:0}");
+  html += F("html{scroll-behavior:smooth}");
+  html += F("body{background:radial-gradient(1200px 600px at 10% -5%,var(--bg2),transparent),radial-gradient(1200px 700px at 100% 0%,var(--ring),transparent),radial-gradient(900px 500px at -10% 80%,var(--ring2),transparent),var(--bg);");
+  html += F("color:var(--ink);font-family:'Trebuchet MS','Candara','Segoe UI',sans-serif;line-height:1.35;-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}");
+  html += F("a{text-decoration:none;color:inherit}");
+  html += F(".wrap{max-width:1280px;margin:20px auto;padding:0 16px}");
+  html += F(".nav{position:sticky;top:0;z-index:10;padding:10px 12px 12px;background:linear-gradient(180deg,rgba(0,0,0,.25),transparent),var(--primary-2);box-shadow:0 16px 36px rgba(0,0,0,.25)}");
+  html += F(".nav .in{max-width:1280px;margin:0 auto;display:flex;align-items:center;justify-content:space-between;gap:12px;color:#fff;flex-wrap:wrap}");
+  html += F(".brand{display:flex;align-items:center;gap:8px;font-weight:800;letter-spacing:.2px;font-size:1.12rem}");
+  html += F(".brand-copy{display:flex;flex-direction:column;gap:2px}");
+  html += F(".brand-title{text-transform:uppercase;letter-spacing:.9px;font-size:1rem;line-height:1}");
+  html += F(".brand-sub{font-size:.74rem;font-weight:650;color:rgba(255,255,255,.8);letter-spacing:.08em;text-transform:uppercase}");
+  html += F(".dot{width:12px;height:12px;border-radius:999px;background:#84ffb5;box-shadow:0 0 14px #84ffb5}");
+  html += F(".nav .meta{display:flex;gap:8px;flex-wrap:wrap;align-items:center;font-weight:650;font-size:.88rem}");
+  html += F(".pill{display:inline-flex;align-items:center;gap:6px;background:rgba(255,255,255,.16);border:1px solid rgba(255,255,255,.28);border-radius:999px;padding:7px 12px}");
+  html += F(".btn-ghost{background:rgba(255,255,255,.14);border:1px solid rgba(255,255,255,.35);color:#fff;border-radius:10px;padding:8px 14px;font-weight:700;cursor:pointer;font-size:.92rem}");
+  html += F(".glass{background:var(--glass);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);border:1px solid var(--glass-brd);border-radius:20px;box-shadow:var(--shadow)}");
+  html += F(".section{padding:18px}");
+  html += F(".hero-shell{position:relative;overflow:hidden;padding:clamp(18px,3vw,30px);margin:18px 0}");
+  html += F(".hero-shell::before,.hero-shell::after{content:'';position:absolute;border-radius:999px;pointer-events:none;filter:blur(8px)}");
+  html += F(".hero-shell::before{width:220px;height:220px;right:-50px;top:-40px;background:radial-gradient(circle,rgba(233,173,73,.2),transparent 68%)}");
+  html += F(".hero-shell::after{width:260px;height:260px;left:-90px;bottom:-100px;background:radial-gradient(circle,rgba(70,198,163,.2),transparent 68%)}");
+  html += F(".hero-grid{display:grid;grid-template-columns:minmax(0,1.15fr) minmax(320px,.85fr);gap:18px;align-items:stretch}");
+  html += F(".hero-copy,.hero-mini-grid{position:relative;z-index:1}");
+  html += F(".hero-copy{display:flex;flex-direction:column;justify-content:center;gap:14px}");
+  html += F(".hero-kicker{text-transform:uppercase;letter-spacing:.22em;font-size:.72rem;font-weight:800;color:var(--primary)}");
+  html += F(".hero-title{margin:0;font-size:clamp(1.95rem,4vw,3rem);line-height:1.02;max-width:11ch}");
+  html += F(".hero-text{margin:0;max-width:60ch;color:var(--muted);font-size:1rem}");
+  html += F(".hero-actions,.toolbar{display:flex;gap:10px;flex-wrap:wrap}");
+  html += F(".hero-mini-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}");
+  html += F(".hero-mini{min-height:132px;padding:16px;border-radius:18px;border:1px solid var(--glass-brd);background:linear-gradient(180deg,rgba(255,255,255,.58),rgba(255,255,255,.14));box-shadow:0 14px 30px rgba(19,33,68,.12);display:flex;flex-direction:column;justify-content:space-between;backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px)}");
+  html += F(".hero-mini.hero-mini-strong{background:linear-gradient(135deg,rgba(31,138,112,.2),rgba(82,194,102,.1))}");
+  html += F(".hero-mini-label{text-transform:uppercase;letter-spacing:.16em;font-size:.74rem;font-weight:800;color:var(--muted)}");
+  html += F(".hero-mini-value{font-size:1.72rem;font-weight:800;line-height:1.02;font-variant-numeric:tabular-nums}");
+  html += F(".hero-mini-sub{color:var(--muted);font-size:.92rem}");
+  html += F(".section-head{display:flex;align-items:flex-end;justify-content:space-between;gap:14px;max-width:1280px;margin:0 auto 14px;padding:0 2px;flex-wrap:wrap}");
+  html += F(".section-kicker{text-transform:uppercase;letter-spacing:.18em;font-size:.72rem;font-weight:800;color:var(--primary)}");
+  html += F(".section-head h2{margin:4px 0 0;font-size:1.35rem;line-height:1.08}");
+  html += F(".section-note{margin:0;max-width:42ch;color:var(--muted);font-size:.92rem}");
+  html += F(".card{background:var(--card);border:1px solid var(--glass-brd);border-radius:20px;box-shadow:var(--shadow);padding:18px;transition:transform .12s ease,box-shadow .12s ease}");
+  html += F(".card:hover{transform:translateY(-2px);box-shadow:0 16px 34px rgba(0,0,0,.18)}");
+  html += F(".btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;background:linear-gradient(180deg,var(--primary),var(--primary-2));color:#fff;border:1px solid rgba(0,0,0,.08);border-radius:13px;padding:11px 16px;font-weight:800;cursor:pointer;box-shadow:0 8px 20px rgba(0,0,0,.22);font-size:1rem}");
+  html += F(".btn-secondary{background:transparent;color:var(--ink);border:1px solid var(--line);box-shadow:none}");
+  html += F(".btn-danger{background:linear-gradient(180deg,#ef4444,#b91c1c);border-color:rgba(185,28,28,.6)}");
+  html += F(".btn-warn{background:linear-gradient(180deg,#d97706,#92400e);border-color:rgba(146,64,14,.55)}");
+  html += F(".btn,.btn-ghost,.pill{transition:transform .06s ease,box-shadow .06s ease,filter .06s ease;touch-action:manipulation;position:relative;overflow:hidden}");
+  html += F(".btn:hover{filter:brightness(1.05)}");
+  html += F(".btn:active:not(:disabled),.btn-ghost:active,.pill:active{transform:translateY(1px);box-shadow:inset 0 2px 6px rgba(0,0,0,.25)}");
+  html += F(".btn:focus-visible,.btn-ghost:focus-visible,.pill:focus-visible{outline:2px solid var(--primary);outline-offset:2px}");
+  html += F(".toolbar{margin:14px 0 0}");
+  html += F(".toolbar form{display:inline-flex;margin:0}");
+  html += F(".table-wrap{overflow:auto;border-radius:18px;border:1px solid var(--glass-brd);background:linear-gradient(180deg,rgba(255,255,255,.18),rgba(255,255,255,.05));box-shadow:var(--shadow)}");
+  html += F("table{width:100%;border-collapse:separate;border-spacing:0;min-width:820px}");
+  html += F("th,td{padding:12px 14px;border-bottom:1px solid var(--line);font-size:.94rem;text-align:left;white-space:nowrap;vertical-align:top}");
+  html += F("th{position:sticky;top:0;z-index:1;background:rgba(20,91,99,.92);color:#fff;text-transform:uppercase;letter-spacing:.08em;font-size:.75rem}");
+  html += F("tbody tr{background:rgba(255,255,255,.04)}");
+  html += F("tbody tr:nth-child(even){background:rgba(255,255,255,.02)}");
+  html += F("tbody tr:hover{background:rgba(31,138,112,.09)}");
+  html += F("td:first-child{font-family:'JetBrains Mono','Consolas',monospace;font-size:.82rem}");
+  html += F("td:last-child{white-space:normal;min-width:260px;color:var(--muted)}");
+  html += F(".event-chip{display:inline-flex;align-items:center;justify-content:center;min-width:88px;padding:6px 10px;border-radius:999px;border:1px solid var(--chip-brd);font-size:.78rem;font-weight:800;letter-spacing:.08em;text-transform:uppercase}");
+  html += F(".event-chip.start{background:rgba(34,197,94,.12);border-color:rgba(34,197,94,.3);color:var(--ok)}");
+  html += F(".event-chip.stopped{background:rgba(217,72,95,.12);border-color:rgba(217,72,95,.32);color:var(--bad)}");
+  html += F(".muted{color:var(--muted)}");
+  html += F(".empty-state{padding:28px 22px;text-align:center;color:var(--muted)}");
   html += F(".ripple{position:absolute;border-radius:999px;transform:scale(0);background:rgba(255,255,255,.35);animation:ripple .5s ease-out;pointer-events:none}");
   html += F("@keyframes ripple{to{transform:scale(3.2);opacity:0;}}");
-  html += F(".btn-danger{background:linear-gradient(180deg,#ef4444,#b91c1c)}.btn-warn{background:linear-gradient(180deg,#d97706,#92400e)}");
-  html += F(".table-wrap{margin-top:10px;overflow-x:auto;border-radius:14px;border:1px solid #22314f;box-shadow:0 16px 34px rgba(0,0,0,.28)}");
-  html += F("table{width:100%;border-collapse:collapse;background:#0b1220;min-width:760px}");
-  html += F("th,td{border:1px solid #22314f;padding:8px 8px;font-size:.95em;text-align:left;white-space:nowrap}");
-  html += F("th{background:#172540;position:sticky;top:0;z-index:1;text-transform:uppercase;letter-spacing:.45px;font-size:.78rem}");
-  html += F("tr:nth-child(even) td{background:#0d1729}");
-  html += F("td:last-child{white-space:normal;max-width:260px}");
-  html += F("td:first-child{font-family:'JetBrains Mono','Consolas',monospace;font-size:.82rem}");
-  html += F("a{color:#a9cbff}");
-  html += F("@media(max-width:760px){header{font-size:1.15em}.wrap{padding:0 6px}.btn{flex:1;text-align:center}}");
+  html += F("html[data-theme='dark'] .hero-mini{background:linear-gradient(180deg,rgba(15,30,34,.96),rgba(15,30,34,.9));box-shadow:0 14px 30px rgba(0,0,0,.22)}");
+  html += F("html[data-theme='dark'] .hero-mini.hero-mini-strong{background:linear-gradient(135deg,rgba(31,138,112,.18),rgba(16,39,43,.94))}");
+  html += F("html[data-theme='dark'] .table-wrap{background:linear-gradient(180deg,rgba(12,28,31,.9),rgba(12,28,31,.72))}");
+  html += F("html[data-theme='dark'] tbody tr{background:rgba(255,255,255,.015)}");
+  html += F("html[data-theme='light'] th{background:rgba(20,91,99,.94)}");
+  html += F("html[data-theme='light'] tbody tr{background:rgba(255,255,255,.8)}");
+  html += F("html[data-theme='light'] tbody tr:nth-child(even){background:rgba(248,251,248,.92)}");
+  html += F("@media(max-width:980px){.hero-grid{grid-template-columns:1fr}.hero-mini-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}");
+  html += F("@media(max-width:720px){.wrap{padding:0 12px}.nav{padding:10px}.hero-mini-grid{grid-template-columns:1fr}.toolbar,.hero-actions{flex-direction:column}.toolbar form{display:flex}.btn,.btn-ghost{width:100%}.section{padding:16px}th,td{padding:10px 12px}}");
+  html += F("@media (prefers-reduced-motion: reduce){*{animation:none!important;transition:none!important}}");
   html += F("</style></head><body>");
 
-  html += F("<header>Irrigation Event Log</header><div class='wrap'>");
-  html += F("<div class='toolbar'>");
-  html += F("<a class='btn' href='/'>Home</a>");
-  html += F("<a class='btn' href='/download/events.csv'>Download CSV</a>");
-  html += F("<form style='display:inline' method='POST' action='/clearevents'>");
-  html += F("<button class='btn btn-danger' type='submit'>Clear</button></form>");
-  html += F("<form style='display:inline' method='POST' action='/stopall'>");
-  html += F("<button class='btn btn-warn' type='submit'>Stop All</button></form>");
-  html += F("</div>");
-
-  html += F("<div class='table-wrap'><table><tr>");
-  html += F("<th>Time</th><th>Zone</th><th>Event</th><th>Source</th><th>Rain Delay</th><th>Details</th></tr>");
+  int eventCount = 0;
+  int startCount = 0;
+  int stopCount = 0;
+  String latestTs = "-";
 
   String eventRows;
-  eventRows.reserve(7000);
+  eventRows.reserve(9000);
 
   while (f.available()) {
     String line=f.readStringUntil('\n');
@@ -5679,11 +5747,18 @@ void handleLogPage() {
                       ? ("T="+temp+"C, H="+hum+"%, W="+wind+"m/s, "+cond+" @ "+city)
                       : "n/a");
 
+    eventCount++;
+    latestTs = ts;
+    if (ev == "START") startCount++;
+    else if (ev == "STOPPED") stopCount++;
+
     String row;
-    row.reserve(220);
+    row.reserve(320);
     row += F("<tr><td>"); row += ts;
     row += F("</td><td>"); row += zone;
-    row += F("</td><td>"); row += ev;
+    row += F("</td><td><span class='event-chip ");
+    row += (ev == "START") ? F("start'>Start") : F("stopped'>Stopped");
+    row += F("</span>");
     row += F("</td><td>"); row += src;
     row += F("</td><td>"); row += rd;
     row += F("</td><td>"); row += details; row += F("</td></tr>");
@@ -5692,17 +5767,41 @@ void handleLogPage() {
     eventRows = row + eventRows;
   }
   f.close();
-  html += eventRows;
-
-  html += F("</table></div></div>");
+  html += F("<nav class='nav'><div class='in'><div class='brand'><span class='dot'></span><div class='brand-copy'><span class='brand-title'>ESP32 Irrigation</span><span class='brand-sub'>Event History</span></div></div><div class='meta'><span class='pill'>");
+  html += String(eventCount);
+  html += F(" filtered events</span><button id='themeBtn' class='btn-ghost' title='Toggle theme'>Theme</button></div></div></nav>");
+  html += F("<div class='wrap'>");
+  html += F("<section class='glass hero-shell'><div class='hero-grid'><div class='hero-copy'><div class='hero-kicker'>System History</div><h1 class='hero-title'>Irrigation event log</h1><p class='hero-text'>Review the latest START and STOPPED actions, export the CSV, or clear the log without leaving the dashboard visual style.</p><div class='hero-actions'><a class='btn' href='/'>Home</a><a class='btn btn-secondary' href='/setup'>Setup</a><a class='btn btn-secondary' href='/download/events.csv'>Download CSV</a></div></div>");
+  html += F("<div class='hero-mini-grid'><div class='hero-mini hero-mini-strong'><div class='hero-mini-label'>Latest Event</div><div class='hero-mini-value'>");
+  html += latestTs;
+  html += F("</div><div class='hero-mini-sub'>Most recent matching log timestamp</div></div>");
+  html += F("<div class='hero-mini'><div class='hero-mini-label'>Start Events</div><div class='hero-mini-value'>");
+  html += String(startCount);
+  html += F("</div><div class='hero-mini-sub'>Zone starts recorded in this filtered view</div></div>");
+  html += F("<div class='hero-mini'><div class='hero-mini-label'>Stopped Events</div><div class='hero-mini-value'>");
+  html += String(stopCount);
+  html += F("</div><div class='hero-mini-sub'>Stops and manual interruptions</div></div>");
+  html += F("<div class='hero-mini'><div class='hero-mini-label'>Actions</div><div class='hero-mini-sub'>Maintenance controls stay available here when you need them.</div></div></div></div></section>");
+  html += F("<div class='section-head'><div><div class='section-kicker'>Audit Trail</div><h2>Recent events</h2></div><p class='section-note'>The table keeps newest entries at the top and only shows START or STOPPED records for faster scanning.</p></div>");
+  html += F("<section class='card'><div class='toolbar'><form method='POST' action='/clearevents'><button class='btn btn-danger' type='submit'>Clear Events</button></form><form method='POST' action='/stopall'><button class='btn btn-warn' type='submit'>Stop All</button></form></div><div class='table-wrap'><table><thead><tr>");
+  html += F("<th>Time</th><th>Zone</th><th>Event</th><th>Source</th><th>Rain Delay</th><th>Details</th></tr></thead><tbody>");
+  if (eventCount == 0) {
+    html += F("<tr><td colspan='6' class='empty-state'>No START or STOPPED entries are available in the current event log.</td></tr>");
+  } else {
+    html += eventRows;
+  }
+  html += F("</tbody></table></div></section></div>");
   html += F("<script>");
+  html += F("function applyTheme(t){document.documentElement.setAttribute('data-theme',t==='dark'?'dark':'light');}");
+  html += F("(function(){let saved=localStorage.getItem('theme');if(saved!=='dark'&&saved!=='light'){saved=(window.matchMedia&&window.matchMedia('(prefers-color-scheme: dark)').matches)?'dark':'light';localStorage.setItem('theme',saved);}applyTheme(saved);})();");
+  html += F("document.getElementById('themeBtn')?.addEventListener('click',()=>{const cur=(document.documentElement.getAttribute('data-theme')==='dark')?'dark':'light';const nxt=(cur==='dark')?'light':'dark';applyTheme(nxt);localStorage.setItem('theme',nxt);});");
   html += F("function addRipple(e){const t=e.currentTarget; if(t.disabled) return; const rect=t.getBoundingClientRect();");
   html += F("const size=Math.max(rect.width,rect.height); const x=(e.clientX|| (rect.left+rect.width/2)) - rect.left - size/2;");
   html += F("const y=(e.clientY|| (rect.top+rect.height/2)) - rect.top - size/2;");
   html += F("const r=document.createElement('span'); r.className='ripple'; r.style.width=size+'px'; r.style.height=size+'px';");
   html += F("r.style.left=x+'px'; r.style.top=y+'px'; const old=t.querySelector('.ripple'); if(old) old.remove(); t.appendChild(r);");
   html += F("setTimeout(()=>{r.remove();},520);}");
-  html += F("document.querySelectorAll('.btn').forEach(el=>{el.addEventListener('pointerdown',addRipple);});");
+  html += F("document.querySelectorAll('.btn,.btn-ghost').forEach(el=>{el.addEventListener('pointerdown',addRipple);});");
   html += F("</script></body></html>");
   server.send(200,"text/html",html);
 }
