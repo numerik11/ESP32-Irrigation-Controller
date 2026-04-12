@@ -5,7 +5,7 @@
   #define ENABLE_DEBUG_ROUTES 0   // set to 1 when you need them
 #endif
 #ifndef ENABLE_OTA
-  #define ENABLE_OTA 0  
+  #define ENABLE_OTA 0
 #endif
 #ifndef TFT_MISO
   #define TFT_MISO -1   // ST7789 typically doesn't use MISO
@@ -66,10 +66,10 @@ Adafruit_NeoPixel statusPixel(STATUS_PIXEL_COUNT, STATUS_PIXEL_PIN, NEO_GRB + NE
 bool statusPixelReady = false;
 
 // ---------- ST7789 (1.9") TFT ----------
-// Most 1.9" ST7789 modules are 170x320.
-// If yours is 240x320, change TFT_W/TFT_H accordingly.
-static constexpr int16_t TFT_W = 240;
-static constexpr int16_t TFT_H = 320;
+// Common ST7789 sizes are 170x320 and 240x320.
+// Kept runtime-configurable so the Setup page can persist the panel geometry.
+static constexpr int16_t TFT_W_DEFAULT = 240;
+static constexpr int16_t TFT_H_DEFAULT = 320;
 
 // Choose pins that do NOT clash with your I2C (4/15) or other IO.
 // Defaults (editable from Setup -> SPI (TFT)):
@@ -94,6 +94,8 @@ static int tftCsPin   = TFT_CS_DEFAULT;
 static int tftDcPin   = TFT_DC_DEFAULT;
 static int tftRstPin  = TFT_RST_DEFAULT;
 static int tftBlPin   = TFT_BL_DEFAULT;
+static int16_t tftPanelWidth  = TFT_W_DEFAULT;
+static int16_t tftPanelHeight = TFT_H_DEFAULT;
 static uint8_t tftRotation = 3; // ST7789 rotation: 0..3
 
 Adafruit_ST7789 tft(&SPI, -1, -1, -1);
@@ -391,6 +393,8 @@ void tickManualButtons();
 void showManualSelection();
 void drawManualSelection();
 bool isValidAdcPin(int pin);
+bool isValidGpioPin(int pin);
+bool isValidPhotoPin(int pin);
 void updateStatusPixel();
 void statusPixelSet(uint8_t r,uint8_t g,uint8_t b);
 bool initTempSensor();
@@ -924,6 +928,14 @@ inline bool isValidAdcPin(int pin) {
   #endif
 }
 
+inline bool isValidPhotoPin(int pin) {
+  #if defined(CONFIG_IDF_TARGET_ESP32S3)
+  return (pin >= 1 && pin <= 40) && isValidGpioPin(pin);
+  #else
+  return isValidAdcPin(pin);
+  #endif
+}
+
 inline bool isValidGpioPin(int pin) {
   if (pin < 0) return false;
   if (!GPIO_IS_VALID_GPIO((gpio_num_t)pin)) return false;
@@ -943,8 +955,55 @@ inline bool isValidOutputPin(int pin) {
 }
 
 inline bool isUnsafeTftPin(int pin) {
+  #if defined(CONFIG_IDF_TARGET_ESP32S3)
+  // ESP32-S3:
+  // - 0/3/45/46 are strapping pins
+  // - 26..32 are typically used for flash/PSRAM
+  // - 33..37 are also reserved on octal PSRAM modules
+  // GPIO19/20 are USB by default, but still usable as GPIO if USB is not needed.
+  return (pin == 0 || pin == 3 || pin == 45 || pin == 46 ||
+          (pin >= 26 && pin <= 32) || (pin >= 33 && pin <= 37));
+  #else
   return (pin == 0 || pin == 19 || pin == 20 || pin == 45 || pin == 46 ||
           (pin >= 9 && pin <= 14) || (pin >= 35 && pin <= 38));
+  #endif
+}
+
+inline bool isValidTftSignalPin(int pin) {
+  return isValidOutputPin(pin) && !isUnsafeTftPin(pin);
+}
+
+inline bool isValidOptionalTftPin(int pin) {
+  return (pin == -1) || isValidTftSignalPin(pin);
+}
+
+inline bool isValidTftDimension(int v) {
+  return (v >= 120 && v <= 400);
+}
+
+static bool tryParseStrictInt(const String& raw, int &out) {
+  String s = raw;
+  s.trim();
+  if (!s.length()) return false;
+  char* end = nullptr;
+  long v = strtol(s.c_str(), &end, 10);
+  if (end == s.c_str() || *end != '\0') return false;
+  out = (int)v;
+  return true;
+}
+
+static bool parseRequiredIntArg(const String& raw, int &out, String &err, const __FlashStringHelper* label) {
+  String s = raw;
+  s.trim();
+  if (!s.length()) {
+    err += String(label) + " is blank\n";
+    return false;
+  }
+  if (!tryParseStrictInt(s, out)) {
+    err += String(label) + " is not a valid integer: " + s + "\n";
+    return false;
+  }
+  return true;
 }
 
 static void warnPinConflict(const char* aName, int aPin, const char* bName, int bPin) {
@@ -979,17 +1038,20 @@ static void sanitizePinConfig() {
   #else
   if (!isValidAdcPin(tankLevelPin)) tankLevelPin = 1;  // safe default on ESP32-S3
   #endif
-  if (!isValidAdcPin(photoPin)) photoPin = -1;
+  if (!isValidPhotoPin(photoPin)) photoPin = -1;
 
   // TFT pins: fall back to safe defaults if invalid/unsafe
-  if (!(isValidGpioPin(tftSclkPin) && !isUnsafeTftPin(tftSclkPin))) tftSclkPin = TFT_SCLK_DEFAULT;
-  if (!(isValidGpioPin(tftMosiPin) && !isUnsafeTftPin(tftMosiPin))) tftMosiPin = TFT_MOSI_DEFAULT;
-  if (!(isValidGpioPin(tftCsPin)   && !isUnsafeTftPin(tftCsPin)))   tftCsPin   = TFT_CS_DEFAULT;
-  if (!(isValidGpioPin(tftDcPin)   && !isUnsafeTftPin(tftDcPin)))   tftDcPin   = TFT_DC_DEFAULT;
+  if (!isValidTftSignalPin(tftSclkPin)) tftSclkPin = TFT_SCLK_DEFAULT;
+  if (!isValidTftSignalPin(tftMosiPin)) tftMosiPin = TFT_MOSI_DEFAULT;
+  if (!isValidTftSignalPin(tftCsPin))   tftCsPin   = TFT_CS_DEFAULT;
+  if (!isValidTftSignalPin(tftDcPin))   tftDcPin   = TFT_DC_DEFAULT;
 
   // Optional TFT pins
-  if (!(tftRstPin == -1 || (isValidGpioPin(tftRstPin) && !isUnsafeTftPin(tftRstPin)))) tftRstPin = TFT_RST_DEFAULT;
-  if (!(tftBlPin  == -1 || (isValidGpioPin(tftBlPin)  && !isUnsafeTftPin(tftBlPin))))  tftBlPin  = TFT_BL_DEFAULT;
+  if (!isValidOptionalTftPin(tftRstPin)) tftRstPin = TFT_RST_DEFAULT;
+  if (!isValidOptionalTftPin(tftBlPin))  tftBlPin  = TFT_BL_DEFAULT;
+
+  if (!isValidTftDimension(tftPanelWidth))  tftPanelWidth  = TFT_W_DEFAULT;
+  if (!isValidTftDimension(tftPanelHeight)) tftPanelHeight = TFT_H_DEFAULT;
 
   // I2C pins
   if (!isValidGpioPin(i2cSdaPin)) i2cSdaPin = I2C_SDA_DEFAULT;
@@ -1218,7 +1280,7 @@ static void tftSetBrightness(uint8_t pct){ // pct: 0-100
 static void tickAutoBacklight(){
   if (!displayUseTft) return;
   if (!photoAutoEnabled) return;
-  if (!isValidAdcPin(photoPin)) return;
+  if (!isValidPhotoPin(photoPin)) return;
 
   static uint32_t lastMs = 0;
   uint32_t nowMs = millis();
@@ -1345,7 +1407,7 @@ void setup() {
 
     tftInitBacklightPwm();
 
-    tft.init(TFT_W, TFT_H);
+    tft.init(tftPanelWidth, tftPanelHeight);
     tft.setRotation(tftRotation);
     tft.fillScreen(ST77XX_BLACK);
     tft.setTextWrap(true);
@@ -1508,6 +1570,8 @@ void setup() {
   doc["tftBlOn"]          = g_tftBlOn;
   doc["tftDisplayOn"]     = g_tftDisplayOn;
   doc["tftBrightnessPct"] = tftPct;
+  doc["tftWidth"]         = tftPanelWidth;
+  doc["tftHeight"]        = tftPanelHeight;
   doc["displayType"]      = displayUseTft ? "tft" : "oled";
 
     // Current rain (actuals)
@@ -1741,7 +1805,7 @@ void setup() {
     bool pinsOk = true;
     auto chk = [&](const char* name, int pin, bool allowNeg){
       if (pin == -1 && allowNeg) return;
-      if (!isValidGpioPin(pin) || isUnsafeTftPin(pin)) {
+      if ((allowNeg && !isValidOptionalTftPin(pin)) || (!allowNeg && !isValidTftSignalPin(pin))) {
         pinsOk = false;
         msg += String(name) + " invalid/unsafe: " + String(pin) + "\n";
       }
@@ -2732,10 +2796,10 @@ void updateLCDForZone(int zone) {
   const int H = tft.height();
   const int pad = 8;
   const int infoY = 44;
-  const int infoH = 112;
-  const int statsY = infoY + infoH + 8;
+  const int infoH = 96;
+  const int statsY = infoY + infoH + 4;
   const int statsH = 64;
-  const int meterY = statsY + statsH + 8;
+  const int meterY = statsY + statsH + 6;
   int meterH = H - meterY - 8;
   if (meterH < 58) meterH = 58;
   const int barX = pad + 14;
@@ -4884,7 +4948,14 @@ void handleRoot() {
 void handleSetupPage() {
   HttpScope _scope;
   loadConfig();
+  sanitizePinConfig();
   String html; html.reserve(26000);
+  const int uiMaxGpio = 
+  #if defined(CONFIG_IDF_TARGET_ESP32)
+    39;
+  #else
+    48;
+  #endif
   String latStr = isfinite(meteoLat) ? String(meteoLat, 6) : String("");
   String lonStr = isfinite(meteoLon) ? String(meteoLon, 6) : String("");
   String setupWeatherLabel = meteoLocation.length() ? meteoLocation : String("Open-Meteo ready");
@@ -5085,7 +5156,7 @@ void handleSetupPage() {
   html += F("<div class='setup-badge'><div class='setup-badge-k'>Forecast Model</div><div class='setup-badge-v'>"); html += meteoModel; html += F("</div></div>");
   html += F("</div></div>");
   html += F("<div class='setup-nav'>");
-  html += F("<a href='#zones-card'>Zones</a><a href='#tank-card'>Water</a><a href='#delays-card'>Delays</a><a href='#weather-card'>Weather</a><a href='#timezone-card'>Timezone</a><a href='#display-card'>Display</a><a href='#advanced-card'>Advanced</a><a href='#mqtt-card'>MQTT</a>");
+  html += F("<a href='#zones-card'>Zones</a><a href='#tank-card'>Source</a><a href='#delays-card'>Delays</a><a href='#weather-card'>Weather</a><a href='#timezone-card'>Timezone</a><a href='#display-card'>Display</a><a href='#advanced-card'>GPIO</a><a href='#mqtt-card'>Buttons/MQTT</a>");
   html += F("</div><form action='/configure' method='POST'>");
   html += F("<div class='setup-actions-top'><button class='btn' type='submit'>Save Changes</button><button class='btn-alt' formaction='/' formmethod='GET'>Home</button><button class='btn-alt' type='button' onclick=\"fetch('/clear_cooldown',{method:'POST'})\">Clear Cooldown</button><button class='btn btn-danger' type='button' onclick=\"if(confirm('Reboot controller now?'))fetch('/reboot',{method:'POST'})\">Reboot</button></div>");
 
@@ -5305,13 +5376,18 @@ void handleSetupPage() {
   html += F("<option value='2'"); html += (tftRotation == 2 ? " selected" : ""); html += F(">2</option>");
   html += F("<option value='3'"); html += (tftRotation == 3 ? " selected" : ""); html += F(">3</option>");
   html += F("</select><small>ST7789 screen orientation (0-3)</small></div>");
+  html += F("<div class='row'><label>TFT Size</label><div class='field'><input class='in-xs' type='number' min='120' max='400' name='tftWidth' value='");
+  html += String(tftPanelWidth);
+  html += F("'><span>x</span><input class='in-xs' type='number' min='120' max='400' name='tftHeight' value='");
+  html += String(tftPanelHeight);
+  html += F("'></div><small>Saved panel size. Common ST7789 sizes: 170x320, 240x320, 240x240. Applied after reboot.</small></div>");
   html += F("<div class='row switchline'><label>Auto Backlight (LDR)</label><input type='checkbox' name='photoAuto' ");
   html += (photoAutoEnabled ? "checked" : "");
   html += F("><small>Turn off TFT when it is dark</small></div>");
   if (tftBlPin < 0) {
     html += F("<div class='row helptext'><label></label><small>No BL pin set; will use display sleep (backlight stays on).</small></div>");
   }
-  int photoRaw = isValidAdcPin(photoPin) ? analogRead(photoPin) : -1;
+  int photoRaw = isValidPhotoPin(photoPin) ? analogRead(photoPin) : -1;
   html += F("<div class='row'><label>Photo Raw</label><div class='chip'>");
   if (photoRaw < 0) html += F("--");
   else html += String(photoRaw);
@@ -5321,9 +5397,9 @@ void handleSetupPage() {
     html += String(photoPin);
     html += F("'><small>ADC1 pin (ESP32: GPIO32-39)</small></div>");
   #else
-    html += F("<div class='row'><label>Photo GPIO</label><input class='in-xs' type='number' min='1' max='20' name='photoPin' value='");
+    html += F("<div class='row'><label>Photo GPIO</label><input class='in-xs' type='number' min='1' max='40' name='photoPin' value='");
     html += String(photoPin);
-    html += F("'><small>ADC pin (ESP32-S3: GPIO1-20)</small></div>");
+    html += F("'><small>ESP32-S3 photo input range: GPIO1-40</small></div>");
   #endif
   html += F("<div class='row'><label>Dark Threshold</label><input class='in-sm' type='number' min='0' max='4095' name='photoThreshold' value='");
   html += String(photoThreshold);
@@ -5336,36 +5412,56 @@ void handleSetupPage() {
   // SPI (TFT) config
   html += F("<div class='card narrow' id='advanced-card'><details class='collapse'><summary>SPI (TFT)</summary><div class='collapse-body'><p class='card-intro'>Advanced screen pin mapping and backlight tools. Change these only if your display wiring differs from the defaults.</p>");
   html += F("<div class='row'><label>TFT Size</label><div class='chip'>");
-  html += String(TFT_W); html += "x"; html += String(TFT_H);
-  html += F("</div><small>Set in code</small></div>");
+  html += String(tftPanelWidth); html += "x"; html += String(tftPanelHeight);
+  html += F("</div><small>Saved display geometry</small></div>");
   html += F("<datalist id='tftPins'>");
-  for (int p = 1; p <= 48; ++p) {
+  for (int p = 1; p <= uiMaxGpio; ++p) {
     if (!isUnsafeTftPin(p)) { html += F("<option value='"); html += String(p); html += F("'>"); }
   }
   html += F("</datalist>");
   html += F("<datalist id='tftPinsOrNone'><option value='-1'>");
-  for (int p = 1; p <= 48; ++p) {
+  for (int p = 1; p <= uiMaxGpio; ++p) {
     if (!isUnsafeTftPin(p)) { html += F("<option value='"); html += String(p); html += F("'>"); }
   }
   html += F("</datalist>");
-  html += F("<div class='row'><label>SCK</label><input class='in-xs' type='number' min='1' max='48' list='tftPins' name='tftSclk' value='");
+  html += F("<div class='row'><label>SCK</label><input class='in-xs' type='number' min='1' max='");
+  html += String(uiMaxGpio);
+  html += F("' list='tftPins' name='tftSclk' value='");
   html += String(tftSclkPin); html += F("'></div>");
-  html += F("<div class='row'><label>MOSI</label><input class='in-xs' type='number' min='1' max='48' list='tftPins' name='tftMosi' value='");
+  html += F("<div class='row'><label>MOSI</label><input class='in-xs' type='number' min='1' max='");
+  html += String(uiMaxGpio);
+  html += F("' list='tftPins' name='tftMosi' value='");
   html += String(tftMosiPin); html += F("'></div>");
-  html += F("<div class='row'><label>CS</label><input class='in-xs' type='number' min='1' max='48' list='tftPins' name='tftCs' value='");
+  html += F("<div class='row'><label>CS</label><input class='in-xs' type='number' min='1' max='");
+  html += String(uiMaxGpio);
+  html += F("' list='tftPins' name='tftCs' value='");
   html += String(tftCsPin); html += F("'></div>");
-  html += F("<div class='row'><label>DC</label><input class='in-xs' type='number' min='1' max='48' list='tftPins' name='tftDc' value='");
+  html += F("<div class='row'><label>DC</label><input class='in-xs' type='number' min='1' max='");
+  html += String(uiMaxGpio);
+  html += F("' list='tftPins' name='tftDc' value='");
   html += String(tftDcPin); html += F("'></div>");
-  html += F("<div class='row'><label>RST</label><input class='in-xs' type='number' min='-1' max='48' list='tftPinsOrNone' name='tftRst' value='");
+  html += F("<div class='row'><label>RST</label><input class='in-xs' type='number' min='-1' max='");
+  html += String(uiMaxGpio);
+  html += F("' list='tftPinsOrNone' name='tftRst' value='");
   html += String(tftRstPin); html += F("'><small>-1 = not used</small></div>");
-  html += F("<div class='row'><label>BL</label><input class='in-xs' type='number' min='-1' max='48' list='tftPinsOrNone' name='tftBl' value='");
+  html += F("<div class='row'><label>BL</label><input class='in-xs' type='number' min='-1' max='");
+  html += String(uiMaxGpio);
+  html += F("' list='tftPinsOrNone' name='tftBl' value='");
   html += String(tftBlPin); html += F("'><small>-1 = not used</small></div>");
   html += F("<div class='row'><label>LCD Brightness (%)</label><input class='in-xs' type='number' id='tftLevel' min='0' max='100' value='100'><button class='btn' type='button' id='btn-tft-bright'>Set</button></div>");
   html += F("<div class='row'><label>Self-Test</label><div class='field'>");
   html += F("<button class='btn-alt' type='button' id='tftSelfTestBtn'>TFT Self-Test</button>");
   html += F("</div></div>");
   html += F("<div class='row helptext'><label></label><small id='tftStatusLine'>Backlight: --</small></div>");
-  html += F("<div class='row helptext'><label></label><small>Changing TFT pins requires reboot. Use GPIO 1-48 excluding 19/20 (USB), 0/45/46 (strapping), 9-14 & 35-38 (flash/PSRAM).</small></div>");
+  html += F("<div class='row helptext'><label></label><small>Changing TFT pins requires reboot. ");
+  #if defined(CONFIG_IDF_TARGET_ESP32S3)
+    html += F("ESP32-S3: avoid 0/3/45/46 (strapping) and 26-37 (flash/PSRAM, module-dependent). GPIO19/20 are allowed but will take over the USB pins.");
+  #else
+    html += F("Use output-capable GPIO 1-");
+    html += String(uiMaxGpio);
+    html += F(" excluding 19/20 (USB), 0/45/46 (strapping), 9-14 & 35-38 (flash/PSRAM).");
+  #endif
+  html += F("</small></div>");
   html += F("</div></details></div>");
 
   // I2C config
@@ -6011,19 +6107,19 @@ void loadConfig() {
   if (f.available()) { 
     if ((s = _safeReadLine(f)).length()) {
       int p = s.toInt();
-      photoPin = isValidAdcPin(p) ? p : -1;
+      photoPin = isValidPhotoPin(p) ? p : -1;
     }
   }
   if (f.available()) { if ((s = _safeReadLine(f)).length()) photoThreshold = s.toInt(); }
   if (f.available()) { if ((s = _safeReadLine(f)).length()) photoInvert = (s.toInt() == 1); }
 
   // NEW: TFT SPI pins (optional trailing lines)
-  if (f.available()) { if ((s = _safeReadLine(f)).length()) { int p=s.toInt(); if (isValidGpioPin(p) && !isUnsafeTftPin(p)) tftSclkPin = p; } }
-  if (f.available()) { if ((s = _safeReadLine(f)).length()) { int p=s.toInt(); if (isValidGpioPin(p) && !isUnsafeTftPin(p)) tftMosiPin = p; } }
-  if (f.available()) { if ((s = _safeReadLine(f)).length()) { int p=s.toInt(); if (isValidGpioPin(p) && !isUnsafeTftPin(p)) tftCsPin   = p; } }
-  if (f.available()) { if ((s = _safeReadLine(f)).length()) { int p=s.toInt(); if (isValidGpioPin(p) && !isUnsafeTftPin(p)) tftDcPin   = p; } }
-  if (f.available()) { if ((s = _safeReadLine(f)).length()) { int p=s.toInt(); if ((p == -1) || (isValidGpioPin(p) && !isUnsafeTftPin(p))) tftRstPin = p; } }
-  if (f.available()) { if ((s = _safeReadLine(f)).length()) { int p=s.toInt(); if ((p == -1) || (isValidGpioPin(p) && !isUnsafeTftPin(p))) tftBlPin  = p; } }
+  if (f.available()) { if ((s = _safeReadLine(f)).length()) { int p=s.toInt(); if (isValidTftSignalPin(p))   tftSclkPin = p; } }
+  if (f.available()) { if ((s = _safeReadLine(f)).length()) { int p=s.toInt(); if (isValidTftSignalPin(p))   tftMosiPin = p; } }
+  if (f.available()) { if ((s = _safeReadLine(f)).length()) { int p=s.toInt(); if (isValidTftSignalPin(p))   tftCsPin   = p; } }
+  if (f.available()) { if ((s = _safeReadLine(f)).length()) { int p=s.toInt(); if (isValidTftSignalPin(p))   tftDcPin   = p; } }
+  if (f.available()) { if ((s = _safeReadLine(f)).length()) { int p=s.toInt(); if (isValidOptionalTftPin(p)) tftRstPin  = p; } }
+  if (f.available()) { if ((s = _safeReadLine(f)).length()) { int p=s.toInt(); if (isValidOptionalTftPin(p)) tftBlPin   = p; } }
 
   // NEW: Open-Meteo location label (optional trailing line)
   if (f.available()) { if ((s = _safeReadLine(f)).length()) meteoLocation = cleanName(s); }
@@ -6041,6 +6137,19 @@ void loadConfig() {
       if (r < 0) r = 0;
       if (r > 3) r = 3;
       tftRotation = (uint8_t)r;
+    }
+  }
+  // NEW: TFT panel width/height (optional trailing lines)
+  if (f.available()) {
+    if ((s = _safeReadLine(f)).length()) {
+      int v = s.toInt();
+      if (isValidTftDimension(v)) tftPanelWidth = (int16_t)v;
+    }
+  }
+  if (f.available()) {
+    if ((s = _safeReadLine(f)).length()) {
+      int v = s.toInt();
+      if (isValidTftDimension(v)) tftPanelHeight = (int16_t)v;
     }
   }
 
@@ -6150,6 +6259,9 @@ void saveConfig() {
   f.println(displayUseTft ? 1 : 0);
   // NEW: TFT rotation (0..3)
   f.println((int)tftRotation);
+  // NEW: TFT panel width/height
+  f.println((int)tftPanelWidth);
+  f.println((int)tftPanelHeight);
 
   f.close();
 }
@@ -6211,6 +6323,7 @@ void saveSchedule() {
 
 void handleConfigure() {
   HttpScope _scope;
+  String displayCfgErr;
 
     // NEW: snapshot current values before applying POST changes
   float  oldLat    = meteoLat;
@@ -6223,6 +6336,8 @@ void handleConfigure() {
   int oldTftDc   = tftDcPin;
   int oldTftRst  = tftRstPin;
   int oldTftBl   = tftBlPin;
+  int oldTftWidth = tftPanelWidth;
+  int oldTftHeight = tftPanelHeight;
   int oldTftRotation = tftRotation;
   int oldI2cSda  = i2cSdaPin;
   int oldI2cScl  = i2cSclPin;
@@ -6389,7 +6504,7 @@ void handleConfigure() {
   photoAutoEnabled = server.hasArg("photoAuto");
   if (server.hasArg("photoPin")) {
     int p = server.arg("photoPin").toInt();
-    if (isValidAdcPin(p)) photoPin = p;
+    if (isValidPhotoPin(p)) photoPin = p;
   }
   if (server.hasArg("photoThreshold")) {
     int th = server.arg("photoThreshold").toInt();
@@ -6410,30 +6525,66 @@ void handleConfigure() {
     if (r > 3) r = 3;
     tftRotation = (uint8_t)r;
   }
+  if (server.hasArg("tftWidth")) {
+    int v = 0;
+    if (parseRequiredIntArg(server.arg("tftWidth"), v, displayCfgErr, F("TFT width"))) {
+      if (isValidTftDimension(v)) tftPanelWidth = (int16_t)v;
+      else displayCfgErr += "TFT width out of range: " + String(v) + " (allowed 120..400)\n";
+    }
+  }
+  if (server.hasArg("tftHeight")) {
+    int v = 0;
+    if (parseRequiredIntArg(server.arg("tftHeight"), v, displayCfgErr, F("TFT height"))) {
+      if (isValidTftDimension(v)) tftPanelHeight = (int16_t)v;
+      else displayCfgErr += "TFT height out of range: " + String(v) + " (allowed 120..400)\n";
+    }
+  }
   // TFT SPI pins (apply on reboot)
   if (server.hasArg("tftSclk")) {
-    int p = server.arg("tftSclk").toInt();
-    if (isValidGpioPin(p) && !isUnsafeTftPin(p)) tftSclkPin = p;
+    int p = 0;
+    if (parseRequiredIntArg(server.arg("tftSclk"), p, displayCfgErr, F("TFT SCK"))) {
+      if (isValidTftSignalPin(p)) tftSclkPin = p;
+      else displayCfgErr += "TFT SCK invalid/unsafe: GPIO" + String(p) + "\n";
+    }
   }
   if (server.hasArg("tftMosi")) {
-    int p = server.arg("tftMosi").toInt();
-    if (isValidGpioPin(p) && !isUnsafeTftPin(p)) tftMosiPin = p;
+    int p = 0;
+    if (parseRequiredIntArg(server.arg("tftMosi"), p, displayCfgErr, F("TFT MOSI"))) {
+      if (isValidTftSignalPin(p)) tftMosiPin = p;
+      else displayCfgErr += "TFT MOSI invalid/unsafe: GPIO" + String(p) + "\n";
+    }
   }
   if (server.hasArg("tftCs")) {
-    int p = server.arg("tftCs").toInt();
-    if (isValidGpioPin(p) && !isUnsafeTftPin(p)) tftCsPin = p;
+    int p = 0;
+    if (parseRequiredIntArg(server.arg("tftCs"), p, displayCfgErr, F("TFT CS"))) {
+      if (isValidTftSignalPin(p)) tftCsPin = p;
+      else displayCfgErr += "TFT CS invalid/unsafe: GPIO" + String(p) + "\n";
+    }
   }
   if (server.hasArg("tftDc")) {
-    int p = server.arg("tftDc").toInt();
-    if (isValidGpioPin(p) && !isUnsafeTftPin(p)) tftDcPin = p;
+    int p = 0;
+    if (parseRequiredIntArg(server.arg("tftDc"), p, displayCfgErr, F("TFT DC"))) {
+      if (isValidTftSignalPin(p)) tftDcPin = p;
+      else displayCfgErr += "TFT DC invalid/unsafe: GPIO" + String(p) + "\n";
+    }
   }
   if (server.hasArg("tftRst")) {
-    int p = server.arg("tftRst").toInt();
-    if (p == -1 || (isValidGpioPin(p) && !isUnsafeTftPin(p))) tftRstPin = p;
+    int p = 0;
+    if (parseRequiredIntArg(server.arg("tftRst"), p, displayCfgErr, F("TFT RST"))) {
+      if (isValidOptionalTftPin(p)) tftRstPin = p;
+      else displayCfgErr += "TFT RST invalid/unsafe: GPIO" + String(p) + "\n";
+    }
   }
   if (server.hasArg("tftBl")) {
-    int p = server.arg("tftBl").toInt();
-    if (p == -1 || (isValidGpioPin(p) && !isUnsafeTftPin(p))) tftBlPin = p;
+    int p = 0;
+    if (parseRequiredIntArg(server.arg("tftBl"), p, displayCfgErr, F("TFT BL"))) {
+      if (isValidOptionalTftPin(p)) tftBlPin = p;
+      else displayCfgErr += "TFT BL invalid/unsafe: GPIO" + String(p) + "\n";
+    }
+  }
+  if (displayCfgErr.length()) {
+    server.send(400, "text/plain", displayCfgErr);
+    return;
   }
   if (server.hasArg("manualSelectPin")) {
     int p = server.arg("manualSelectPin").toInt();
@@ -6482,6 +6633,8 @@ void handleConfigure() {
                          oldTftDc   != tftDcPin   ||
                          oldTftRst  != tftRstPin  ||
                          oldTftBl   != tftBlPin);
+  bool tftGeometryChanged = (oldTftWidth != tftPanelWidth ||
+                             oldTftHeight != tftPanelHeight);
 
   if (server.hasArg("i2cSda")) {
     int p = server.arg("i2cSda").toInt();
@@ -6501,7 +6654,7 @@ void handleConfigure() {
   saveConfig();
   initManualButtons();
   initGpioPinsForZones();
-  if (!displayModeChanged && displayUseTft && tftRotationChanged) {
+  if (!displayModeChanged && !tftGeometryChanged && displayUseTft && tftRotationChanged) {
     tft.setRotation(tftRotation);
   }
 
@@ -6551,7 +6704,7 @@ void handleConfigure() {
   server.sendHeader("Location", "/setup", true);
   server.send(302, "text/plain", "");
 
-  if (tftPinsChanged || i2cPinsChanged || displayModeChanged) {
+  if (tftPinsChanged || tftGeometryChanged || i2cPinsChanged || displayModeChanged) {
     Serial.println("[CFG] Display/pin mapping changed, restarting to apply...");
     delay(200);
     ESP.restart();
