@@ -1,4 +1,3 @@
-![PXL_20260411_171054084~2](https://github.com/user-attachments/assets/2ec30adf-9279-4a4f-ba21-5e947c793055)
 # 🌱 ESP32 1–16 Zone Irrigation Controller
 
 **ESP32-based irrigation solenoid controller** designed to manage **1–16 solenoids/zones**, with automatic **tank/mains water source selection**, **live weather integration**, and a modern **local web interface**:
