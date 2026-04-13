@@ -286,6 +286,7 @@ Download Kincony PCF8574 library:
 <img width="610" height="354" alt="image" src="https://github.com/user-attachments/assets/03cd3421-9d22-4272-9b58-5f9a08d18479" />
 
 -Esp32-s3 w/SPI TFT OLCD, 6 Zone, 24v AC Solenoids 
-![PXL_20260411_171054084~2](https://github.com/user-attachments/assets/a5adb1c9-68d2-432e-8c30-765ba6087ee6)
+<img width="860" height="669" alt="image" src="https://github.com/user-attachments/assets/4736357a-fbe4-470d-b324-8bfd5476e716" />
+
 
 
