@@ -1,3 +1,4 @@
+![PXL_20260411_171054084~2](https://github.com/user-attachments/assets/2ec30adf-9279-4a4f-ba21-5e947c793055)
 # 🌱 ESP32 1–16 Zone Irrigation Controller
 
 **ESP32-based irrigation solenoid controller** designed to manage **1–16 solenoids/zones**, with automatic **tank/mains water source selection**, **live weather integration**, and a modern **local web interface**:
@@ -286,5 +287,6 @@ Download Kincony PCF8574 library:
 <img width="610" height="354" alt="image" src="https://github.com/user-attachments/assets/03cd3421-9d22-4272-9b58-5f9a08d18479" />
 
 -Esp32-s3 w/SPI TFT OLCD, 6 Zone, 24v AC Solenoids 
-<img width="490" height="340" alt="image" src="https://github.com/user-attachments/assets/55f58a6f-606e-4aac-9061-a2c1fe721f88" />
+![PXL_20260411_171054084~2](https://github.com/user-attachments/assets/a5adb1c9-68d2-432e-8c30-765ba6087ee6)
+
 
