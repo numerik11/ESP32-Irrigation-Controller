@@ -31,6 +31,7 @@
 #include <Adafruit_NeoPixel.h>
 #include <math.h>
 #include "driver/gpio.h"
+#include "esp_heap_caps.h"
 extern "C" {
   #include "esp_log.h"
   #include "esp_wifi.h"
@@ -170,6 +171,9 @@ uint8_t zonesCount   = 4;  // 1..MAX_ZONES
 bool useGpioFallback = false;
 bool gpioActiveLow   = false;
 bool relayActiveHigh = true;
+bool zoneGpioActiveLow[MAX_ZONES] = {false};
+bool mainsGpioActiveLow = false;
+bool tankGpioActiveLow  = false;
 bool tankEnabled     = true;
 
 #if defined(CONFIG_IDF_TARGET_ESP32)
@@ -203,6 +207,17 @@ int manualStartPin  = -1;   // toggles start/stop for the selected zone (INPUT_P
 uint8_t manualSelectedZone = 0;
 uint32_t manualScreenUntilMs = 0;
 const unsigned long MANUAL_BTN_DEBOUNCE_MS = 60;
+const unsigned long MANUAL_BTN_REPEAT_GUARD_MS = 180;
+
+struct ManualButtonState {
+  int stableState = HIGH;
+  int lastRawState = HIGH;
+  uint32_t lastRawChangeMs = 0;
+  uint32_t lastPressMs = 0;
+};
+
+static ManualButtonState g_manualSelectBtn;
+static ManualButtonState g_manualStartBtn;
 
 // ---------- Config / State ----------
 float  meteoLat = NAN;
@@ -347,6 +362,24 @@ struct HttpScope {
   HttpScope()  { g_inHttp = true; }
   ~HttpScope() { g_inHttp = false; }
 };
+
+#if defined(BOARD_HAS_PSRAM)
+static constexpr size_t PSRAM_LARGE_ALLOC_THRESHOLD = 2048;
+
+static void configurePsramForLargeBuffers() {
+  if (!psramFound()) {
+    Serial.println("[BOOT] PSRAM board selected, but no PSRAM was detected.");
+    return;
+  }
+  heap_caps_malloc_extmem_enable(PSRAM_LARGE_ALLOC_THRESHOLD);
+  Serial.printf("[BOOT] PSRAM ready: total=%u free=%u threshold=%u\n",
+                (unsigned)ESP.getPsramSize(),
+                (unsigned)ESP.getFreePsram(),
+                (unsigned)PSRAM_LARGE_ALLOC_THRESHOLD);
+}
+#else
+static void configurePsramForLargeBuffers() {}
+#endif
 
 // ---------- Prototypes ----------
 void wifiCheck();
@@ -857,8 +890,8 @@ static void mdnsStart() {
 // ---------- GPIO fallback helpers ----------
 inline bool isValidOutputPin(int pin);
 
-inline int gpioLevel(bool on) {
-  if (gpioActiveLow) {
+inline int gpioLevelForPolarity(bool on, bool activeLow) {
+  if (activeLow) {
     // Active-LOW: LOW = ON, HIGH = OFF
     return on ? LOW : HIGH;
   } else {
@@ -867,24 +900,28 @@ inline int gpioLevel(bool on) {
   }
 }
 
-inline void gpioInitOutput(int pin) {
+inline int gpioLevel(bool on) {
+  return gpioLevelForPolarity(on, gpioActiveLow);
+}
+
+inline void gpioInitOutput(int pin, bool activeLow) {
   if (!isValidOutputPin(pin)) return;
   pinMode(pin, OUTPUT);
-  digitalWrite(pin, gpioLevel(false));  // ensure OFF
+  digitalWrite(pin, gpioLevelForPolarity(false, activeLow));  // ensure OFF
 }
 
 inline void gpioZoneWrite(int z, bool on) {
   if (z < 0 || z >= (int)MAX_ZONES) return;
   int pin = zonePins[z];
   if (!isValidOutputPin(pin)) return;
-  digitalWrite(pin, gpioLevel(on));
+  digitalWrite(pin, gpioLevelForPolarity(on, zoneGpioActiveLow[z]));
 }
 
 inline void gpioSourceWrite(bool mainsOn, bool tankOn) {
   bool mainsOk = isValidOutputPin(mainsPin);
   bool tankOk  = isValidOutputPin(tankPin);
-  if (mainsOk) digitalWrite(mainsPin, gpioLevel(mainsOn));
-  if (tankOk)  digitalWrite(tankPin,  gpioLevel(tankOn));
+  if (mainsOk) digitalWrite(mainsPin, gpioLevelForPolarity(mainsOn, mainsGpioActiveLow));
+  if (tankOk)  digitalWrite(tankPin,  gpioLevelForPolarity(tankOn, tankGpioActiveLow));
 }
 
 inline void setWaterSourceRelays(bool mainsOn, bool tankOn) {
@@ -1335,6 +1372,9 @@ void setup() {
   esp_log_level_set("i2c", ESP_LOG_NONE);
   esp_log_level_set("i2c.master", ESP_LOG_NONE);
   esp_log_level_set("i2c_master", ESP_LOG_NONE);
+
+  // Route larger heap allocations to PSRAM before long-lived page/cache buffers reserve.
+  configurePsramForLargeBuffers();
 
   // I2C bus
   I2Cbus.begin(i2cSdaPin, i2cSclPin, 100000);
@@ -2120,29 +2160,64 @@ void initGpioFallback() {
   useGpioFallback = true;
 
   for (uint8_t i = 0; i < MAX_ZONES; i++) {
-    gpioInitOutput(zonePins[i]);    // OFF based on gpioActiveLow
+    gpioInitOutput(zonePins[i], zoneGpioActiveLow[i]);
   }
 
-  gpioInitOutput(mainsPin);         // OFF
-  gpioInitOutput(tankPin);          // OFF
+  gpioInitOutput(mainsPin, mainsGpioActiveLow);
+  gpioInitOutput(tankPin, tankGpioActiveLow);
 }
 
 void initGpioPinsForZones() {
   // Initialise GPIO outputs for any zones not handled by the PCF expanders.
   for (uint8_t i = 0; i < zonesCount && i < MAX_ZONES; i++) {
     if (useExpanderForZone(i)) continue;
-    gpioInitOutput(zonePins[i]);
+    gpioInitOutput(zonePins[i], zoneGpioActiveLow[i]);
   }
 
   // Prepare mains/tank GPIO pins when using fallback or when running more than 4 zones
   // (so PCF pins remain dedicated to zone control).
   if (useGpioFallback || zonesCount > 4) {
-    gpioInitOutput(mainsPin);
-    gpioInitOutput(tankPin);
+    gpioInitOutput(mainsPin, mainsGpioActiveLow);
+    gpioInitOutput(tankPin, tankGpioActiveLow);
   }
 }
 
 // ---------- Manual hardware buttons (select + start/stop) ----------
+static void resetManualButtonState(ManualButtonState& state, int pin) {
+  int level = HIGH;
+  if (pin >= 0) level = digitalRead(pin);
+  state.stableState = level;
+  state.lastRawState = level;
+  state.lastRawChangeMs = millis();
+  state.lastPressMs = 0;
+}
+
+static bool consumeManualButtonPress(int pin, ManualButtonState& state, uint32_t nowMs) {
+  if (pin < 0) return false;
+
+  const int raw = digitalRead(pin);
+  if (raw != state.lastRawState) {
+    state.lastRawState = raw;
+    state.lastRawChangeMs = nowMs;
+  }
+  if ((uint32_t)(nowMs - state.lastRawChangeMs) < MANUAL_BTN_DEBOUNCE_MS) return false;
+  if (raw == state.stableState) return false;
+
+  state.stableState = raw;
+  if (raw != LOW) return false;
+  if ((uint32_t)(nowMs - state.lastPressMs) < MANUAL_BTN_REPEAT_GUARD_MS) return false;
+
+  state.lastPressMs = nowMs;
+  return true;
+}
+
+static int firstActiveZoneIndex() {
+  for (int i = 0; i < (int)zonesCount; ++i) {
+    if (zoneActive[i]) return i;
+  }
+  return -1;
+}
+
 void showManualSelection() {
   manualScreenUntilMs = millis() + 15000UL;
   g_forceManualReset = true;
@@ -2150,6 +2225,9 @@ void showManualSelection() {
 }
 
 void drawManualSelection() {
+  const int selectedZone = manualSelectedZone % zonesCount;
+  const bool selectedActive = zoneActive[selectedZone];
+
   if (!displayUseTft) {
     display.clearDisplay();
     display.setTextSize(2);
@@ -2157,7 +2235,11 @@ void drawManualSelection() {
     display.print("Manual");
     display.setCursor(0, 24);
     display.print("Zone ");
-    display.print((int)manualSelectedZone + 1);
+    display.print((int)selectedZone + 1);
+    display.setTextSize(1);
+    display.setCursor(0, 50);
+    display.print("State: ");
+    display.print(selectedActive ? "ON" : "OFF");
     display.display();
     return;
   }
@@ -2168,43 +2250,141 @@ void drawManualSelection() {
   static int lastW = -1;
   static int lastH = -1;
   static int lastZone = -1;
+  static int lastStatusId = -1;
+  static int lastActiveZone = -2;
+  static bool lastQueued = false;
+  static bool lastPinReady = false;
+  static bool lastSelectedActive = false;
 
   const bool layoutChanged = g_forceManualReset || !init || lastW != W || lastH != H;
+  const int activeZone = firstActiveZoneIndex();
+  const bool selectedQueued = pendingStart[selectedZone];
+  const bool pinReady = useExpanderForZone(selectedZone) ||
+                        (zonePins[selectedZone] >= 0 && zonePins[selectedZone] <= 39);
+
+  int statusId = 0;
+  const char* statusText = "READY";
+  uint16_t statusColor = C_GOOD;
+  char detailLine[40] = "Press Start to toggle";
+
+  if (!pinReady) {
+    statusId = 1;
+    statusText = "NO PIN";
+    statusColor = C_BAD;
+    snprintf(detailLine, sizeof(detailLine), "Assign an output pin for Z%d", selectedZone + 1);
+  } else if (selectedActive) {
+    statusId = 2;
+    statusText = "ACTIVE";
+    statusColor = C_GOOD;
+    snprintf(detailLine, sizeof(detailLine), "Running now");
+  } else if (selectedQueued) {
+    statusId = 3;
+    statusText = "QUEUED";
+    statusColor = C_WARN;
+    snprintf(detailLine, sizeof(detailLine), "Waiting for wind or active run");
+  } else if (isBlockedNow()) {
+    statusId = 4;
+    statusText = "BLOCKED";
+    statusColor = C_BAD;
+    if (!systemMasterEnabled) snprintf(detailLine, sizeof(detailLine), "Master switch is off");
+    else if (isPausedNow()) snprintf(detailLine, sizeof(detailLine), "System pause is active");
+    else snprintf(detailLine, sizeof(detailLine), "Rain cooldown is active");
+  } else if (rainActive) {
+    statusId = 5;
+    statusText = "RAIN";
+    statusColor = C_BAD;
+    snprintf(detailLine, sizeof(detailLine), "Rain delay is active");
+  } else if (windActive) {
+    statusId = 7;
+    statusText = "WIND";
+    statusColor = C_WARN;
+    snprintf(detailLine, sizeof(detailLine), "Start will queue until wind clears");
+  } else if (!runZonesConcurrent && activeZone >= 0 && activeZone != selectedZone) {
+    statusId = 6;
+    statusText = "BUSY";
+    statusColor = C_WARN;
+    snprintf(detailLine, sizeof(detailLine), "Z%d is already running", activeZone + 1);
+  }
+
   if (layoutChanged) {
     tft.fillScreen(C_BG);
     drawTopBar("Manual", "BTN", C_ACCENT);
 
     int cardW = W - 24;
-    int cardH = 90;
+    int cardH = 108;
     int cardX = 12;
-    int cardY = (H - cardH) / 2;
+    int cardY = (H - cardH) / 2 - 10;
+    if (cardY < 44) cardY = 44;
     drawCard(cardX, cardY, cardW, cardH, C_PANEL, C_EDGE);
-
-    tft.setTextSize(1);
-    tft.setTextColor(C_MUTED);
-    tft.setCursor(cardX + 12, cardY + cardH - 18);
-    tft.print("Press Start to toggle");
+    tft.drawFastHLine(cardX + 1, cardY + 58, cardW - 2, C_EDGE);
+    tft.drawFastHLine(cardX + 1, cardY + 84, cardW - 2, C_EDGE);
 
     init = true;
     lastW = W;
     lastH = H;
     lastZone = -1;
+    lastStatusId = -1;
+    lastActiveZone = -2;
+    lastQueued = false;
+    lastPinReady = false;
+    lastSelectedActive = false;
     g_forceManualReset = false;
   }
 
-  if (layoutChanged || lastZone != (int)manualSelectedZone) {
+  if (layoutChanged || lastZone != selectedZone || lastStatusId != statusId ||
+      lastActiveZone != activeZone || lastQueued != selectedQueued || lastPinReady != pinReady ||
+      lastSelectedActive != selectedActive) {
     int cardW = W - 24;
-    int cardH = 90;
+    int cardH = 108;
     int cardX = 12;
-    int cardY = (H - cardH) / 2;
+    int cardY = (H - cardH) / 2 - 10;
+    if (cardY < 44) cardY = 44;
 
-    tft.fillRect(cardX + 10, cardY + 12, cardW - 20, 38, C_PANEL);
+    tft.fillRect(cardX + 10, cardY + 10, cardW - 20, cardH - 20, C_PANEL);
     tft.setTextColor(C_TEXT);
     tft.setTextSize(3);
     tft.setCursor(cardX + 12, cardY + 16);
     tft.print("Zone ");
-    tft.print((int)manualSelectedZone + 1);
-    lastZone = manualSelectedZone;
+    tft.print(selectedZone + 1);
+
+    int pillW = 10 + (int)strlen(statusText) * 6;
+    int pillX = cardX + cardW - pillW - 12;
+    tft.fillRect(pillX, cardY + 16, pillW, 18, statusColor);
+    tft.drawRect(pillX, cardY + 16, pillW, 18, C_EDGE);
+    tft.setTextSize(1);
+    tft.setTextColor(ST77XX_BLACK);
+    tft.setCursor(pillX + 5, cardY + 21);
+    tft.print(statusText);
+
+    tft.setTextColor(C_MUTED);
+    tft.setCursor(cardX + 12, cardY + 66);
+    tft.print(detailLine);
+
+    const char* stateText = selectedActive ? "ON" : "OFF";
+    uint16_t stateColor = selectedActive ? C_GOOD : C_BAD;
+    int statePillW = 24;
+    int statePillX = cardX + 12;
+    int statePillY = cardY + 88;
+    tft.fillRect(statePillX, statePillY, statePillW, 14, stateColor);
+    tft.drawRect(statePillX, statePillY, statePillW, 14, C_EDGE);
+    tft.setTextColor(ST77XX_BLACK);
+    tft.setTextSize(1);
+    tft.setCursor(statePillX + 5, statePillY + 4);
+    tft.print(stateText);
+    tft.setTextColor(C_TEXT);
+    tft.setCursor(cardX + 42, cardY + 92);
+    tft.print("Selected zone is ");
+    tft.print(stateText);
+    tft.setTextColor(C_MUTED);
+    tft.setCursor(cardX + 168, cardY + 92);
+    tft.print("| Start toggles");
+
+    lastZone = selectedZone;
+    lastStatusId = statusId;
+    lastActiveZone = activeZone;
+    lastQueued = selectedQueued;
+    lastPinReady = pinReady;
+    lastSelectedActive = selectedActive;
   }
 }
 
@@ -2213,14 +2393,18 @@ void initManualButtons() {
 
   if (manualSelectPin >= 0 && manualSelectPin <= 39) {
     pinMode(manualSelectPin, INPUT_PULLUP);
+    resetManualButtonState(g_manualSelectBtn, manualSelectPin);
   } else {
     manualSelectPin = -1;
+    resetManualButtonState(g_manualSelectBtn, -1);
   }
 
   if (manualStartPin >= 0 && manualStartPin <= 39) {
     pinMode(manualStartPin, INPUT_PULLUP);
+    resetManualButtonState(g_manualStartBtn, manualStartPin);
   } else {
     manualStartPin = -1;
+    resetManualButtonState(g_manualStartBtn, -1);
   }
 }
 
@@ -2229,38 +2413,18 @@ void tickManualButtons() {
   if (zonesCount == 0) return;
   manualSelectedZone = manualSelectedZone % zonesCount;
 
-  // Select button: cycle target zone
-  static int lastSelState = HIGH;
-  static uint32_t lastSelChange = 0;
-  if (manualSelectPin >= 0) {
-    int s = digitalRead(manualSelectPin);
-    if (s != lastSelState && (nowMs - lastSelChange) > MANUAL_BTN_DEBOUNCE_MS) {
-      lastSelChange = nowMs;
-      lastSelState = s;
-      if (s == LOW) {
-        manualSelectedZone = (manualSelectedZone + 1) % zonesCount;
-        Serial.printf("[BTN] Manual select -> Z%d\n", manualSelectedZone + 1);
-        showManualSelection();
-      }
-    }
+  if (consumeManualButtonPress(manualSelectPin, g_manualSelectBtn, nowMs)) {
+    manualSelectedZone = (manualSelectedZone + 1) % zonesCount;
+    Serial.printf("[BTN] Manual select -> Z%d\n", manualSelectedZone + 1);
+    showManualSelection();
   }
 
-  // Start/stop button: toggle the selected zone
-  static int lastStartState = HIGH;
-  static uint32_t lastStartChange = 0;
-  if (manualStartPin >= 0) {
-    int s = digitalRead(manualStartPin);
-    if (s != lastStartState && (nowMs - lastStartChange) > MANUAL_BTN_DEBOUNCE_MS) {
-      lastStartChange = nowMs;
-      lastStartState = s;
-      if (s == LOW) {
-        uint8_t z = manualSelectedZone % zonesCount;
-        if (zoneActive[z]) {
-          turnOffValveManual(z);
-        } else {
-          turnOnValveManual(z);
-        }
-      }
+  if (consumeManualButtonPress(manualStartPin, g_manualStartBtn, nowMs)) {
+    uint8_t z = manualSelectedZone % zonesCount;
+    if (zoneActive[z]) {
+      turnOffValveManual(z);
+    } else {
+      turnOnValveManual(z);
     }
   }
 }
@@ -2795,17 +2959,29 @@ void updateLCDForZone(int zone) {
   const int W = tft.width();
   const int H = tft.height();
   const int pad = 8;
-  const int infoY = 44;
-  const int infoH = 96;
-  const int statsY = infoY + infoH + 4;
-  const int statsH = 64;
-  const int meterY = statsY + statsH + 6;
-  int meterH = H - meterY - 8;
-  if (meterH < 58) meterH = 58;
+  const int topY = 40;
+  int statsH = 64;
+  int meterH = 74;
+  int infoH = 60;
+  int statsY = topY;
+  int meterY = statsY + statsH + 6;
+  int infoY = meterY + meterH + 6;
+  int bottomGap = H - infoY - infoH - 8;
+  if (bottomGap < 0) {
+    meterH += bottomGap;
+    if (meterH < 58) meterH = 58;
+    infoY = meterY + meterH + 6;
+    bottomGap = H - infoY - infoH - 8;
+    if (bottomGap < 0) {
+      infoH += bottomGap;
+      if (infoH < 50) infoH = 50;
+      infoY = meterY + meterH + 6;
+    }
+  }
   const int barX = pad + 14;
-  const int barY = meterY + 28;
+  const int barY = meterY + 40;
   const int barW = W - (pad + 14) * 2;
-  const int barH = 20;
+  const int barH = 18;
   const uint16_t C_RUN_INFO = RGB(20, 29, 47);
   const uint16_t C_RUN_STATS = RGB(17, 25, 40);
   const uint16_t C_RUN_METER = RGB(14, 21, 34);
@@ -2824,12 +3000,12 @@ void updateLCDForZone(int zone) {
   if (layoutChanged) {
     tft.fillScreen(C_BG);
     drawTopBar("RUNNING", "LIVE", C_GOOD);
-    drawCard(pad, infoY, W - 2 * pad, infoH, C_RUN_INFO, C_EDGE);
     drawCard(pad, statsY, W - 2 * pad, statsH, C_RUN_STATS, C_EDGE);
     drawCard(pad, meterY, W - 2 * pad, meterH, C_RUN_METER, C_EDGE);
-    tft.drawFastHLine(pad + 1, infoY + 22, W - 2 * pad - 2, C_EDGE);
+    drawCard(pad, infoY, W - 2 * pad, infoH, C_RUN_INFO, C_EDGE);
     tft.drawFastHLine(pad + 1, statsY + 24, W - 2 * pad - 2, C_EDGE);
     tft.drawFastHLine(pad + 1, meterY + 24, W - 2 * pad - 2, C_EDGE);
+    tft.drawFastHLine(pad + 1, infoY + 22, W - 2 * pad - 2, C_EDGE);
     tft.drawRect(barX, barY, barW, barH, C_EDGE);
     for (int tick = 1; tick < 10; ++tick) {
       int tx = barX + (tick * (barW - 2)) / 10;
@@ -2837,11 +3013,11 @@ void updateLCDForZone(int zone) {
     }
     tft.setTextSize(1);
     tft.setTextColor(C_MUTED);
-    tft.setCursor(pad + 10, infoY + 8);  tft.print("ACTIVE ZONE");
-    tft.setCursor(W - 78, infoY + 8);    tft.print("LIVE");
     tft.setCursor(pad + 10, statsY + 8); tft.print("ELAPSED");
     tft.setCursor(pad + 112, statsY + 8); tft.print("REMAIN");
     tft.setCursor(pad + 10, meterY + 8); tft.print("FLOW PROGRESS");
+    tft.setCursor(pad + 10, infoY + 8);  tft.print("ACTIVE ZONE");
+    tft.setCursor(W - 78, infoY + 8);    tft.print("LIVE");
     runInit = true;
     lastZone = zone;
     lastW = W;
@@ -2862,14 +3038,20 @@ void updateLCDForZone(int zone) {
   snprintf(totalBuf, sizeof(totalBuf), "%02lu:%02lu", tm, ts);
 
   if (layoutChanged || lastZone != zone) {
-    tft.fillRect(pad + 10, infoY + 30, W - 2 * pad - 20, 28, C_RUN_INFO);
+    tft.fillRect(pad + 10, infoY + 28, W - 2 * pad - 20, infoH - 36, C_RUN_INFO);
     tft.setTextSize(2);
     tft.setTextColor(C_TEXT);
-    tft.setCursor(pad + 12, infoY + 36);
+    tft.setCursor(pad + 12, infoY + 30);
     tft.print("Z");
     tft.print(zone + 1);
     tft.print("  ");
     tft.print(zoneNames[zone]);
+    tft.setTextSize(1);
+    tft.setTextColor(C_MUTED);
+    tft.setCursor(pad + 12, infoY + infoH - 14);
+    tft.print("TOTAL ");
+    tft.setTextColor(C_TEXT);
+    tft.print(totalBuf);
     lastZone = zone;
   }
 
@@ -2882,25 +3064,19 @@ void updateLCDForZone(int zone) {
     tft.setTextColor(C_GOOD);
     tft.setCursor(pad + 116, statsY + 34);
     tft.print(remainBuf);
-    tft.setTextSize(1);
-    tft.setTextColor(C_MUTED);
-    tft.setCursor(pad + 12, statsY + 52);
-    tft.print("TOTAL ");
-    tft.setTextColor(C_TEXT);
-    tft.print(totalBuf);
     lastElapsed = elapsed;
     lastRemain = rem;
     lastTotal = total;
   }
 
   if (layoutChanged || pct != lastPct) {
-    tft.fillRect(pad + 10, meterY + 30, W - 2 * pad - 20, 22, C_RUN_METER);
+    tft.fillRect(pad + 10, meterY + 28, W - 2 * pad - 20, 18, C_RUN_METER);
     tft.setTextSize(2);
     tft.setTextColor(C_LIVE);
-    tft.setCursor(pad + 12, meterY + 34);
+    tft.setCursor(pad + 12, meterY + 28);
     tft.print("Progress");
     tft.setTextColor(C_TEXT);
-    tft.setCursor(W - 78, meterY + 34);
+    tft.setCursor(W - 78, meterY + 28);
     tft.print(pct);
     tft.print("%");
 
@@ -3909,6 +4085,7 @@ void turnOnValveManual(int z) {
     if (pin < 0 || pin > 39) {
       Serial.printf("[VALVE] Z%d has no GPIO pin assigned; skipping manual start\n", z+1);
       cancelStart(z, "NO_PIN", false);
+      showManualSelection();
       return;
     }
   }
@@ -3917,7 +4094,9 @@ void turnOnValveManual(int z) {
   for (int i = 0; i < (int)zonesCount; i++) {
     if (zoneActive[i]) {
       if (!runZonesConcurrent) {
-        Serial.println("[VALVE] Manual start blocked: another zone is running");
+        manualSelectedZone = i;
+        Serial.printf("[VALVE] Manual start blocked: Z%d is already running\n", i + 1);
+        showManualSelection();
         return;
       }
       break; // concurrent: allow additional zone
@@ -3925,9 +4104,9 @@ void turnOnValveManual(int z) {
   }
 
   // Cancel manual requests during block/rain; queue during wind
-  if (isBlockedNow())  { cancelStart(z, "BLOCKED", false); return; }
-  if (rainActive)      { cancelStart(z, "RAIN",    true ); return; }
-  if (windActive)      { lastStartSlot[z] = 1; pendingStart[z] = true; logEvent(z, "QUEUED", "WIND", false); return; }
+  if (isBlockedNow())  { cancelStart(z, "BLOCKED", false); showManualSelection(); return; }
+  if (rainActive)      { cancelStart(z, "RAIN",    true ); showManualSelection(); return; }
+  if (windActive)      { lastStartSlot[z] = 1; pendingStart[z] = true; logEvent(z, "QUEUED", "WIND", false); showManualSelection(); return; }
 
   zoneStartMs[z] = millis();
   zoneActive[z] = true;
@@ -5478,22 +5657,25 @@ void handleSetupPage() {
   html += (useGpioFallback ? "open" : "");
   html += F("><summary>GPIO Fallback (if I2C relays not found)</summary><div class='collapse-body'><div class='grid'>");
   for (uint8_t i=0;i<MAX_ZONES;i++){
-    html += F("<div class='row'><label>Zone "); html += String(i+1);
+    html += F("<div class='row switchline'><label>Zone "); html += String(i+1);
     html += F(" Pin</label><input class='in-xs' type='number' min='-1' max='39' name='zonePin"); html += String(i);
-    html += F("' value='"); html += String(zonePins[i]); html += F("'></div>");
+    html += F("' value='"); html += String(zonePins[i]); html += F("'>");
+    html += F("<label class='chip'><input type='checkbox' name='zonePinLow"); html += String(i); html += F("' ");
+    html += (zoneGpioActiveLow[i] ? "checked" : "");
+    html += F("><span>LOW = ON</span></label></div>");
   }
-  html += F("<div class='row'><label></label><small>Use -1 to leave a zone unassigned. Zones above the 6 PCF channels use GPIO pins when set.</small></div>");
-  html += F("<div class='row'><label>City Water Relay Pin</label><input class='in-xs' type='number' min='0' max='39' name='mainsPin' value='");
-  html += String(mainsPin); html += F("'><small>Relay for city water in (use check/backflow prevention device)</small></div>");
-  html += F("<div class='row'><label>Tank Relay Pin</label><input class='in-xs' type='number' min='0' max='39' name='tankPin' value='");
-  html += String(tankPin); html += F("'><small>Pump on low pressure (Relay on) and off at a higher pressure (Relay off).</small></div>");
-
-  // NEW: GPIO active polarity
-  html += F("<div class='row switchline'><label>GPIO Active Low</label>");
-  html += F("<input type='checkbox' name='gpioActiveLow' ");
-  html += (gpioActiveLow ? "checked" : "");
-  html += F(">");
-  html += F("<small>Checked = LOW = ON (active-low relay modules). Unchecked = HIGH = ON.</small></div>");
+  html += F("<div class='row'><label></label><small>Use -1 to leave a zone unassigned. Zones above the PCF channels use GPIO pins when set.</small></div>");
+  html += F("<div class='row switchline'><label>City Water Relay Pin</label><input class='in-xs' type='number' min='0' max='39' name='mainsPin' value='");
+  html += String(mainsPin); html += F("'><label class='chip'><input type='checkbox' name='mainsPinLow' ");
+  html += (mainsGpioActiveLow ? "checked" : "");
+  html += F("><span>LOW = ON</span></label><small>Relay for city water in (use check/backflow prevention device)</small></div>");
+  html += F("<div class='row switchline'><label>Tank Relay Pin</label><input class='in-xs' type='number' min='0' max='39' name='tankPin' value='");
+  html += String(tankPin); html += F("'><label class='chip'><input type='checkbox' name='tankPinLow' ");
+  html += (tankGpioActiveLow ? "checked" : "");
+  html += F("><span>LOW = ON</span></label><small>Pump on low pressure (Relay on) and off at a higher pressure (Relay off).</small></div>");
+  html += F("<div class='row'><label>Legacy Default</label><div class='chip'>");
+  html += (gpioActiveLow ? "LOW = ON" : "HIGH = ON");
+  html += F("</div><small>Used only when loading older saved configs that do not have per-pin polarity values yet.</small></div>");
 
   html += F("</div>");
   html += F("<div class='row' style='justify-content:flex-end;gap:8px'>");
@@ -6094,63 +6276,82 @@ void loadConfig() {
       gpioActiveLow = (s.toInt() == 1);
   }
 
+  // Default per-output polarity to the legacy global value, then override if present.
+  for (int i = 0; i < MAX_ZONES; ++i) zoneGpioActiveLow[i] = gpioActiveLow;
+  mainsGpioActiveLow = gpioActiveLow;
+  tankGpioActiveLow  = gpioActiveLow;
+
+  // Read the rest of the file so older configs can safely skip the new per-pin polarity block.
+  String tail[48];
+  int tailCount = 0;
+  while (f.available() && tailCount < (int)(sizeof(tail) / sizeof(tail[0]))) {
+    tail[tailCount++] = _safeReadLine(f);
+  }
+  int tailIdx = 0;
+  const int legacyTailCount = 19;
+  const int perOutputPolarityCount = MAX_ZONES + 2;
+
+  auto nextTail = [&](String& out) -> bool {
+    if (tailIdx >= tailCount) return false;
+    out = tail[tailIdx++];
+    return true;
+  };
+
+  if (tailCount >= legacyTailCount + perOutputPolarityCount) {
+    for (int i = 0; i < MAX_ZONES; ++i) {
+      if (nextTail(s) && s.length()) zoneGpioActiveLow[i] = (s.toInt() == 1);
+    }
+    if (nextTail(s) && s.length()) mainsGpioActiveLow = (s.toInt() == 1);
+    if (nextTail(s) && s.length()) tankGpioActiveLow  = (s.toInt() == 1);
+  }
+
   // NEW: tank level sensor pin (ADC)
-  if (f.available()) {
-  if ((s = _safeReadLine(f)).length()) {
+  if (nextTail(s) && s.length()) {
     int p = s.toInt();
     if (isValidAdcPin(p)) tankLevelPin = p;
   }
-  }
 
   // NEW: photoresistor auto-backlight (optional trailing lines)
-  if (f.available()) { if ((s = _safeReadLine(f)).length()) photoAutoEnabled = (s.toInt() == 1); }
-  if (f.available()) { 
-    if ((s = _safeReadLine(f)).length()) {
-      int p = s.toInt();
-      photoPin = isValidPhotoPin(p) ? p : -1;
-    }
+  if (nextTail(s) && s.length()) photoAutoEnabled = (s.toInt() == 1);
+  if (nextTail(s) && s.length()) {
+    int p = s.toInt();
+    photoPin = isValidPhotoPin(p) ? p : -1;
   }
-  if (f.available()) { if ((s = _safeReadLine(f)).length()) photoThreshold = s.toInt(); }
-  if (f.available()) { if ((s = _safeReadLine(f)).length()) photoInvert = (s.toInt() == 1); }
+  if (nextTail(s) && s.length()) photoThreshold = s.toInt();
+  if (nextTail(s) && s.length()) photoInvert = (s.toInt() == 1);
 
   // NEW: TFT SPI pins (optional trailing lines)
-  if (f.available()) { if ((s = _safeReadLine(f)).length()) { int p=s.toInt(); if (isValidTftSignalPin(p))   tftSclkPin = p; } }
-  if (f.available()) { if ((s = _safeReadLine(f)).length()) { int p=s.toInt(); if (isValidTftSignalPin(p))   tftMosiPin = p; } }
-  if (f.available()) { if ((s = _safeReadLine(f)).length()) { int p=s.toInt(); if (isValidTftSignalPin(p))   tftCsPin   = p; } }
-  if (f.available()) { if ((s = _safeReadLine(f)).length()) { int p=s.toInt(); if (isValidTftSignalPin(p))   tftDcPin   = p; } }
-  if (f.available()) { if ((s = _safeReadLine(f)).length()) { int p=s.toInt(); if (isValidOptionalTftPin(p)) tftRstPin  = p; } }
-  if (f.available()) { if ((s = _safeReadLine(f)).length()) { int p=s.toInt(); if (isValidOptionalTftPin(p)) tftBlPin   = p; } }
+  if (nextTail(s) && s.length()) { int p=s.toInt(); if (isValidTftSignalPin(p))   tftSclkPin = p; }
+  if (nextTail(s) && s.length()) { int p=s.toInt(); if (isValidTftSignalPin(p))   tftMosiPin = p; }
+  if (nextTail(s) && s.length()) { int p=s.toInt(); if (isValidTftSignalPin(p))   tftCsPin   = p; }
+  if (nextTail(s) && s.length()) { int p=s.toInt(); if (isValidTftSignalPin(p))   tftDcPin   = p; }
+  if (nextTail(s) && s.length()) { int p=s.toInt(); if (isValidOptionalTftPin(p)) tftRstPin  = p; }
+  if (nextTail(s) && s.length()) { int p=s.toInt(); if (isValidOptionalTftPin(p)) tftBlPin   = p; }
 
   // NEW: Open-Meteo location label (optional trailing line)
-  if (f.available()) { if ((s = _safeReadLine(f)).length()) meteoLocation = cleanName(s); }
+  if (nextTail(s) && s.length()) meteoLocation = cleanName(s);
   // NEW: Open-Meteo model (optional trailing line)
-  if (f.available()) { if ((s = _safeReadLine(f)).length()) meteoModel = cleanMeteoModel(s); }
+  if (nextTail(s) && s.length()) meteoModel = cleanMeteoModel(s);
   // NEW: I2C pins (optional trailing lines)
-  if (f.available()) { if ((s = _safeReadLine(f)).length()) { int p=s.toInt(); if (isValidGpioPin(p)) i2cSdaPin = p; } }
-  if (f.available()) { if ((s = _safeReadLine(f)).length()) { int p=s.toInt(); if (isValidGpioPin(p)) i2cSclPin = p; } }
+  if (nextTail(s) && s.length()) { int p=s.toInt(); if (isValidGpioPin(p)) i2cSdaPin = p; }
+  if (nextTail(s) && s.length()) { int p=s.toInt(); if (isValidGpioPin(p)) i2cSclPin = p; }
   // NEW: display mode (optional trailing line)
-  if (f.available()) { if ((s = _safeReadLine(f)).length()) displayUseTft = (s.toInt() == 1); }
+  if (nextTail(s) && s.length()) displayUseTft = (s.toInt() == 1);
   // NEW: TFT rotation (optional trailing line)
-  if (f.available()) {
-    if ((s = _safeReadLine(f)).length()) {
+  if (nextTail(s) && s.length()) {
       int r = s.toInt();
       if (r < 0) r = 0;
       if (r > 3) r = 3;
       tftRotation = (uint8_t)r;
-    }
   }
   // NEW: TFT panel width/height (optional trailing lines)
-  if (f.available()) {
-    if ((s = _safeReadLine(f)).length()) {
-      int v = s.toInt();
-      if (isValidTftDimension(v)) tftPanelWidth = (int16_t)v;
-    }
+  if (nextTail(s) && s.length()) {
+    int v = s.toInt();
+    if (isValidTftDimension(v)) tftPanelWidth = (int16_t)v;
   }
-  if (f.available()) {
-    if ((s = _safeReadLine(f)).length()) {
-      int v = s.toInt();
-      if (isValidTftDimension(v)) tftPanelHeight = (int16_t)v;
-    }
+  if (nextTail(s) && s.length()) {
+    int v = s.toInt();
+    if (isValidTftDimension(v)) tftPanelHeight = (int16_t)v;
   }
 
   f.close();
@@ -6234,6 +6435,10 @@ void saveConfig() {
   f.println(relayActiveHigh ? 1 : 0);
   // NEW: persist GPIO polarity for fallback mode
   f.println(gpioActiveLow ? 1 : 0);
+  // NEW: persist per-output GPIO polarity for fallback mode
+  for (int i = 0; i < MAX_ZONES; ++i) f.println(zoneGpioActiveLow[i] ? 1 : 0);
+  f.println(mainsGpioActiveLow ? 1 : 0);
+  f.println(tankGpioActiveLow ? 1 : 0);
   // NEW: tank level sensor pin (ADC)
   f.println(tankLevelPin);
   // NEW: photoresistor auto-backlight
@@ -6487,15 +6692,19 @@ void handleConfigure() {
       int p = server.arg(key).toInt();
       if (p >= -1 && p <= 39) zonePins[i] = p;
     }
+    String polarityKey = "zonePinLow" + String(i);
+    zoneGpioActiveLow[i] = server.hasArg(polarityKey);
   }
   if (server.hasArg("mainsPin")) {
     int p = server.arg("mainsPin").toInt();
     if (isValidOutputPin(p)) mainsPin = p;
   }
+  mainsGpioActiveLow = server.hasArg("mainsPinLow");
   if (server.hasArg("tankPin")) {
     int p = server.arg("tankPin").toInt();
     if (isValidOutputPin(p)) tankPin = p;
   }
+  tankGpioActiveLow = server.hasArg("tankPinLow");
   if (server.hasArg("tankLevelPin")) {
     int p = server.arg("tankLevelPin").toInt();
     if (isValidAdcPin(p)) tankLevelPin = p;
@@ -6595,8 +6804,12 @@ void handleConfigure() {
     if ((p >= -1 && p <= 39)) manualStartPin = p;
   }
 
-  // NEW: polarity setting
-  gpioActiveLow = server.hasArg("gpioActiveLow"); 
+  // Keep the legacy global polarity aligned for backward-compatible saves.
+  gpioActiveLow = false;
+  for (int i = 0; i < MAX_ZONES; ++i) {
+    if (zoneGpioActiveLow[i]) { gpioActiveLow = true; break; }
+  }
+  if (mainsGpioActiveLow || tankGpioActiveLow) gpioActiveLow = true;
 
   // Timezone mode + values
   if (server.hasArg("tzMode")) {
