@@ -2227,6 +2227,7 @@ void showManualSelection() {
 void drawManualSelection() {
   const int selectedZone = manualSelectedZone % zonesCount;
   const bool selectedActive = zoneActive[selectedZone];
+  const char* selectedZoneName = zoneNames[selectedZone].c_str();
 
   if (!displayUseTft) {
     display.clearDisplay();
@@ -2234,8 +2235,7 @@ void drawManualSelection() {
     display.setCursor(0, 0);
     display.print("Manual");
     display.setCursor(0, 24);
-    display.print("Zone ");
-    display.print((int)selectedZone + 1);
+    display.print(selectedZoneName);
     display.setTextSize(1);
     display.setCursor(0, 50);
     display.print("State: ");
@@ -2265,13 +2265,13 @@ void drawManualSelection() {
   int statusId = 0;
   const char* statusText = "READY";
   uint16_t statusColor = C_GOOD;
-  char detailLine[40] = "Press Start to toggle";
+  char detailLine[64] = "Press Start to toggle";
 
   if (!pinReady) {
     statusId = 1;
     statusText = "NO PIN";
     statusColor = C_BAD;
-    snprintf(detailLine, sizeof(detailLine), "Assign an output pin for Z%d", selectedZone + 1);
+    snprintf(detailLine, sizeof(detailLine), "Assign an output pin for %s", selectedZoneName);
   } else if (selectedActive) {
     statusId = 2;
     statusText = "ACTIVE";
@@ -2303,7 +2303,7 @@ void drawManualSelection() {
     statusId = 6;
     statusText = "BUSY";
     statusColor = C_WARN;
-    snprintf(detailLine, sizeof(detailLine), "Z%d is already running", activeZone + 1);
+    snprintf(detailLine, sizeof(detailLine), "%s is already running", zoneNames[activeZone].c_str());
   }
 
   if (layoutChanged) {
@@ -2340,15 +2340,27 @@ void drawManualSelection() {
     int cardY = (H - cardH) / 2 - 10;
     if (cardY < 44) cardY = 44;
 
-    tft.fillRect(cardX + 10, cardY + 10, cardW - 20, cardH - 20, C_PANEL);
-    tft.setTextColor(C_TEXT);
-    tft.setTextSize(3);
-    tft.setCursor(cardX + 12, cardY + 16);
-    tft.print("Zone ");
-    tft.print(selectedZone + 1);
-
     int pillW = 10 + (int)strlen(statusText) * 6;
     int pillX = cardX + cardW - pillW - 12;
+    int titleX = cardX + 12;
+    int maxTitleW = pillX - titleX - 8;
+    int16_t titleX1 = 0, titleY1 = 0;
+    uint16_t titleW = 0, titleH = 0;
+    uint8_t titleSize = 2;
+    tft.setTextSize(titleSize);
+    tft.getTextBounds(selectedZoneName, 0, 0, &titleX1, &titleY1, &titleW, &titleH);
+    if ((int)titleW > maxTitleW) {
+      titleSize = 1;
+      tft.setTextSize(titleSize);
+      tft.getTextBounds(selectedZoneName, 0, 0, &titleX1, &titleY1, &titleW, &titleH);
+    }
+
+    tft.fillRect(cardX + 10, cardY + 10, cardW - 20, cardH - 20, C_PANEL);
+    tft.setTextColor(C_TEXT);
+    tft.setTextSize(titleSize);
+    tft.setCursor(titleX, cardY + (titleSize == 2 ? 18 : 22));
+    tft.print(selectedZoneName);
+
     tft.fillRect(pillX, cardY + 16, pillW, 18, statusColor);
     tft.drawRect(pillX, cardY + 16, pillW, 18, C_EDGE);
     tft.setTextSize(1);
@@ -4515,16 +4527,15 @@ void handleRoot() {
   html += F(".sched-card input[type=checkbox]:focus-visible{outline:none;border-color:#ffffff;box-shadow:0 0 0 3px rgba(31,138,112,.18)}");
   html += F(".sched-card input[type=checkbox]:active{transform:translateY(1px)}");
   html += F(".in{border:1px solid var(--line);border-radius:10px;padding:8px 10px;background:transparent;color:var(--ink);font-size:.9rem}");
-  html += F(".days-grid{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:8px;width:100%}");
+  html += F(".days-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;width:100%}");
   html += F(".day{position:relative;display:block;min-width:0}");
   html += F(".day input{position:absolute;inset:0;width:100%;height:100%;margin:0;opacity:0;cursor:pointer;z-index:2}");
-  html += F(".day span{display:flex;align-items:center;justify-content:center;min-height:44px;padding:10px 8px;border-radius:14px;border:1px solid var(--chip-brd);");
+  html += F(".day span{display:flex;align-items:center;justify-content:center;min-height:44px;padding:10px 16px;border-radius:999px;border:1px solid var(--chip-brd);");
   html += F("background:linear-gradient(180deg,rgba(255,255,255,.06),rgba(255,255,255,.02));font-size:.78rem;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);transition:border-color .12s ease,background .12s ease,box-shadow .12s ease,transform .06s ease}");
   html += F(".day input:checked + span{border-color:rgba(31,138,112,.46);background:linear-gradient(180deg,rgba(31,138,112,.18),rgba(31,138,112,.05));color:var(--ink);box-shadow:0 10px 20px rgba(20,91,99,.12)}");
   html += F(".day input:focus-visible + span{outline:2px solid var(--primary);outline-offset:2px}");
   html += F(".day input:active + span{transform:translateY(1px)}");
-  html += F("@media(max-width:900px){.days-grid{grid-template-columns:repeat(4,minmax(0,1fr))}}");
-  html += F("@media(max-width:720px){.nav .in{flex-direction:column;align-items:flex-start}.zones{grid-template-columns:1fr}.sched-grid{grid-template-columns:1fr}.rowx{grid-template-columns:1fr}.rowx label{margin-bottom:4px}.days-grid{grid-template-columns:repeat(4,minmax(0,1fr))}.day span{min-height:42px}}");
+  html += F("@media(max-width:720px){.nav .in{flex-direction:column;align-items:flex-start}.zones{grid-template-columns:1fr}.sched-grid{grid-template-columns:1fr}.rowx{grid-template-columns:1fr}.rowx label{margin-bottom:4px}.days-grid{grid-template-columns:repeat(3,minmax(0,1fr))}.day span{min-height:42px}}");
   html += F("@media(max-width:460px){.days-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}");
   html += F(".collapse{cursor:pointer;user-select:none;display:flex;align-items:center;justify-content:space-between;font-size:1.05rem}");
   html += F(".collapse .arr{font-size:1rem;opacity:.8;margin-left:6px}");
@@ -5691,8 +5702,8 @@ void handleSetupPage() {
   html += F("<div class='row switchline'><label>Start/Stop Button Pin</label><input class='in-xs' type='number' min='-1' max='39' name='manualStartPin' value='");
   html += String(manualStartPin);
   html += F("'><small>Toggles the selected zone on/off.</small></div>");
-  html += F("<div class='row'><label>Selected Zone</label><div class='sub'>Z");
-  html += String(manualSelectedZone + 1);
+  html += F("<div class='row'><label>Selected Zone</label><div class='sub'>");
+  html += zoneNames[manualSelectedZone % zonesCount];
   html += F(" (cycles with Select button)</div></div>");
   html += F("</div></details></div>");
 
