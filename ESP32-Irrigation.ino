@@ -4465,31 +4465,30 @@ void handleRoot() {
   html += F(".btn,.btn-ghost,.pill{position:relative;overflow:hidden}");
   html += F(".ripple{position:absolute;border-radius:999px;transform:scale(0);background:rgba(255,255,255,.35);animation:ripple .5s ease-out;pointer-events:none}");
   html += F("@keyframes ripple{to{transform:scale(3.2);opacity:0;}}");
-  html += F(".zone-actions{margin-top:8px;justify-content:flex-end;align-items:center}");
-  html += F(".zones{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:var(--gap);justify-content:center;justify-items:stretch}");
-  html += F(".zone-card{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius-sm);padding:var(--pad);");
-  html += F("display:flex;flex-direction:column;gap:12px;min-height:140px;position:relative;overflow:hidden;");
-  html += F("background:linear-gradient(160deg,var(--panel),rgba(70,198,163,.08));transition:transform .14s ease,box-shadow .14s ease,border-color .14s ease}");
-  html += F(".zone-card::before{content:'';position:absolute;left:0;top:0;bottom:0;width:4px;background:transparent;transition:background .14s ease}");
-  html += F(".zone-card.is-active{border-color:rgba(34,197,94,.42);box-shadow:0 20px 40px rgba(22,163,74,.14)}");
-  html += F(".zone-card.is-active::before{background:linear-gradient(180deg,#34d399,#22c55e)}");
-  html += F(".zone-head{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:2px}");
-  html += F(".zone-title{display:flex;align-items:center;gap:8px;font-weight:700;font-size:1.08rem;min-width:0}");
+  html += F(".zone-overview{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:var(--gap);margin-bottom:18px}");
+  html += F(".zone-summary-card{padding:18px;border:1px solid var(--line);border-radius:18px;background:linear-gradient(160deg,var(--panel),rgba(70,198,163,.08));display:flex;flex-direction:column;gap:8px;min-height:136px}");
+  html += F(".zone-summary-k{font-size:.74rem;letter-spacing:.16em;text-transform:uppercase;color:var(--muted);font-weight:800}");
+  html += F(".zone-summary-v{font-size:1.3rem;line-height:1.06;font-weight:850;color:var(--ink)}");
+  html += F(".zone-summary-sub{font-size:.95rem;color:var(--ink);font-weight:650}");
+  html += F(".zone-summary-meta{margin-top:auto;font-size:.84rem;color:var(--muted)}");
+  html += F(".zone-list-head{display:flex;align-items:flex-end;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:10px}");
+  html += F(".zone-list-head h3{margin:0}");
+  html += F(".zone-list-note{font-size:.9rem;color:var(--muted)}");
+  html += F(".zone-list{display:flex;flex-direction:column;gap:10px}");
+  html += F(".zone-row{display:grid;grid-template-columns:minmax(0,1.6fr) auto auto;gap:12px;align-items:center;padding:14px 16px;border:1px solid var(--line);border-radius:18px;background:linear-gradient(180deg,var(--panel),rgba(255,255,255,.04));transition:border-color .14s ease,box-shadow .14s ease,transform .14s ease}");
+  html += F(".zone-row.is-active{border-color:rgba(34,197,94,.42);box-shadow:0 14px 30px rgba(22,163,74,.12)}");
+  html += F(".zone-row-main{display:flex;align-items:center;gap:10px;min-width:0}");
+  html += F(".zone-row-copy{min-width:0}");
+  html += F(".zone-row-name{font-size:1rem;font-weight:780;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}");
+  html += F(".zone-row-sub{font-size:.84rem;color:var(--muted);margin-top:2px}");
   html += F(".zone-index{width:26px;height:26px;border-radius:999px;display:flex;align-items:center;justify-content:center;");
   html += F("font-size:.82rem;background:var(--chip);border:1px solid var(--chip-brd);flex-shrink:0}");
   html += F(".zone-dot{width:13px;height:13px;border-radius:999px;background:var(--line);border:1px solid var(--glass-brd);box-shadow:0 0 0 2px rgba(0,0,0,.06) inset}");
   html += F(".zone-dot.on{background:var(--ok);box-shadow:0 0 10px rgba(34,197,94,.55)}");
-  html += F(".zone-title .big{font-size:.98rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}");
-  html += F(".zone-timer{display:flex;align-items:center;gap:10px;margin-top:4px}");
-  html += F(".zone-rem-wrap{min-width:90px}");
-  html += F(".zone-rem-label{font-size:.8rem;letter-spacing:.4px;text-transform:uppercase;color:var(--muted);display:block;margin-bottom:2px}");
-  html += F(".zone-rem{font-size:1.05rem;font-weight:700;color:var(--ink);font-variant-numeric:tabular-nums}");
-  html += F(".zone-meter{flex:1;display:flex;flex-direction:column;gap:3px}");
-  html += F(".zone-meter .meter{margin-top:0}");
-  html += F(".zone-bar-label{font-size:.82rem;letter-spacing:.3px;color:var(--muted);font-weight:600}");
-  html += F(".zone-meta-row{display:flex;gap:6px;flex-wrap:wrap;margin-top:6px;font-size:.82rem;color:var(--muted)}");
-  html += F(".zone-meta-row .pill-soft{padding:4px 10px;border-radius:999px;background:var(--chip);border:1px solid var(--chip-brd)}");
-  html += F(".zone-meta-row b{font-weight:700}");
+  html += F(".zone-row-status{display:flex;align-items:center;justify-content:flex-end;gap:10px;flex-wrap:wrap}");
+  html += F(".zone-row-rem{font-size:.96rem;font-weight:760;color:var(--ink);font-variant-numeric:tabular-nums;min-width:86px;text-align:right}");
+  html += F(".zone-row-actions{margin:0;display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap}");
+  html += F(".zone-row-actions .btn{padding:9px 14px;font-size:.92rem}");
   html += F("body{-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}");
   html += F(".card{transition:transform .12s ease,box-shadow .12s ease}");
   html += F(".card:hover{transform:translateY(-2px);box-shadow:0 16px 34px rgba(0,0,0,.18)}");
@@ -4586,7 +4585,7 @@ void handleRoot() {
   html += F(".action-copy p{margin:8px 0 0;color:var(--muted)}");
   html += F("#clock,.hero-mini-value{font-variant-numeric:tabular-nums}");
   html += F("@media(max-width:980px){.hero-grid{grid-template-columns:1fr}.section-head{flex-direction:column;align-items:flex-start}.section-note{text-align:left}.summary-grid .weather-card,.summary-grid .next-card{grid-column:auto}.metric-tile.metric-wide{grid-column:auto}.dash-nav{top:68px}}");
-  html += F("@media(max-width:720px){.nav{padding-top:8px}.chip{font-size:.88rem}.hero-shell{padding:18px}.hero-title{max-width:none;font-size:1.95rem}.hero-mini-grid{grid-template-columns:1fr}.zone-actions{justify-content:stretch}.zone-actions .btn{flex:1 1 140px}.brand-title{letter-spacing:.55px}.summary-card{min-height:auto}.summary-link{min-height:0}.summary-metric-grid{grid-template-columns:1fr 1fr}.dash-nav{top:120px;overflow:auto;flex-wrap:nowrap;padding-bottom:8px}.dash-nav a{white-space:nowrap}.sched-top{padding:16px}.sched-body{padding:16px}.sched-tools .btn{flex:1 1 140px}}");
+  html += F("@media(max-width:720px){.nav{padding-top:8px}.chip{font-size:.88rem}.hero-shell{padding:18px}.hero-title{max-width:none;font-size:1.95rem}.hero-mini-grid{grid-template-columns:1fr}.zone-row{grid-template-columns:1fr}.zone-row-status,.zone-row-actions{justify-content:flex-start}.zone-row-actions .btn{flex:1 1 140px}.brand-title{letter-spacing:.55px}.summary-card{min-height:auto}.summary-link{min-height:0}.summary-metric-grid{grid-template-columns:1fr 1fr}.dash-nav{top:120px;overflow:auto;flex-wrap:nowrap;padding-bottom:8px}.dash-nav a{white-space:nowrap}.sched-top{padding:16px}.sched-body{padding:16px}.sched-tools .btn{flex:1 1 140px}}");
   html += F("</style></head><body>");
   flush();
 
@@ -4800,119 +4799,152 @@ void handleRoot() {
   html += F("</div></div></div>"); // #schedBody, .card.sched, .wrap
   flush();
 
-    // --- Live Zones ---
-  html += F("<div class='wrap section-block' id='zones-section'><div class='section-head'><div><div class='section-kicker'>Live Control</div><h2>Zones</h2></div>");
+  String zoneLiveHeadline = "Idle";
+  String zoneLiveSub = "No zones are running";
+  String zoneLiveMeta = String(zonesCount) + " zones ready";
+  if (activeZoneCount == 1) {
+    for (int z = 0; z < (int)zonesCount; ++z) {
+      if (!zoneActive[z]) continue;
+      unsigned long total = zoneRunTotalSec[z];
+      if (total == 0) total = durationForSlot(z, 1);
+      unsigned long elapsed = (millis() - zoneStartMs[z]) / 1000UL;
+      unsigned long rem = (elapsed < total ? total - elapsed : 0);
+      char remBuf[16];
+      fmtMMSS(remBuf, sizeof(remBuf), rem);
+      zoneLiveHeadline = zoneNames[z];
+      zoneLiveSub = String("Remaining ") + remBuf;
+      zoneLiveMeta = sourceModeText();
+      break;
+    }
+  } else if (activeZoneCount > 1) {
+    String activeNames;
+    int listed = 0;
+    for (int z = 0; z < (int)zonesCount; ++z) {
+      if (!zoneActive[z]) continue;
+      if (listed < 2) {
+        if (activeNames.length()) activeNames += ", ";
+        activeNames += zoneNames[z];
+      }
+      listed++;
+    }
+    if (activeZoneCount > 2) {
+      activeNames += " +";
+      activeNames += String(activeZoneCount - 2);
+      activeNames += " more";
+    }
+    zoneLiveHeadline = String(activeZoneCount) + " zones running";
+    zoneLiveSub = activeNames;
+    zoneLiveMeta = runZonesConcurrent ? String("Concurrent mode active") : String("Sequential queue active");
+  }
+
+  String zoneNextHeadline = "No run queued";
+  String zoneNextSub = rainActive ? String("Waiting for rain delay to clear") : String("No queued run");
+  String zoneNextMeta = "Awaiting schedule";
+  if (nextWater.epoch > 0 && nextWater.zone >= 0 && nextWater.zone < (int)zonesCount) {
+    zoneNextHeadline = zoneNames[nextWater.zone];
+    zoneNextSub = nextWaterLabel;
+    if (nextWater.durSec > 0) {
+      char durBuf[16];
+      fmtMMSS(durBuf, sizeof(durBuf), nextWater.durSec);
+      zoneNextMeta = String("Duration ") + durBuf;
+    } else {
+      zoneNextMeta = "Scheduled";
+    }
+  }
+
+  String zoneStatusHeadline = !systemMasterEnabled ? String("Master Off")
+                              : (pausedNow ? String("Paused")
+                              : (rainActive ? String("Rain Delay")
+                              : (windActive ? String("Wind Delay") : String("Ready"))));
+  String zoneStatusSub = !systemMasterEnabled ? String("Outputs are blocked")
+                           : (pausedNow ? String("Schedules are temporarily suspended")
+                           : ((rainActive || windActive) ? causeText : String("Automation is clear to run")));
+  String zoneStatusMeta = sourceModeText();
+  zoneStatusMeta = sourceModeText() + String(" | ") + String(zonesCount) + String(" zones | ") +
+                   (runZonesConcurrent ? String("Concurrent") : String("Sequential"));
+  zoneStatusMeta += " • ";
+  zoneStatusMeta += String(zonesCount);
+  zoneStatusMeta += " zones • ";
+  zoneStatusMeta += runZonesConcurrent ? "Concurrent" : "Sequential";
+  zoneStatusMeta = sourceModeText() + String(" | ") + String(zonesCount) + String(" zones | ") +
+                   (runZonesConcurrent ? String("Concurrent") : String("Sequential"));
+
+  // --- Live Zones ---
+  html += F("<div class='wrap section-block' id='zones-section'><div class='section-head'><div><div class='section-kicker'>Live Control</div><h2>Zone overview</h2></div>");
   html += F("<p class='section-note'></p></div>");
   html += F("<div class='card zones-shell'>");
-  html += F("<h3>Zones</h3><div class='zones'>");
+  html += F("<div class='zone-overview'>");
+  html += F("<div class='zone-summary-card'><div class='zone-summary-k'>Running Now</div><div class='zone-summary-v' id='zoneLiveHeadline'>");
+  html += zoneLiveHeadline;
+  html += F("</div><div class='zone-summary-sub' id='zoneLiveSub'>");
+  html += zoneLiveSub;
+  html += F("</div><div class='zone-summary-meta' id='zoneLiveMeta'>");
+  html += zoneLiveMeta;
+  html += F("</div></div>");
+  html += F("<div class='zone-summary-card'><div class='zone-summary-k'>Next Run</div><div class='zone-summary-v' id='zoneNextHeadline'>");
+  html += zoneNextHeadline;
+  html += F("</div><div class='zone-summary-sub' id='zoneNextSub'>");
+  html += zoneNextSub;
+  html += F("</div><div class='zone-summary-meta' id='zoneNextMeta'>");
+  html += zoneNextMeta;
+  html += F("</div></div>");
+  html += F("<div class='zone-summary-card'><div class='zone-summary-k'>System Status</div><div class='zone-summary-v' id='zoneSystemHeadline'>");
+  html += zoneStatusHeadline;
+  html += F("</div><div class='zone-summary-sub' id='zoneSystemSub'>");
+  html += zoneStatusSub;
+  html += F("</div><div class='zone-summary-meta' id='zoneSystemMeta'>");
+  html += zoneStatusMeta;
+  html += F("</div></div>");
+  html += F("</div>");
 
-  for (int z=0; z<(int)zonesCount; z++) {
-    unsigned long rem  = 0;
+  html += F("<div class='zone-list-head'><h3>Quick Zone Control</h3><div class='zone-list-note'>Compact live rows with manual on/off control.</div></div>");
+  html += F("<div class='zone-list'>");
+
+  for (int z = 0; z < (int)zonesCount; z++) {
     unsigned long total = zoneRunTotalSec[z];
-    if (total == 0) total = durationForSlot(z,1);
-
+    if (total == 0) total = durationForSlot(z, 1);
+    unsigned long rem = total;
     if (zoneActive[z]) {
-      unsigned long elapsed = (millis() - zoneStartMs[z]) / 1000;
+      unsigned long elapsed = (millis() - zoneStartMs[z]) / 1000UL;
       rem = (elapsed < total ? total - elapsed : 0);
     }
-    int pctDone = (zoneActive[z] && total>0)
-                  ? (int)((100UL * (total - rem)) / total)
-                  : 0;
 
-    // Prettier duration label
-    unsigned long durSec = total;
-    unsigned int durM = durSec / 60;
-    unsigned int durS = durSec % 60;
+    char valueBuf[16];
+    fmtMMSS(valueBuf, sizeof(valueBuf), zoneActive[z] ? rem : total);
 
-    html += F("<div class='zone-card ");
+    html += F("<div class='zone-row ");
     html += (zoneActive[z] ? "is-active" : "");
     html += F("' id='zone-");
     html += String(z);
-    html += F("-card'>");
+    html += F("-row'>");
 
-    // Header: index + name + state badge
-    html += F("<div class='zone-head'>");
-      html += F("<div class='zone-title'>");
-        html += F("<span class='zone-index'>Z");
-        html += String(z+1);
-        html += F("</span>");
-        html += F("<span id='zone-");
-        html += String(z);
-        html += F("-dot' class='zone-dot ");
-        html += (zoneActive[z] ? "on" : "");
-        html += F("'></span>");
-        html += F("<span class='big'>");
-        html += zoneNames[z];
-        html += F("</span>");
-      html += F("</div>");
-      html += F("<div id='zone-");
-      html += String(z);
-      html += F("-state' class='badge ");
-      html += (zoneActive[z] ? "b-ok" : "");
-      html += F("'>");
-      html += (zoneActive[z] ? "Running" : "Off");
-      html += F("</div>");
-    html += F("</div>"); // .zone-head
+    html += F("<div class='zone-row-main'><span class='zone-index'>Z");
+    html += String(z + 1);
+    html += F("</span><span id='zone-");
+    html += String(z);
+    html += F("-dot' class='zone-dot ");
+    html += (zoneActive[z] ? "on" : "");
+    html += F("'></span><div class='zone-row-copy'><div class='zone-row-name'>");
+    html += zoneNames[z];
+    html += F("</div><div class='zone-row-sub' id='zone-");
+    html += String(z);
+    html += F("-meta'>");
+    html += (zoneActive[z] ? "Remaining" : "Run time");
+    html += F("</div></div></div>");
 
-    // Timer row: Remaining + bar
-    html += F("<div class='zone-timer'>");
+    html += F("<div class='zone-row-status'><div id='zone-");
+    html += String(z);
+    html += F("-state' class='badge ");
+    html += (zoneActive[z] ? "b-ok" : "");
+    html += F("'>");
+    html += (zoneActive[z] ? "Running" : "Ready");
+    html += F("</div><div class='zone-row-rem' id='zone-");
+    html += String(z);
+    html += F("-rem'>");
+    html += valueBuf;
+    html += F("</div></div>");
 
-      html += F("<div class='zone-rem-wrap'>");
-        html += F("<span class='zone-rem-label'>Remaining</span>");
-        html += F("<div class='zone-rem' id='zone-");
-        html += String(z);
-        html += F("-rem'>");
-        if (zoneActive[z]) {
-          int rm = rem / 60;
-          int rs = rem % 60;
-          if (rm < 10) html += F("0");
-          html += String(rm);
-          html += F("m ");
-          if (rs < 10) html += F("0");
-          html += String(rs);
-          html += F("s");
-        } else {
-          html += F("--");
-        }
-        html += F("</div>");
-      html += F("</div>"); // .zone-rem-wrap
-
-      html += F("<div class='zone-meter'>");
-      html += F("<span class='zone-bar-label'>Progress</span>");
-      html += F("<div class='meter'><div id='zone-");
-      html += String(z);
-      html += F("-bar' class='fill' style='width:");
-      html += String(pctDone);
-      html += F("%'></div></div>");
-      html += F("</div>");
-
-    html += F("</div>"); // .zone-timer
-
-    // Meta row: Duration
-    html += F("<div class='zone-meta-row'>");
-      html += F("<span class='pill-soft'><span>Run Time 1 -&nbsp;</span><b>");
-      if (durM < 10) html += F("0");
-      html += String(durM);
-      html += F("m ");
-      if (durS < 10) html += F("0");
-      html += String(durS);
-      html += F("s</b></span>");
-      if (enableStartTime2[z]) {
-        unsigned long d2 = (unsigned long)duration2Min[z]*60UL + (unsigned long)duration2Sec[z];
-        unsigned int d2m = d2 / 60;
-        unsigned int d2s = d2 % 60;
-        html += F("<span class='pill-soft'><span>Run Time 2 -&nbsp;</span><b>");
-        if (d2m < 10) html += F("0");
-        html += String(d2m);
-        html += F("m ");
-        if (d2s < 10) html += F("0");
-        html += String(d2s);
-        html += F("s</b></span>");
-      }
-    html += F("</div>");
-
-    // Actions
-    html += F("<div class='toolbar zone-actions'>");
+    html += F("<div class='zone-row-actions'>");
     html += F("<button type='button' class='btn' id='zone-");
     html += String(z);
     html += F("-on' onclick='toggleZone(");
@@ -4927,13 +4959,13 @@ void handleRoot() {
     html += F(",0)'");
     if (!zoneActive[z]) html += F(" disabled");
     html += F(">Off</button>");
-    html += F("</div>"); // .toolbar
+    html += F("</div>");
 
-    html += F("</div>"); // .zone-card
+    html += F("</div>");
     flush();
   }
 
-  html += F("</div></div></div>"); // Close zones block
+  html += F("</div></div></div>");
   flush();
 
   // --- System Controls ---
@@ -5005,6 +5037,7 @@ void handleRoot() {
   html += F("const diff=Math.round((target-start)/86400000); if(diff===0) return 'Today'; if(diff===1) return 'Tomorrow';");
   html += F("return d.toLocaleDateString(undefined,{weekday:'short', day:'2-digit', month:'short'});}"); 
   html += F("function nextWaterStartLabel(epoch){if(!epoch||epoch===0)return'--'; return nextWaterDayLabel(epoch)+' '+toLocalHHMM(epoch);}");
+  html += F("function fmtDurCompact(s){ if(!(s>0)) return '--'; const m=Math.floor(s/60), sec=s%60; return pad(m)+'m '+pad(sec)+'s'; }");
   html += F("async function refreshStatus(){try{const r=await fetch('/status');const st=await r.json();");
   html += F("if(typeof st.deviceEpoch==='number' && st.deviceEpoch>0 && _devEpoch===null){ startDeviceClock(st.deviceEpoch); }");
   html += F("const rb=document.getElementById('rainBadge');const wb=document.getElementById('windBadge');");
@@ -5038,14 +5071,28 @@ void handleRoot() {
   html += F("if(acc1h){var v=(typeof st.rain1hNow==='number')?st.rain1hNow:NaN;acc1h.textContent=isNaN(v)?'--':v.toFixed(1);}");
   html += F("const acc24=document.getElementById('acc24'); if(acc24){ const v=(typeof st.rain24hActual==='number')?st.rain24hActual:(typeof st.rain24h==='number'?st.rain24h:NaN); acc24.textContent=isNaN(v)?'--':v.toFixed(1);} ");
 
-  html += F("let activeCount=0; if(Array.isArray(st.zones)){ st.zones.forEach((z,idx)=>{");
-  html += F("if(z.active) activeCount++; const stateEl=document.getElementById('zone-'+idx+'-state'); const remEl=document.getElementById('zone-'+idx+'-rem'); const barEl=document.getElementById('zone-'+idx+'-bar'); const dotEl=document.getElementById('zone-'+idx+'-dot'); const cardEl=document.getElementById('zone-'+idx+'-card');");
-  html += F("if(stateEl){stateEl.className='badge '+(z.active?'b-ok':'');stateEl.innerHTML=z.active?'Running':'Off';} if(dotEl){dotEl.className='zone-dot'+(z.active?' on':'');} if(cardEl){cardEl.classList.toggle('is-active',!!z.active);}");
-  html += F("if(remEl){ if(z.active){ const r=z.remaining||0; const rm=Math.floor(r/60),rs=r%60; remEl.textContent=pad(rm)+'m '+pad(rs)+'s left'; } else remEl.textContent='--'; }");
-  html += F("if(barEl){ let p=0; const total=z.totalSec||0; const rem=z.remaining||0; p=total>0?Math.max(0,Math.min(100,Math.round(100*(total-rem)/total))):0; barEl.style.width=p+'%'; }");
+  html += F("let activeCount=0; const activeZones=[]; if(Array.isArray(st.zones)){ st.zones.forEach((z,idx)=>{");
+  html += F("if(z.active){ activeCount++; activeZones.push({name:z.name||('Z'+(idx+1)), remaining:(z.remaining||0), totalSec:(z.totalSec||0)}); }");
+  html += F("const stateEl=document.getElementById('zone-'+idx+'-state'); const remEl=document.getElementById('zone-'+idx+'-rem'); const dotEl=document.getElementById('zone-'+idx+'-dot'); const rowEl=document.getElementById('zone-'+idx+'-row'); const metaEl=document.getElementById('zone-'+idx+'-meta');");
+  html += F("if(stateEl){stateEl.className='badge '+(z.active?'b-ok':'');stateEl.textContent=z.active?'Running':'Ready';}");
+  html += F("if(dotEl){dotEl.className='zone-dot'+(z.active?' on':'');} if(rowEl){rowEl.classList.toggle('is-active',!!z.active);}");
+  html += F("if(metaEl) metaEl.textContent=z.active?'Remaining':'Run time';");
+  html += F("if(remEl){ remEl.textContent=z.active?fmtDurCompact(z.remaining||0):fmtDurCompact(z.totalSec||0); }");
   html += F("const onBtn=document.getElementById('zone-'+idx+'-on'); const offBtn=document.getElementById('zone-'+idx+'-off');");
   html += F("if(onBtn) onBtn.disabled=!!z.active; if(offBtn) offBtn.disabled=!z.active;");
   html += F("}); }");
+  html += F("(function(){ const h=document.getElementById('zoneLiveHeadline'); const s=document.getElementById('zoneLiveSub'); const m=document.getElementById('zoneLiveMeta');");
+  html += F("if(activeZones.length===0){ if(h) h.textContent='Idle'; if(s) s.textContent='No zones are running'; if(m) m.textContent=((st.zonesCount||0)+' zones ready'); return; }");
+  html += F("if(activeZones.length===1){ const a=activeZones[0]; if(h) h.textContent=a.name; if(s) s.textContent='Remaining '+fmtDurCompact(a.remaining||0); if(m) m.textContent=st.sourceMode||''; return; }");
+  html += F("const names=activeZones.slice(0,2).map(z=>z.name).join(', ')+(activeZones.length>2?(' +'+(activeZones.length-2)+' more'):'');");
+  html += F("if(h) h.textContent=activeZones.length+' zones running'; if(s) s.textContent=names; if(m) m.textContent=st.runConcurrent?'Concurrent mode active':'Sequential queue active'; })();");
+  html += F("(function(){ const h=document.getElementById('zoneSystemHeadline'); const s=document.getElementById('zoneSystemSub'); const m=document.getElementById('zoneSystemMeta');");
+  html += F("let headline='Ready', sub='Automation is clear to run';");
+  html += F("if(st.masterOn===false){ headline='Master Off'; sub='Outputs are blocked'; } else if(st.systemPaused){ headline='Paused'; sub='Schedules are temporarily suspended'; } else if(st.rainDelayActive){ headline='Rain Delay'; sub=st.rainDelayCause||'Rain delay active'; } else if(st.windDelayActive){ headline='Wind Delay'; sub=st.rainDelayCause||'Wind delay active'; }");
+  html += F("if(h) h.textContent=headline; if(s) s.textContent=sub;");
+  html += F("if(m){ const parts=[]; if(st.sourceMode) parts.push(st.sourceMode); parts.push((st.zonesCount||0)+' zones'); parts.push(st.runConcurrent?'Concurrent':'Sequential'); m.textContent=parts.join(' • '); } })();");
+
+  html += F("(function(){ const m=document.getElementById('zoneSystemMeta'); if(m){ const parts=[]; if(st.sourceMode) parts.push(st.sourceMode); parts.push((st.zonesCount||0)+' zones'); parts.push(st.runConcurrent?'Concurrent':'Sequential'); m.textContent=parts.join(' | '); } })();");
 
   // Weather stats
   html += F("const tmin=document.getElementById('tmin'); const tmax=document.getElementById('tmax'); const sunr=document.getElementById('sunr'); const suns=document.getElementById('suns'); const press=document.getElementById('press');");
@@ -5086,6 +5133,7 @@ void handleRoot() {
   // Next Water
   html += F("(function(){ const zEl=document.getElementById('nwZone'); const tEl=document.getElementById('nwTime'); const eEl=document.getElementById('nwETA'); const dEl=document.getElementById('nwDur');");
   html += F("const hv=document.getElementById('heroNextValue'); const hs=document.getElementById('heroNextSub');");
+  html += F("const znh=document.getElementById('zoneNextHeadline'); const zns=document.getElementById('zoneNextSub'); const znm=document.getElementById('zoneNextMeta');");
   html += F("const epoch=st.nextWaterEpoch|0; const zone=st.nextWaterZone; const name=st.nextWaterName||(Number.isInteger(zone)?('Z'+(zone+1)):'--'); const dur=st.nextWaterDurSec|0;");
   html += F("function fmtDur(s){ if(s<=0) return '--'; const m=Math.floor(s/60), sec=s%60; return pad(m)+'m '+pad(sec)+'s'; }");
   html += F("function fmtETA(delta){ if(delta<=0) return 'now'; const h=Math.floor(delta/3600), m=Math.floor((delta%3600)/60); if(h>0) return h+'h '+m+'m'; return m+'m'; }");
@@ -5093,7 +5141,8 @@ void handleRoot() {
   html += F("let nowEpoch=(typeof st.deviceEpoch==='number'&&st.deviceEpoch>0&&_devEpoch!=null)?_devEpoch:Math.floor(Date.now()/1000);");
   html += F("if(eEl) eEl.textContent=epoch?fmtETA(epoch-nowEpoch):'--';");
   html += F("if(hv) hv.textContent=nextWaterStartLabel(epoch);");
-  html += F("if(hs) hs.textContent=epoch?(name+(dur>0?(' - '+fmtDur(dur)):'')):(st.rainDelayActive?'Waiting for rain delay to clear':'No queued run'); })();");
+  html += F("if(hs) hs.textContent=epoch?(name+(dur>0?(' - '+fmtDur(dur)):'')):(st.rainDelayActive?'Waiting for rain delay to clear':'No queued run');");
+  html += F("if(znh) znh.textContent=epoch?name:'No run queued'; if(zns) zns.textContent=epoch?nextWaterStartLabel(epoch):(st.rainDelayActive?'Waiting for rain delay to clear':'No queued run'); if(znm) znm.textContent=epoch?(dur>0?('Duration '+fmtDur(dur)):'Scheduled'):'Awaiting schedule'; })();");
 
   html += F("}catch(e){} } setInterval(refreshStatus,2500); refreshStatus();");
 
