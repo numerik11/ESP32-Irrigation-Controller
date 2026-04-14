@@ -157,9 +157,7 @@ Main endpoints:
 ## Screenshots
 
 ### Main Dashboard
-<img width="646" height="798" alt="image" src="https://github.com/user-attachments/assets/6452f930-a4c3-4a31-88bb-5245ff77b529" />
-<img width="609" height="892" alt="image" src="https://github.com/user-attachments/assets/37ed2172-5d07-4683-8a3e-7e5e2899974a" />
-
+<img width="434" height="913" alt="image" src="https://github.com/user-attachments/assets/3b4db57d-9f69-4c1c-96fb-1efced560b9e" />
 
 ### ESP32-S3 + 6 Zone + 24V AC
 <img width="484" height="457" alt="image" src="https://github.com/user-attachments/assets/f9d2c234-1e8a-4ff2-8e8d-51a5bdf73905" />
