@@ -197,15 +197,15 @@ Watering is cancelled and logged if blocked by:
 - Master off
 - After Rain Cooldown period
 
-Manual zone activation can still be used.
-
 ### Rain Delay
 
 Scheduled watering is cancelled when:
 
 - It is currently raining
 - Rainfall threshold has been reached
-- After Rain cooldown is active
+- After Rain cooldown is active.
+
+- Manual zone activation can be used at all times.
 
 ### Wind Delay
 
