@@ -65,6 +65,8 @@ PCF8574 pcfIn (&I2Cbus, 0x22, I2C_SDA_DEFAULT, I2C_SCL_DEFAULT);
 PCF8574 pcfOut(&I2Cbus, 0x24, I2C_SDA_DEFAULT, I2C_SCL_DEFAULT);
 Adafruit_NeoPixel statusPixel(STATUS_PIXEL_COUNT, STATUS_PIXEL_PIN, NEO_GRB + NEO_KHZ800);
 bool statusPixelReady = false;
+uint32_t statusPixelLastColor = 0;
+extern uint32_t bootMillis;
 
 // ---------- ST7789 (1.9") TFT ----------
 // Common ST7789 sizes are 170x320 and 240x320.
@@ -430,6 +432,8 @@ bool isValidGpioPin(int pin);
 bool isValidPhotoPin(int pin);
 void updateStatusPixel();
 void statusPixelSet(uint8_t r,uint8_t g,uint8_t b);
+uint8_t statusPixelPulseLevel(uint16_t periodMs, uint8_t low, uint8_t high);
+bool statusPixelWindowOn(uint16_t periodMs, uint16_t startMs, uint16_t widthMs);
 bool initTempSensor();
 bool readChipTempC(float& outC);
 bool physicalRainNowRaw();
@@ -563,19 +567,36 @@ static inline bool isPausedNow() {
   return systemPaused && (pauseUntilEpoch == 0 || now < (time_t)pauseUntilEpoch);
 }
 
+static inline bool isCooldownActiveNow() {
+  time_t now = time(nullptr);
+  return (rainCooldownUntilEpoch && now < (time_t)rainCooldownUntilEpoch);
+}
+
 static inline bool isBlockedNow(){
   if (!systemMasterEnabled) return true;
   if (isPausedNow()) return true;
-  time_t now = time(nullptr);
-  if (rainCooldownUntilEpoch && now < (time_t)rainCooldownUntilEpoch) return true;
+  if (isCooldownActiveNow()) return true;
   return false;
+}
+
+static bool hasActiveManualZone() {
+  for (int z = 0; z < (int)zonesCount; ++z) {
+    if (zoneActive[z] && zoneStartedManual[z]) return true;
+  }
+  return false;
+}
+
+static void stopAutoZonesForDelay() {
+  for (int z = 0; z < (int)zonesCount; ++z) {
+    if (zoneActive[z] && !zoneStartedManual[z]) turnOffZone(z);
+  }
 }
 
 void updateStatusPixel() {
   if (!statusPixelReady) return;
 
-  // Default: OK (green)
-  uint8_t r = 0, g = 20, b = 0;
+  // Default: ready/idle = soft green breathe.
+  uint8_t r = 0, g = statusPixelPulseLevel(1800, 4, 18), b = 0;
 
   // Is any zone currently active?
   bool anyZoneOn = false;
@@ -583,21 +604,37 @@ void updateStatusPixel() {
     if (zoneActive[i]) { anyZoneOn = true; break; }
   }
 
-  if (WiFi.status() != WL_CONNECTED) {
-    // Wi-Fi not connected yet: magenta
-    r = 20; g = 0; b = 12;
+  const uint32_t sinceBootMs = millis() - bootMillis;
+  if (sinceBootMs < 3000U) {
+    // Boot: cyan breathe.
+    uint8_t level = statusPixelPulseLevel(1200, 6, 24);
+    r = 0; g = level; b = level;
+  } else if (WiFi.status() != WL_CONNECTED) {
+    // Wi-Fi disconnected: violet double flash.
+    bool on = statusPixelWindowOn(1100, 0, 120) || statusPixelWindowOn(1100, 180, 120);
+    r = on ? 22 : 1;
+    g = 0;
+    b = on ? 14 : 0;
   } else if (anyZoneOn) {
-    // Watering in progress: Blue
-    r = 0; g = 0; b = 24;
+    // Watering in progress: solid blue.
+    r = 0; g = 0; b = 28;
   } else if (!systemMasterEnabled || isPausedNow()) {
-    // Master off or paused: red
-    r = 24; g = 0; b = 0;
+    // Master off / pause: red slow pulse.
+    r = statusPixelPulseLevel(1400, 2, 26);
+    g = 0;
+    b = 0;
   } else if (rainActive || windActive || isBlockedNow()) {
-    // Weather/cooldown blocking: amber
-    r = 24; g = 12; b = 0;
+    // Weather / cooldown blocking: amber heartbeat.
+    bool on = statusPixelWindowOn(1300, 0, 110) || statusPixelWindowOn(1300, 170, 110);
+    r = on ? 28 : 2;
+    g = on ? 14 : 1;
+    b = 0;
   } else if (useGpioFallback) {
-    // Fallback mode: Green
-    r = 0; g = 60; b = 0;
+    // Fallback mode: teal pulse to distinguish degraded I/O from normal ready.
+    uint8_t level = statusPixelPulseLevel(1500, 4, 22);
+    r = 0;
+    g = level;
+    b = level / 3;
   }
 
   statusPixelSet(r,g,b);
@@ -1119,8 +1156,29 @@ static void validatePinMap() {
 
 void statusPixelSet(uint8_t r,uint8_t g,uint8_t b) {
   if (!statusPixelReady) return;
-  statusPixel.setPixelColor(0, statusPixel.Color(r,g,b));
+  uint32_t color = statusPixel.Color(r,g,b);
+  if (color == statusPixelLastColor) return;
+  statusPixelLastColor = color;
+  statusPixel.setPixelColor(0, color);
   statusPixel.show();
+}
+
+uint8_t statusPixelPulseLevel(uint16_t periodMs, uint8_t low, uint8_t high) {
+  if (high <= low || periodMs < 2) return high;
+  const uint32_t halfPeriod = periodMs / 2U;
+  if (halfPeriod == 0) return high;
+  const uint32_t phase = millis() % periodMs;
+  const uint32_t ramp = (phase < halfPeriod) ? phase : (periodMs - phase);
+  const uint32_t span = (uint32_t)(high - low);
+  return (uint8_t)(low + ((span * ramp) / halfPeriod));
+}
+
+bool statusPixelWindowOn(uint16_t periodMs, uint16_t startMs, uint16_t widthMs) {
+  if (periodMs == 0 || widthMs == 0 || startMs >= periodMs) return false;
+  const uint32_t phase = millis() % periodMs;
+  const uint32_t endMs = (uint32_t)startMs + (uint32_t)widthMs;
+  if (endMs <= periodMs) return phase >= startMs && phase < endMs;
+  return phase >= startMs || phase < (endMs - periodMs);
 }
 
 #if __has_include("soc/soc_caps.h")
@@ -1432,10 +1490,12 @@ void setup() {
     statusPixel.setBrightness(32);
     statusPixel.clear();
     statusPixel.show();
+    statusPixelLastColor = 0;
     statusPixelReady = true;
     statusPixelSet(0, 0, 20); // boot = blue
   } else {
     statusPixelReady = false;
+    statusPixelLastColor = 0;
   }
 
   initTempSensor(); // try to bring up the internal temp sensor (ESP32-S3)
@@ -1995,18 +2055,26 @@ void loop() {
   // Track transitions to clear/refresh screens
   static bool lastWasDelayScreen = false;
 
-  // Hard block while paused/master off/cooldown
-  if (isBlockedNow()) {
+  const bool hardBlock = (!systemMasterEnabled || isPausedNow());
+  const bool cooldownActive = isCooldownActiveNow();
+  const bool manualDelayBypassActive = hasActiveManualZone();
+  const bool delayScreenActive = !manualDelayBypassActive &&
+                                 (cooldownActive || rainActive || windActive);
+
+  // Hard block while paused/master off
+  if (hardBlock) {
     if (!lastWasDelayScreen) g_forceRainReset = true;
     for (int z=0; z<(int)zonesCount; ++z) if (zoneActive[z]) turnOffZone(z);
     if (now - lastScreenRefresh >= 1000) { lastScreenRefresh = now; RainScreen(); lastWasDelayScreen = true; }
     delay(15); return;
   }
 
-  const bool weatherDelay = (rainActive || windActive);
-  if (weatherDelay) {
+  if (cooldownActive || rainActive || windActive) {
+    stopAutoZonesForDelay();
+  }
+
+  if (delayScreenActive) {
     if (!lastWasDelayScreen) g_forceRainReset = true;
-    for (int z=0; z<(int)zonesCount; ++z) if (zoneActive[z]) turnOffZone(z);
     if (now - lastScreenRefresh >= 1000) { lastScreenRefresh = now; RainScreen(); lastWasDelayScreen = true; }
   } else if (lastWasDelayScreen) {
     // Only clear once delay has actually ended
@@ -2042,7 +2110,7 @@ void loop() {
 
   // WS2812 status pixel (non-blocking, light refresh)
   static uint32_t lastPixelUpdate = 0;
-  if (statusPixelReady && now - lastPixelUpdate >= 500) {
+  if (statusPixelReady && now - lastPixelUpdate >= 100) {
     lastPixelUpdate = now;
     updateStatusPixel();
   }
@@ -2053,6 +2121,10 @@ void loop() {
   // -------- SCHEDULER (supports sequential or concurrent) --------
   if (now - lastScheduleTick >= SCHEDULE_TICK_MS) {
     lastScheduleTick = now;
+
+    for (int z=0; z<(int)zonesCount; z++) {
+      if (zoneActive[z] && hasDurationCompleted(z)) turnOffZone(z);
+    }
 
     if (!isBlockedNow()) {
       for (int z=0; z<(int)zonesCount; z++) {
@@ -2071,7 +2143,6 @@ void loop() {
             turnOnZone(z); anyActive = true;
           }
         }
-        if (zoneActive[z] && hasDurationCompleted(z)) turnOffZone(z);
       }
 
       if (!runZonesConcurrent) {
@@ -2095,7 +2166,7 @@ void loop() {
     lastScreenRefresh = 0;
   }
 
-  if (!weatherDelay && now - lastScreenRefresh >= 1000) {
+  if (!delayScreenActive && now - lastScreenRefresh >= 1000) {
     lastScreenRefresh = now;
     if (manualActive) {
       drawManualSelection();
@@ -2588,31 +2659,45 @@ String fetchForecast(float lat, float lon) {
 }
 
 // ---------- NEW helpers for rain history ----------
-// Rolling 24h rain history (ACTUAL ONLY, no forecast)
+// Rolling 24h rain history (ACTUAL ONLY, no forecast).
+// Record once per elapsed hour instead of relying on a narrow HH:00 window.
 static void tickActualRainHistory() {
   time_t now = time(nullptr);
-  struct tm lt;
-  localtime_r(&now, &lt);
+  if (now <= 0) return;
 
-  // Only record once at the start of each hour,
-  // and make sure we don't double-count within 5 minutes.
-  if (lt.tm_min == 0 && lt.tm_sec < 5 && (now - lastRainHistHour) > 300) {
-    float v = rain1hNow;
+  const time_t thisHour = now - (now % 3600);
+  float v = rain1hNow;
 
-    // Sanity: NaN / negative => 0
-    if (!isfinite(v) || v < 0.0f) {
-      v = 0.0f;
-    }
+  // Sanity: NaN / negative => 0
+  if (!isfinite(v) || v < 0.0f) {
+    v = 0.0f;
+  }
 
-    // Advance ring buffer and store
+  // Seed the current hour immediately so reboots or loop jitter do not
+  // require hitting a tiny HH:00 window before history starts moving again.
+  if (lastRainHistHour == 0) {
     rainIdx = (rainIdx + 1) % 24;
     rainHist[rainIdx] = v;
-    lastRainHistHour = now;
-
-    // Optional debug:
-    // Serial.printf("[RainHist] %02d:00 -> v=%.2f, sum24=%.2f\n",
-    //               lt.tm_hour, v, last24hActualRain());
+    lastRainHistHour = thisHour;
+    return;
   }
+
+  if (thisHour <= lastRainHistHour) {
+    return;
+  }
+
+  int hoursElapsed = (int)((thisHour - lastRainHistHour) / 3600);
+  if (hoursElapsed > 24) hoursElapsed = 24;
+
+  // Advance one slot per elapsed hour to preserve a true rolling 24h window.
+  // If several hours were skipped, fill the gap with zeros and store the
+  // latest observed rain value in the newest hour slot.
+  for (int h = 1; h <= hoursElapsed; ++h) {
+    rainIdx = (rainIdx + 1) % 24;
+    rainHist[rainIdx] = (h == hoursElapsed) ? v : 0.0f;
+  }
+
+  lastRainHistHour = thisHour;
 }
 
 // Sum rolling 24h actual rainfall from the ring buffer
@@ -4115,10 +4200,13 @@ void turnOnValveManual(int z) {
     }
   }
 
-  // Cancel manual requests during block/rain; queue during wind
-  if (isBlockedNow())  { cancelStart(z, "BLOCKED", false); showManualSelection(); return; }
-  if (rainActive)      { cancelStart(z, "RAIN",    true ); showManualSelection(); return; }
-  if (windActive)      { lastStartSlot[z] = 1; pendingStart[z] = true; logEvent(z, "QUEUED", "WIND", false); showManualSelection(); return; }
+  // Manual starts bypass weather and cooldown delays, but still respect
+  // master-off and pause states.
+  if (!systemMasterEnabled || isPausedNow()) {
+    cancelStart(z, "BLOCKED", false);
+    showManualSelection();
+    return;
+  }
 
   zoneStartMs[z] = millis();
   zoneActive[z] = true;
@@ -4799,103 +4887,10 @@ void handleRoot() {
   html += F("</div></div></div>"); // #schedBody, .card.sched, .wrap
   flush();
 
-  String zoneLiveHeadline = "Idle";
-  String zoneLiveSub = "No zones are running";
-  String zoneLiveMeta = String(zonesCount) + " zones ready";
-  if (activeZoneCount == 1) {
-    for (int z = 0; z < (int)zonesCount; ++z) {
-      if (!zoneActive[z]) continue;
-      unsigned long total = zoneRunTotalSec[z];
-      if (total == 0) total = durationForSlot(z, 1);
-      unsigned long elapsed = (millis() - zoneStartMs[z]) / 1000UL;
-      unsigned long rem = (elapsed < total ? total - elapsed : 0);
-      char remBuf[16];
-      fmtMMSS(remBuf, sizeof(remBuf), rem);
-      zoneLiveHeadline = zoneNames[z];
-      zoneLiveSub = String("Remaining ") + remBuf;
-      zoneLiveMeta = sourceModeText();
-      break;
-    }
-  } else if (activeZoneCount > 1) {
-    String activeNames;
-    int listed = 0;
-    for (int z = 0; z < (int)zonesCount; ++z) {
-      if (!zoneActive[z]) continue;
-      if (listed < 2) {
-        if (activeNames.length()) activeNames += ", ";
-        activeNames += zoneNames[z];
-      }
-      listed++;
-    }
-    if (activeZoneCount > 2) {
-      activeNames += " +";
-      activeNames += String(activeZoneCount - 2);
-      activeNames += " more";
-    }
-    zoneLiveHeadline = String(activeZoneCount) + " zones running";
-    zoneLiveSub = activeNames;
-    zoneLiveMeta = runZonesConcurrent ? String("Concurrent mode active") : String("Sequential queue active");
-  }
-
-  String zoneNextHeadline = "No run queued";
-  String zoneNextSub = rainActive ? String("Waiting for rain delay to clear") : String("No queued run");
-  String zoneNextMeta = "Awaiting schedule";
-  if (nextWater.epoch > 0 && nextWater.zone >= 0 && nextWater.zone < (int)zonesCount) {
-    zoneNextHeadline = zoneNames[nextWater.zone];
-    zoneNextSub = nextWaterLabel;
-    if (nextWater.durSec > 0) {
-      char durBuf[16];
-      fmtMMSS(durBuf, sizeof(durBuf), nextWater.durSec);
-      zoneNextMeta = String("Duration ") + durBuf;
-    } else {
-      zoneNextMeta = "Scheduled";
-    }
-  }
-
-  String zoneStatusHeadline = !systemMasterEnabled ? String("Master Off")
-                              : (pausedNow ? String("Paused")
-                              : (rainActive ? String("Rain Delay")
-                              : (windActive ? String("Wind Delay") : String("Ready"))));
-  String zoneStatusSub = !systemMasterEnabled ? String("Outputs are blocked")
-                           : (pausedNow ? String("Schedules are temporarily suspended")
-                           : ((rainActive || windActive) ? causeText : String("Automation is clear to run")));
-  String zoneStatusMeta = sourceModeText();
-  zoneStatusMeta = sourceModeText() + String(" | ") + String(zonesCount) + String(" zones | ") +
-                   (runZonesConcurrent ? String("Concurrent") : String("Sequential"));
-  zoneStatusMeta += " • ";
-  zoneStatusMeta += String(zonesCount);
-  zoneStatusMeta += " zones • ";
-  zoneStatusMeta += runZonesConcurrent ? "Concurrent" : "Sequential";
-  zoneStatusMeta = sourceModeText() + String(" | ") + String(zonesCount) + String(" zones | ") +
-                   (runZonesConcurrent ? String("Concurrent") : String("Sequential"));
-
   // --- Live Zones ---
   html += F("<div class='wrap section-block' id='zones-section'><div class='section-head'><div><div class='section-kicker'>Live Control</div><h2>Zone overview</h2></div>");
   html += F("<p class='section-note'></p></div>");
   html += F("<div class='card zones-shell'>");
-  html += F("<div class='zone-overview'>");
-  html += F("<div class='zone-summary-card'><div class='zone-summary-k'>Running Now</div><div class='zone-summary-v' id='zoneLiveHeadline'>");
-  html += zoneLiveHeadline;
-  html += F("</div><div class='zone-summary-sub' id='zoneLiveSub'>");
-  html += zoneLiveSub;
-  html += F("</div><div class='zone-summary-meta' id='zoneLiveMeta'>");
-  html += zoneLiveMeta;
-  html += F("</div></div>");
-  html += F("<div class='zone-summary-card'><div class='zone-summary-k'>Next Run</div><div class='zone-summary-v' id='zoneNextHeadline'>");
-  html += zoneNextHeadline;
-  html += F("</div><div class='zone-summary-sub' id='zoneNextSub'>");
-  html += zoneNextSub;
-  html += F("</div><div class='zone-summary-meta' id='zoneNextMeta'>");
-  html += zoneNextMeta;
-  html += F("</div></div>");
-  html += F("<div class='zone-summary-card'><div class='zone-summary-k'>System Status</div><div class='zone-summary-v' id='zoneSystemHeadline'>");
-  html += zoneStatusHeadline;
-  html += F("</div><div class='zone-summary-sub' id='zoneSystemSub'>");
-  html += zoneStatusSub;
-  html += F("</div><div class='zone-summary-meta' id='zoneSystemMeta'>");
-  html += zoneStatusMeta;
-  html += F("</div></div>");
-  html += F("</div>");
 
   html += F("<div class='zone-list-head'><h3>Quick Zone Control</h3><div class='zone-list-note'>Compact live rows with manual on/off control.</div></div>");
   html += F("<div class='zone-list'>");
@@ -5071,8 +5066,8 @@ void handleRoot() {
   html += F("if(acc1h){var v=(typeof st.rain1hNow==='number')?st.rain1hNow:NaN;acc1h.textContent=isNaN(v)?'--':v.toFixed(1);}");
   html += F("const acc24=document.getElementById('acc24'); if(acc24){ const v=(typeof st.rain24hActual==='number')?st.rain24hActual:(typeof st.rain24h==='number'?st.rain24h:NaN); acc24.textContent=isNaN(v)?'--':v.toFixed(1);} ");
 
-  html += F("let activeCount=0; const activeZones=[]; if(Array.isArray(st.zones)){ st.zones.forEach((z,idx)=>{");
-  html += F("if(z.active){ activeCount++; activeZones.push({name:z.name||('Z'+(idx+1)), remaining:(z.remaining||0), totalSec:(z.totalSec||0)}); }");
+  html += F("let activeCount=0; if(Array.isArray(st.zones)){ st.zones.forEach((z,idx)=>{");
+  html += F("if(z.active){ activeCount++; }");
   html += F("const stateEl=document.getElementById('zone-'+idx+'-state'); const remEl=document.getElementById('zone-'+idx+'-rem'); const dotEl=document.getElementById('zone-'+idx+'-dot'); const rowEl=document.getElementById('zone-'+idx+'-row'); const metaEl=document.getElementById('zone-'+idx+'-meta');");
   html += F("if(stateEl){stateEl.className='badge '+(z.active?'b-ok':'');stateEl.textContent=z.active?'Running':'Ready';}");
   html += F("if(dotEl){dotEl.className='zone-dot'+(z.active?' on':'');} if(rowEl){rowEl.classList.toggle('is-active',!!z.active);}");
@@ -5081,18 +5076,7 @@ void handleRoot() {
   html += F("const onBtn=document.getElementById('zone-'+idx+'-on'); const offBtn=document.getElementById('zone-'+idx+'-off');");
   html += F("if(onBtn) onBtn.disabled=!!z.active; if(offBtn) offBtn.disabled=!z.active;");
   html += F("}); }");
-  html += F("(function(){ const h=document.getElementById('zoneLiveHeadline'); const s=document.getElementById('zoneLiveSub'); const m=document.getElementById('zoneLiveMeta');");
-  html += F("if(activeZones.length===0){ if(h) h.textContent='Idle'; if(s) s.textContent='No zones are running'; if(m) m.textContent=((st.zonesCount||0)+' zones ready'); return; }");
-  html += F("if(activeZones.length===1){ const a=activeZones[0]; if(h) h.textContent=a.name; if(s) s.textContent='Remaining '+fmtDurCompact(a.remaining||0); if(m) m.textContent=st.sourceMode||''; return; }");
-  html += F("const names=activeZones.slice(0,2).map(z=>z.name).join(', ')+(activeZones.length>2?(' +'+(activeZones.length-2)+' more'):'');");
-  html += F("if(h) h.textContent=activeZones.length+' zones running'; if(s) s.textContent=names; if(m) m.textContent=st.runConcurrent?'Concurrent mode active':'Sequential queue active'; })();");
-  html += F("(function(){ const h=document.getElementById('zoneSystemHeadline'); const s=document.getElementById('zoneSystemSub'); const m=document.getElementById('zoneSystemMeta');");
-  html += F("let headline='Ready', sub='Automation is clear to run';");
-  html += F("if(st.masterOn===false){ headline='Master Off'; sub='Outputs are blocked'; } else if(st.systemPaused){ headline='Paused'; sub='Schedules are temporarily suspended'; } else if(st.rainDelayActive){ headline='Rain Delay'; sub=st.rainDelayCause||'Rain delay active'; } else if(st.windDelayActive){ headline='Wind Delay'; sub=st.rainDelayCause||'Wind delay active'; }");
-  html += F("if(h) h.textContent=headline; if(s) s.textContent=sub;");
-  html += F("if(m){ const parts=[]; if(st.sourceMode) parts.push(st.sourceMode); parts.push((st.zonesCount||0)+' zones'); parts.push(st.runConcurrent?'Concurrent':'Sequential'); m.textContent=parts.join(' • '); } })();");
 
-  html += F("(function(){ const m=document.getElementById('zoneSystemMeta'); if(m){ const parts=[]; if(st.sourceMode) parts.push(st.sourceMode); parts.push((st.zonesCount||0)+' zones'); parts.push(st.runConcurrent?'Concurrent':'Sequential'); m.textContent=parts.join(' | '); } })();");
 
   // Weather stats
   html += F("const tmin=document.getElementById('tmin'); const tmax=document.getElementById('tmax'); const sunr=document.getElementById('sunr'); const suns=document.getElementById('suns'); const press=document.getElementById('press');");
@@ -5133,7 +5117,6 @@ void handleRoot() {
   // Next Water
   html += F("(function(){ const zEl=document.getElementById('nwZone'); const tEl=document.getElementById('nwTime'); const eEl=document.getElementById('nwETA'); const dEl=document.getElementById('nwDur');");
   html += F("const hv=document.getElementById('heroNextValue'); const hs=document.getElementById('heroNextSub');");
-  html += F("const znh=document.getElementById('zoneNextHeadline'); const zns=document.getElementById('zoneNextSub'); const znm=document.getElementById('zoneNextMeta');");
   html += F("const epoch=st.nextWaterEpoch|0; const zone=st.nextWaterZone; const name=st.nextWaterName||(Number.isInteger(zone)?('Z'+(zone+1)):'--'); const dur=st.nextWaterDurSec|0;");
   html += F("function fmtDur(s){ if(s<=0) return '--'; const m=Math.floor(s/60), sec=s%60; return pad(m)+'m '+pad(sec)+'s'; }");
   html += F("function fmtETA(delta){ if(delta<=0) return 'now'; const h=Math.floor(delta/3600), m=Math.floor((delta%3600)/60); if(h>0) return h+'h '+m+'m'; return m+'m'; }");
@@ -5142,7 +5125,7 @@ void handleRoot() {
   html += F("if(eEl) eEl.textContent=epoch?fmtETA(epoch-nowEpoch):'--';");
   html += F("if(hv) hv.textContent=nextWaterStartLabel(epoch);");
   html += F("if(hs) hs.textContent=epoch?(name+(dur>0?(' - '+fmtDur(dur)):'')):(st.rainDelayActive?'Waiting for rain delay to clear':'No queued run');");
-  html += F("if(znh) znh.textContent=epoch?name:'No run queued'; if(zns) zns.textContent=epoch?nextWaterStartLabel(epoch):(st.rainDelayActive?'Waiting for rain delay to clear':'No queued run'); if(znm) znm.textContent=epoch?(dur>0?('Duration '+fmtDur(dur)):'Scheduled'):'Awaiting schedule'; })();");
+  html += F("})();");
 
   html += F("}catch(e){} } setInterval(refreshStatus,2500); refreshStatus();");
 
@@ -6968,6 +6951,9 @@ void handleConfigure() {
     for (int i = 0; i < 24; ++i) {
       rainHist[i] = 0.0f;
     }
+    rainIdx              = 0;
+    lastRainHistHour     = 0;
+    lastRainAmount       = 0.0f;
   }
 
 
