@@ -1,5 +1,3 @@
-
-
 ![Platform](https://img.shields.io/badge/Platform-ESP32%20%7C%20ESP32--S3-blue)
 ![Zones](https://img.shields.io/badge/Zones-1%E2%80%9316-green)
 ![Web UI](https://img.shields.io/badge/Web%20UI-Local-orange)
@@ -7,10 +5,12 @@
 ![OTA](https://img.shields.io/badge/Updates-OTA-informational)
 
 # 🌱 ESP32 1–16 Zone Irrigation Controller
+---
 
 A feature-rich ESP32-based irrigation controller for managing from 1–16 irrigation zones/solenoids, with optional automatic tank/mains water source switching, live weather-aware control, and a local web interface.
 
 Built for real-world garden and irrigation installations, from small home systems through to larger multi-zone setups.
+---
 
 ✨ Features
 Supports 1–16 irrigation zones
@@ -34,6 +34,8 @@ All at once where power supply capacity allows
 Editable zone names
 Stored directly on the controller
 🖥 Supported Hardware Variants
+---
+
 ESP32 + 240×320 SPI TFT
 
 Full-colour local display showing:
@@ -52,6 +54,7 @@ Lightweight version using a standard 16×2 LCD.
 
 🌦 Weather Integration
 
+---
 Use Open-Meteo to obtain your latitude and longitude:
 
 Visit Open-Meteo
@@ -79,6 +82,8 @@ Wind delay with configurable speed threshold
 Rain cooldown timer
 24-hour rainfall threshold limits
 Rolling rainfall totals for 1 hour and 24 hours
+---
+
 📊 Dashboard
 
 The dashboard provides:
@@ -129,6 +134,8 @@ Event logging
 CSV format
 Includes weather snapshot for each event
 Downloadable through the web UI
+---
+
 ⚙ Behaviour and Safety Logic
 
 Watering is cancelled and logged if blocked by:
@@ -153,6 +160,7 @@ Watering remains delayed for the configured time period.
 Wind Delay
 
 If wind speed rises above the configured threshold, watering is delayed and will resume automatically once wind speed drops below the threshold.
+---
 
 📦 Requirements
 Reliable Wi-Fi connection
@@ -167,12 +175,16 @@ Tank level sensor
 Solenoid power supply
 Approx. 10 W per solenoid
 Typically 12 V DC or 12/24 V AC
+---
+
 🧰 Typical Materials
 KC868-A6 or ESP32 development board + relay module
 1–16 irrigation solenoids
 7-core irrigation cable
 Tank level sensor
 External solenoid power supply
+---
+
 🔧 Typical Wiring
 Tie all solenoid returns to supply GND / COM
 Feed 12/24 V into each relay COM
@@ -184,6 +196,8 @@ Tank sensor → IO36 (A1)
 Important: must not exceed 3.3 V
 Rain sensor → IO27
 (Configurable)
+---
+
 🚀 Flashing and Setup
 Arduino IDE
 
@@ -206,13 +220,20 @@ Large APP (4MB)
 KC868-A Library
 
 Download the Kincony PCF8574 library from the Kincony forum.
+---
 
 📡 First-Time Wi-Fi Setup
-Connect to ESPIrrigationAP
-Open http://192.168.4.1
-Enter your Wi-Fi credentials
-The controller will reboot and join your network
-Open espirrigation.local or use the IP address shown at startup
+
+1. Connect WiFi to ESPIrrigation
+
+2. Open http://192.168.4.1
+
+3. Enter your Wi-Fi credentials
+
+4. The controller will reboot and join your network
+
+5. Open espirrigation.local or use the IP address shown at startup
+
 In Setup, configure:
 Timezone
 Weather location
@@ -220,6 +241,8 @@ GPS coordinates
 Zone count
 Pin assignments
 Other system options
+---
+
 🌍 Web Endpoints
 Path	Description
 /	Dashboard
@@ -233,6 +256,7 @@ Path	Description
 /valve/on/<z>	Start zone
 /valve/off/<z>	Stop zone
 /reboot	Reboot controller
+---
 
 ## Screenshots
 
