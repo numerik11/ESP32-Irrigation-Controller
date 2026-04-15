@@ -320,6 +320,6 @@ Then configure:
 
 <img width="439" height="870" alt="Main Dashboard" src="https://github.com/user-attachments/assets/33c5237b-4b2d-442d-9c54-6c1d7b5c92db" />
 
-### ESP32-S3 + 6 Zone + 24V AC
+### ESP32-S3 + 6 Zone/Relay + 24V AC
 
 <img width="484" height="457" alt="ESP32-S3 6 Zone 24V AC" src="https://github.com/user-attachments/assets/f9d2c234-1e8a-4ff2-8e8d-51a5bdf73905" />
