@@ -5505,7 +5505,7 @@ void handleSetupPage() {
   html += F("'><small>Delay period after rain stops</small></div>");
   html += F("<div class='row'><label>Rain Threshold 24h (mm)</label><input class='in-sm' type='number' min='0' max='200' name='rainThreshold24h' value='");
   html += String(rainThreshold24h_mm);
-  html += F("'><small>Cancel watering if > threshold</small></div>");
+  html += F("'><small>After-Rain Delay if above threshold</small></div>");
   html += F("</div>");
 
   html += F("</div>"); // end cols2
