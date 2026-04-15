@@ -4548,6 +4548,7 @@ void handleRoot() {
   html += F(".summary-meta{display:flex;gap:8px;flex-wrap:wrap}");
   html += F(".mini-chip{display:inline-flex;align-items:center;gap:6px;padding:7px 11px;border-radius:999px;border:1px solid var(--chip-brd);background:var(--chip);font-size:.82rem;font-weight:700;color:var(--ink)}");
   html += F(".summary-metric-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:10px}");
+  html += F(".summary-metric-grid.metric-pair{grid-template-columns:repeat(2,minmax(0,1fr))}");
   html += F(".summary-subhead{font-size:.76rem;letter-spacing:.16em;text-transform:uppercase;color:var(--muted);font-weight:800;margin-top:2px}");
   html += F(".metric-tile{display:flex;flex-direction:column;justify-content:space-between;gap:8px;min-height:92px;padding:12px 13px;border-radius:16px;");
   html += F("border:1px solid var(--chip-brd);background:linear-gradient(180deg,rgba(255,255,255,.55),rgba(255,255,255,.15))}");
@@ -4691,7 +4692,7 @@ void handleRoot() {
   html += F(".action-copy p{margin:8px 0 0;color:var(--muted)}");
   html += F("#clock,.hero-mini-value{font-variant-numeric:tabular-nums}");
   html += F("@media(max-width:980px){.hero-grid{grid-template-columns:1fr}.section-head{flex-direction:column;align-items:flex-start}.section-note{text-align:left}.summary-grid .weather-card,.summary-grid .next-card{grid-column:auto}.metric-tile.metric-wide{grid-column:auto}.dash-nav{top:68px}}");
-  html += F("@media(max-width:720px){.nav{padding-top:8px}.chip{font-size:.88rem}.hero-shell{padding:18px}.hero-title{max-width:none;font-size:1.95rem}.hero-mini-grid{grid-template-columns:1fr}.zone-row{grid-template-columns:1fr}.zone-row-status,.zone-row-actions{justify-content:flex-start}.zone-row-actions .btn{flex:1 1 140px}.brand-title{letter-spacing:.55px}.summary-card{min-height:auto}.summary-link{min-height:0}.summary-metric-grid{grid-template-columns:1fr 1fr}.dash-nav{top:120px;overflow:auto;flex-wrap:nowrap;padding-bottom:8px}.dash-nav a{white-space:nowrap}.sched-top{padding:16px}.sched-body{padding:16px}.sched-tools .btn{flex:1 1 140px}}");
+  html += F("@media(max-width:720px){.nav{padding-top:8px}.chip{font-size:.88rem}.hero-shell{padding:18px}.hero-title{max-width:none;font-size:1.95rem}.hero-mini-grid{grid-template-columns:1fr}.zone-row{grid-template-columns:1fr}.zone-row-status,.zone-row-actions{justify-content:flex-start}.zone-row-actions .btn{flex:1 1 140px}.brand-title{letter-spacing:.55px}.summary-card{min-height:auto}.summary-link{min-height:0}.summary-metric-grid{grid-template-columns:1fr 1fr}.summary-metric-grid.metric-pair{grid-template-columns:1fr}.dash-nav{top:120px;overflow:auto;flex-wrap:nowrap;padding-bottom:8px}.dash-nav a{white-space:nowrap}.sched-top{padding:16px}.sched-body{padding:16px}.sched-tools .btn{flex:1 1 140px}}");
   html += F("</style></head><body>");
   flush();
 
@@ -4780,6 +4781,7 @@ void handleRoot() {
   html += F("<div class='metric-tile'><span class='metric-k'>Wind</span><div class='metric-v' id='windChip'>");
   html += (isnan(ws) ? String("--") : String(ws,1)+" m/s");
   html += F("</div></div>");
+  html += F("</div><div class='summary-metric-grid metric-pair'>");
   html += F("<div class='metric-tile'><span class='metric-k'>Condition</span><div class='metric-v' id='cond'>");
   html += cond.length() ? cond : String("--");
   html += F("</div></div>");
