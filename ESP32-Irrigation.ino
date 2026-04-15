@@ -353,6 +353,7 @@ float curFeelsC = NAN;
 float curPressureHpa = NAN;
 float curWindMs = NAN;
 float curGustMs = NAN;
+float curWindDirDeg = NAN;
 int   curHumidityPct = -1;
 int   curWeatherCode = -1;
 int   curUtcOffsetSec = 0;
@@ -788,6 +789,34 @@ static const char* meteoCodeToDesc(int code) {
 static inline bool meteoCodeIsWet(int code) {
   return (code >= 51 && code <= 67) || (code >= 71 && code <= 77) ||
          (code >= 80 && code <= 86) || (code >= 95);
+}
+
+static float normalizeDegrees360(float deg) {
+  if (!isfinite(deg)) return NAN;
+  while (deg < 0.0f) deg += 360.0f;
+  while (deg >= 360.0f) deg -= 360.0f;
+  return deg;
+}
+
+static const char* meteoWindDirectionToCompass(float deg) {
+  static const char* DIRS[16] = {
+    "N", "NNE", "NE", "ENE",
+    "E", "ESE", "SE", "SSE",
+    "S", "SSW", "SW", "WSW",
+    "W", "WNW", "NW", "NNW"
+  };
+  float norm = normalizeDegrees360(deg);
+  if (!isfinite(norm)) return "";
+  int idx = (int)floor((norm + 11.25f) / 22.5f) & 15;
+  return DIRS[idx];
+}
+
+static String formatWindDirection(float deg) {
+  float norm = normalizeDegrees360(deg);
+  if (!isfinite(norm)) return String("--");
+  char buf[24];
+  snprintf(buf, sizeof(buf), "%s (%d deg)", meteoWindDirectionToCompass(norm), (int)lroundf(norm));
+  return String(buf);
 }
 
 static time_t parseLocalIsoTime(const char* s) {
@@ -1758,6 +1787,7 @@ void setup() {
     doc["pressure"]   = isfinite(curPressureHpa) ? curPressureHpa : 0.0f;
     doc["wind"]       = isfinite(curWindMs) ? curWindMs : 0.0f;
     doc["gustNow"]    = isfinite(curGustMs) ? curGustMs : 0.0f;
+    doc["windDirText"]= formatWindDirection(curWindDirDeg);
     doc["condMain"]   = (curWeatherCode >= 0) ? meteoCodeToMain(curWeatherCode) : "";
     doc["condDesc"]   = (curWeatherCode >= 0) ? meteoCodeToDesc(curWeatherCode) : "";
     doc["icon"]       = "";
@@ -2515,7 +2545,7 @@ String fetchWeather() {
     String url = meteoBaseUrl(model, useForecastEndpoint);
     url += "?latitude=" + String(meteoLat,6) + "&longitude=" + String(meteoLon,6);
     url += "&current=temperature_2m,relative_humidity_2m,apparent_temperature,pressure_msl,surface_pressure,"
-           "wind_speed_10m,wind_gusts_10m,precipitation,weather_code";
+           "wind_speed_10m,wind_gusts_10m,wind_direction_10m,precipitation,weather_code";
     if (useForecastEndpoint) url += "&models=" + model;
     url += "&temperature_unit=celsius&wind_speed_unit=ms&precipitation_unit=mm&pressure_unit=hPa&timezone=auto";
     return url;
@@ -2558,7 +2588,7 @@ String fetchWeatherHourlyForCurrent(const String& model, float lat, float lon, b
   String url = meteoBaseUrl(model, useForecastEndpoint);
   url += "?latitude=" + String(lat,6) + "&longitude=" + String(lon,6);
   url += "&hourly=temperature_2m,relative_humidity_2m,apparent_temperature,pressure_msl,surface_pressure,"
-         "wind_speed_10m,wind_gusts_10m,precipitation,weather_code";
+         "wind_speed_10m,wind_gusts_10m,wind_direction_10m,precipitation,weather_code";
   if (useForecastEndpoint) url += "&models=" + model;
   url += "&forecast_hours=48&timeformat=unixtime&temperature_unit=celsius&wind_speed_unit=ms"
          "&precipitation_unit=mm&pressure_unit=hPa&timezone=auto";
@@ -2607,6 +2637,7 @@ bool buildCurrentFromHourlyPayload(const String& hourlyPayload, String& outPaylo
   cur["surface_pressure"]     = pick("surface_pressure");
   cur["wind_speed_10m"]       = pick("wind_speed_10m");
   cur["wind_gusts_10m"]       = pick("wind_gusts_10m");
+  cur["wind_direction_10m"]   = pick("wind_direction_10m");
   cur["precipitation"]        = pick("precipitation");
   float wcode = pick("weather_code");
   cur["weather_code"]         = isfinite(wcode) ? (int)wcode : -1;
@@ -2711,6 +2742,7 @@ bool refreshCurrentWeatherSnapshotFromCache() {
   curPressureHpa = NAN;
   curWindMs = NAN;
   curGustMs = NAN;
+  curWindDirDeg = NAN;
   curHumidityPct = -1;
   curWeatherCode = -1;
   curUtcOffsetSec = 0;
@@ -2734,6 +2766,7 @@ bool refreshCurrentWeatherSnapshotFromCache() {
   curPressureHpa = isfinite(pmsl) ? pmsl : psfc;
   curWindMs = cur["wind_speed_10m"] | NAN;
   curGustMs = cur["wind_gusts_10m"] | NAN;
+  curWindDirDeg = cur["wind_direction_10m"] | NAN;
   curWeatherCode = cur["weather_code"] | -1;
   curUtcOffsetSec = js["utc_offset_seconds"] | 0;
 
@@ -4350,6 +4383,7 @@ void handleRoot() {
   float hum = (curHumidityPct >= 0) ? (float)curHumidityPct : NAN;
   float ws = curWindMs;
   float feels = curFeelsC;
+  String windDir = formatWindDirection(curWindDirDeg);
   int wcode = curWeatherCode;
   String cond = (wcode >= 0) ? String(meteoCodeToDesc(wcode)) : String("-");
   if (cond == "") cond = "-";
@@ -4746,8 +4780,11 @@ void handleRoot() {
   html += F("<div class='metric-tile'><span class='metric-k'>Wind</span><div class='metric-v' id='windChip'>");
   html += (isnan(ws) ? String("--") : String(ws,1)+" m/s");
   html += F("</div></div>");
-  html += F("<div class='metric-tile metric-wide'><span class='metric-k'>Condition</span><div class='metric-v' id='cond'>");
+  html += F("<div class='metric-tile'><span class='metric-k'>Condition</span><div class='metric-v' id='cond'>");
   html += cond.length() ? cond : String("--");
+  html += F("</div></div>");
+  html += F("<div class='metric-tile'><span class='metric-k'>Wind Direction</span><div class='metric-v' id='windDirChip'>");
+  html += windDir;
   html += F("</div></div></div>");
   html += F("<div class='summary-subhead'>Today</div><div class='summary-metric-grid'>");
   html += F("<div class='metric-tile'><span class='metric-k'>Low / High</span><div class='metric-split'>");
@@ -5083,6 +5120,7 @@ void handleRoot() {
   html += F("const feelsEl=document.getElementById('feelsChip'); if(feelsEl){ const v=st.feels_like; feelsEl.textContent=(typeof v==='number')?v.toFixed(1)+' C':'--'; }");
   html += F("const humEl=document.getElementById('humChip'); if(humEl){ const v=st.humidity; humEl.textContent=(typeof v==='number')?Math.round(v)+' %':'--'; }");
   html += F("const windEl=document.getElementById('windChip'); if(windEl){ const v=st.wind; windEl.textContent=(typeof v==='number')?v.toFixed(1)+' m/s':'--'; }");
+  html += F("const windDirEl=document.getElementById('windDirChip'); if(windDirEl){ const v=(typeof st.windDirText==='string'&&st.windDirText.length)?st.windDirText:'--'; windDirEl.textContent=v; }");
   html += F("const condEl=document.getElementById('cond');");
   html += F("const cd=(typeof st.condDesc==='string' && st.condDesc.length)?st.condDesc:'';");
   html += F("const cm=(typeof st.condMain==='string' && st.condMain.length)?st.condMain:'';");
@@ -6919,6 +6957,7 @@ void handleConfigure() {
     curPressureHpa      = NAN;
     curWindMs           = NAN;
     curGustMs           = NAN;
+    curWindDirDeg       = NAN;
     curHumidityPct      = -1;
     curWeatherCode      = -1;
     curUtcOffsetSec     = 0;
