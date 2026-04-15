@@ -6,7 +6,7 @@
 
 # 🌱 ESP32 1–16 Zone Irrigation Controller
 
-A feature-rich **ESP32-based irrigation controller** for managing **1–16 irrigation zones/solenoids**, with optional **tank/mains source switching**, **weather-aware delay logic**, and a modern **local web interface**.
+**ESP32-based irrigation controller** for managing **1–16 irrigation zones/solenoids**, with optional **tank/mains source switching**, **weather-aware delay logic**, and a modern **local web interface**.
 
 Built for real-world irrigation setups, from small home gardens to larger multi-zone systems.
 
