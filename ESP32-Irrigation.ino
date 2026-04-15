@@ -910,17 +910,17 @@ String rainDelayCauseText() {
         uint32_t h = mins / 60U;
         uint32_t m = mins % 60U;
         if (m > 0U) {
-          // Example: "Cooldown 1h 05m"
-          snprintf(buf, sizeof(buf), "Cooldown %luh %lum",
+          // Example: "After-Rain Delay 1h 05m"
+          snprintf(buf, sizeof(buf), "After-Rain Delay %luh %lum",
                    (unsigned long)h, (unsigned long)m);
         } else {
-          // Example: "Cooldown 2h"
-          snprintf(buf, sizeof(buf), "Cooldown %luh",
+          // Example: "After-Rain Delay 2h"
+          snprintf(buf, sizeof(buf), "After-Rain Delay %luh",
                    (unsigned long)h);
         }
       } else {
-        // Under 1 hour: "Cooldown 23m"
-        snprintf(buf, sizeof(buf), "Cooldown %lum",
+        // Under 1 hour: "After-Rain Delay 23m"
+        snprintf(buf, sizeof(buf), "After-Rain Delay %lum",
                  (unsigned long)mins);
       }
 
@@ -2381,7 +2381,7 @@ void drawManualSelection() {
     statusColor = C_BAD;
     if (!systemMasterEnabled) snprintf(detailLine, sizeof(detailLine), "Master switch is off");
     else if (isPausedNow()) snprintf(detailLine, sizeof(detailLine), "System pause is active");
-    else snprintf(detailLine, sizeof(detailLine), "Rain cooldown is active");
+    else snprintf(detailLine, sizeof(detailLine), "After-Rain Delay is active");
   } else if (rainActive) {
     statusId = 5;
     statusText = "RAIN";
@@ -3352,7 +3352,7 @@ void RainScreen(){
   const bool cooldownActive = (rainCooldownUntilEpoch && now < (time_t)rainCooldownUntilEpoch);
   char causeBuf[40];
   if (cooldownActive) {
-    strncpy(causeBuf, "Cooldown", sizeof(causeBuf));
+    strncpy(causeBuf, "After-Rain Delay", sizeof(causeBuf));
   } else if (causeS.length()) {
     strncpy(causeBuf, causeS.c_str(), sizeof(causeBuf));
   } else {
@@ -3402,7 +3402,7 @@ void RainScreen(){
     tft.setTextSize(1);
     tft.setTextColor(C_MUTED);
     tft.setCursor(x, yv);
-    tft.print("Cooldown: ");
+    tft.print("After-Rain Delay: ");
     tft.setTextColor(C_TEXT);
     tft.print(cooldownBuf);
     strncpy(lastCooldown, cooldownBuf, sizeof(lastCooldown));
@@ -4546,6 +4546,8 @@ void handleRoot() {
   html += F(".summary-support{color:var(--muted);font-size:.92rem}");
   html += F(".summary-row{display:flex;align-items:flex-end;justify-content:space-between;gap:12px;flex-wrap:wrap}");
   html += F(".summary-meta{display:flex;gap:8px;flex-wrap:wrap}");
+  html += F(".summary-meta.status-pills{display:grid;grid-template-columns:repeat(2,minmax(0,1fr))}");
+  html += F(".summary-meta.status-pills .badge{width:100%;justify-content:center}");
   html += F(".mini-chip{display:inline-flex;align-items:center;gap:6px;padding:7px 11px;border-radius:999px;border:1px solid var(--chip-brd);background:var(--chip);font-size:.82rem;font-weight:700;color:var(--ink)}");
   html += F(".summary-metric-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:10px}");
   html += F(".summary-metric-grid.metric-pair{grid-template-columns:repeat(2,minmax(0,1fr))}");
@@ -4692,7 +4694,7 @@ void handleRoot() {
   html += F(".action-copy p{margin:8px 0 0;color:var(--muted)}");
   html += F("#clock,.hero-mini-value{font-variant-numeric:tabular-nums}");
   html += F("@media(max-width:980px){.hero-grid{grid-template-columns:1fr}.section-head{flex-direction:column;align-items:flex-start}.section-note{text-align:left}.summary-grid .weather-card,.summary-grid .next-card{grid-column:auto}.metric-tile.metric-wide{grid-column:auto}.dash-nav{top:68px}}");
-  html += F("@media(max-width:720px){.nav{padding-top:8px}.chip{font-size:.88rem}.hero-shell{padding:18px}.hero-title{max-width:none;font-size:1.95rem}.hero-mini-grid{grid-template-columns:1fr}.zone-row{grid-template-columns:1fr}.zone-row-status,.zone-row-actions{justify-content:flex-start}.zone-row-actions .btn{flex:1 1 140px}.brand-title{letter-spacing:.55px}.summary-card{min-height:auto}.summary-link{min-height:0}.summary-metric-grid{grid-template-columns:1fr 1fr}.summary-metric-grid.metric-pair{grid-template-columns:1fr}.dash-nav{top:120px;overflow:auto;flex-wrap:nowrap;padding-bottom:8px}.dash-nav a{white-space:nowrap}.sched-top{padding:16px}.sched-body{padding:16px}.sched-tools .btn{flex:1 1 140px}}");
+  html += F("@media(max-width:720px){.nav{padding-top:8px}.chip{font-size:.88rem}.hero-shell{padding:18px}.hero-title{max-width:none;font-size:1.95rem}.hero-mini-grid{grid-template-columns:1fr}.zone-row{grid-template-columns:1fr}.zone-row-status,.zone-row-actions{justify-content:flex-start}.zone-row-actions .btn{flex:1 1 140px}.brand-title{letter-spacing:.55px}.summary-card{min-height:auto}.summary-link{min-height:0}.summary-metric-grid{grid-template-columns:1fr 1fr}.summary-metric-grid.metric-pair{grid-template-columns:1fr}.summary-meta.status-pills{grid-template-columns:1fr}.dash-nav{top:120px;overflow:auto;flex-wrap:nowrap;padding-bottom:8px}.dash-nav a{white-space:nowrap}.sched-top{padding:16px}.sched-body{padding:16px}.sched-tools .btn{flex:1 1 140px}}");
   html += F("</style></head><body>");
   flush();
 
@@ -4798,7 +4800,7 @@ void handleRoot() {
   html += F("<div class='metric-tile'><span class='metric-k'>Sunset</span><div class='metric-v' id='suns'>--:--</div></div></div></div>");
 
   // Delays + Next Water
-  html += F("<div class='card summary-card next-card'><h3>Delays & Next Water</h3><div class='summary-meta'>");
+  html += F("<div class='card summary-card next-card'><h3>Delays & Next Water</h3><div class='summary-meta status-pills'>");
   html += F("<div id='rainBadge' class='badge "); html += (rainActive ? "b-bad" : "b-ok"); html += F("'>Rain: <b>");
   html += (rainActive?"Active":"Off"); html += F("</b></div>");
   html += F("<div id='windBadge' class='badge "); html += (windActive ? "b-warn" : "b-ok"); html += F("'>Wind: <b>");
@@ -5404,7 +5406,7 @@ void handleSetupPage() {
   html += F("<div class='setup-nav'>");
   html += F("<a href='#zones-card'>Zones</a><a href='#tank-card'>Source</a><a href='#delays-card'>Delays</a><a href='#weather-card'>Weather</a><a href='#timezone-card'>Timezone</a><a href='#display-card'>Display</a><a href='#advanced-card'>GPIO</a><a href='#mqtt-card'>Buttons/MQTT</a>");
   html += F("</div><form action='/configure' method='POST'>");
-  html += F("<div class='setup-actions-top'><button class='btn' type='submit'>Save Changes</button><button class='btn-alt' formaction='/' formmethod='GET'>Home</button><button class='btn-alt' type='button' onclick=\"fetch('/clear_cooldown',{method:'POST'})\">Clear Cooldown</button><button class='btn btn-danger' type='button' onclick=\"if(confirm('Reboot controller now?'))fetch('/reboot',{method:'POST'})\">Reboot</button></div>");
+  html += F("<div class='setup-actions-top'><button class='btn' type='submit'>Save Changes</button><button class='btn-alt' formaction='/' formmethod='GET'>Home</button><button class='btn-alt' type='button' onclick=\"fetch('/clear_cooldown',{method:'POST'})\">Clear After-Rain Delay</button><button class='btn btn-danger' type='button' onclick=\"if(confirm('Reboot controller now?'))fetch('/reboot',{method:'POST'})\">Reboot</button></div>");
 
   // Zones
   html += F("<div class='card narrow' id='zones-card'><h3>Zones</h3><p class='card-intro'>Set how many watering zones are available and whether they run one at a time or together.</p>");
@@ -5467,7 +5469,7 @@ void handleSetupPage() {
   html += F("</div>");
 
   // Delays & Pause + thresholds
-  html += F("<div class='card narrow' id='delays-card'><h3>Delays & Pause</h3><p class='card-intro'>Weather locks and pause controls live here, including cooldown timing and wind thresholds.</p>");
+  html += F("<div class='card narrow' id='delays-card'><h3>Delays & Pause</h3><p class='card-intro'>Weather locks and pause controls live here, including After-Rain Delay timing and wind thresholds.</p>");
   html += F("<div class='cols2 panel-split'>");
 
   // Left column: toggles
@@ -5498,7 +5500,7 @@ void handleSetupPage() {
   html += F("<div class='subhead'>Thresholds & Timers</div><hr class='hr'>");
   html += F("<div class='row'><label>Wind Threshold (m/s)</label><input class='in-sm' type='number' step='0.1' min='0' max='50' name='windSpeedThreshold' value='");
   html += String(windSpeedThreshold,1); html += F("'></div>");
-  html += F("<div class='row'><label>After Rain Cooldown (hours)</label><input class='in-sm' type='number' min='0' max='720' name='rainCooldownHours' value='");
+  html += F("<div class='row'><label>After-Rain Delay (hours)</label><input class='in-sm' type='number' min='0' max='720' name='rainCooldownHours' value='");
   html += String(rainCooldownMin / 60);
   html += F("'><small>Delay period after rain stops</small></div>");
   html += F("<div class='row'><label>Rain Threshold 24h (mm)</label><input class='in-sm' type='number' min='0' max='200' name='rainThreshold24h' value='");
