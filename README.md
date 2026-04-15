@@ -22,6 +22,8 @@ Live weather display
 Optional TFT, OLED, or LCD display support
 Compatible with ESP32, ESP32-S3, and KC868-A6/A8
 Watering logic continues to run locally if Wi-Fi disconnects, and will automatically reconnect when available
+---
+
 ⏱ Scheduling
 1–16 configurable zones
 Two start times per zone
@@ -33,18 +35,18 @@ Sequentially (default)
 All at once where power supply capacity allows
 Editable zone names
 Stored directly on the controller
-🖥 Supported Hardware Variants
 ---
 
-ESP32 + 240×320 SPI TFT
+🖥 Supported Hardware Variants
 
-Full-colour local display showing:
-
+External display showing:
 System status
 Active zones
 Rain and wind delays
 Water source status
 ESP32 + I²C OLED
+ESP32 + 240×320 SPI TFT
+Add photoreststor for Power saving
 
 Compact, low-pin-count display option ideal for smaller builds.
 
