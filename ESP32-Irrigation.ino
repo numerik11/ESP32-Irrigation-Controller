@@ -586,7 +586,7 @@ static bool hasActiveManualZone() {
   return false;
 }
 
-static void stopAutoZonesForDelay() {
+static void stopAutoZonesForBlock() {
   for (int z = 0; z < (int)zonesCount; ++z) {
     if (zoneActive[z] && !zoneStartedManual[z]) turnOffZone(z);
   }
@@ -2059,18 +2059,10 @@ void loop() {
   const bool cooldownActive = isCooldownActiveNow();
   const bool manualDelayBypassActive = hasActiveManualZone();
   const bool delayScreenActive = !manualDelayBypassActive &&
-                                 (cooldownActive || rainActive || windActive);
+                                 (hardBlock || cooldownActive || rainActive || windActive);
 
-  // Hard block while paused/master off
-  if (hardBlock) {
-    if (!lastWasDelayScreen) g_forceRainReset = true;
-    for (int z=0; z<(int)zonesCount; ++z) if (zoneActive[z]) turnOffZone(z);
-    if (now - lastScreenRefresh >= 1000) { lastScreenRefresh = now; RainScreen(); lastWasDelayScreen = true; }
-    delay(15); return;
-  }
-
-  if (cooldownActive || rainActive || windActive) {
-    stopAutoZonesForDelay();
+  if (hardBlock || cooldownActive || rainActive || windActive) {
+    stopAutoZonesForBlock();
   }
 
   if (delayScreenActive) {
@@ -4198,14 +4190,6 @@ void turnOnValveManual(int z) {
       }
       break; // concurrent: allow additional zone
     }
-  }
-
-  // Manual starts bypass weather and cooldown delays, but still respect
-  // master-off and pause states.
-  if (!systemMasterEnabled || isPausedNow()) {
-    cancelStart(z, "BLOCKED", false);
-    showManualSelection();
-    return;
   }
 
   zoneStartMs[z] = millis();
