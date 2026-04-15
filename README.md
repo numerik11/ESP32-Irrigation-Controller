@@ -38,7 +38,6 @@ Stored directly on the controller
 ---
 
 🖥 Supported Hardware Variants
-
 External display showing:
 System status
 Active zones
@@ -51,14 +50,10 @@ Add photoreststor for Power saving
 Compact, low-pin-count display option ideal for smaller builds.
 
 ESP8266 + I²C LCD
-
-Lightweight version using a standard 16×2 LCD.
+---
 
 🌦 Weather Integration
-
----
 Use Open-Meteo to obtain your latitude and longitude:
-
 Visit Open-Meteo
 Enter your location coordinates in Setup
 Save settings
