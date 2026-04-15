@@ -269,7 +269,7 @@ Recommended boards:
 
 Recommended partition scheme:
 
-- **Large APP (4MB)**
+- **default_16MB**
 
 ### KC868 Library
 
