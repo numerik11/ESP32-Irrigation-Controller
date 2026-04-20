@@ -36,7 +36,7 @@ Built for real-world irrigation setups, from small home gardens to larger multi-
 
 | Feature | Support |
 |---|---|
-| 1–16 zones | ✅ |
+| 1–16 zones | ✅ Optional |
 | Two start times per zone | ✅ |
 | 7-day scheduling | ✅ |
 | Minute + second precision | ✅ |
