@@ -45,8 +45,8 @@ Built for real-world irrigation setups, from small home gardens to larger multi-
 | Editable zone names | ✅ |
 | Tank / mains switching | ✅ Optional |
 | Weather integration | ✅ |
-| Optional Rain delay | ✅ |
-| Optional Wind delay | ✅ |
+| Rain delay | ✅ Optional |
+| Wind delay | ✅ Optional |
 | OTA updates | ✅ |
 | Event logging | ✅ |
 | TFT / OLED / LCD support | ✅ Optional |
