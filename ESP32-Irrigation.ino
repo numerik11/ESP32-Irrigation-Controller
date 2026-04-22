@@ -1,3 +1,7 @@
+#include <Ticker.h>
+// ---------- Runtime Totals ----------
+static unsigned long totalScheduledRuntimeSec = 0;
+static unsigned long totalManualRuntimeSec = 0;
 //ESP32/ESP32-s3 - Irrigation Controller  
 //OLED or TFT NOW SELECTED IN SETUP
 
@@ -1687,6 +1691,8 @@ void setup() {
   doc["sourceMode"]      = sourceModeText();
   doc["rssi"]            = WiFi.RSSI();
   doc["uptimeSec"]       = (millis() - bootMillis) / 1000;
+  doc["totalScheduledRuntimeSec"] = totalScheduledRuntimeSec;
+  doc["totalManualRuntimeSec"]    = totalManualRuntimeSec;
   doc["heapFree"]        = ESP.getFreeHeap();
   doc["heapMin"]         = ESP.getMinFreeHeap();
   doc["heapMaxAlloc"]    = ESP.getMaxAllocHeap();
@@ -3009,6 +3015,21 @@ bool checkWindRain() {
 
 // ---------- Event log ----------
 void logEvent(int zone, const char* eventType, const char* source, bool rainDelayed) {
+    // Track runtime for scheduled/manual runs on STOPPED events
+    if (eventType && strcmp(eventType, "STOPPED") == 0) {
+      // Determine if this was a manual or scheduled run
+      bool isManual = false;
+      if (zone >= 0 && zone < MAX_ZONES) {
+        isManual = zoneStartedManual[zone];
+      }
+      unsigned long dur = 0;
+      if (zone >= 0 && zone < MAX_ZONES) {
+        dur = zoneRunTotalSec[zone];
+        if (dur == 0) dur = durationForSlot(zone, 1);
+      }
+      if (isManual) totalManualRuntimeSec += dur;
+      else totalScheduledRuntimeSec += dur;
+    }
   updateCachedWeather(); // safe early-out if g_inHttp==true, keeps details recent enough
   float temp = curTempC;
   float wind = curWindMs;
@@ -3048,178 +3069,66 @@ void toggleBacklight(){
 }
 
 void updateLCDForZone(int zone) {
-  static unsigned long lastUpdate=0; unsigned long now=millis();
+  static unsigned long lastUpdate = 0; unsigned long now = millis();
   const unsigned long minUiInterval = displayUseTft ? 180UL : 1000UL;
   if (!g_forceRunReset && (now - lastUpdate < minUiInterval)) return;
   lastUpdate = now;
 
-  unsigned long elapsed=(now - zoneStartMs[zone]) / 1000;
+  unsigned long elapsed = (now - zoneStartMs[zone]) / 1000;
   unsigned long total = zoneRunTotalSec[zone];
-  if (total == 0) total = durationForSlot(zone,1);
-  unsigned long rem = (elapsed<total ? total - elapsed : 0);
-
-  if (!displayUseTft) {
-    display.clearDisplay();
-    display.setTextSize(1);
-    display.setCursor(0,0); display.print(zoneNames[zone]); display.print(" ");
-    display.print(elapsed/60); display.print(":"); if ((elapsed%60)<10) display.print('0'); display.print(elapsed%60);
-    display.setCursor(0,12);
-    if (elapsed<total){ display.print(rem/60); display.print("m Remaining"); }
-    else display.print("Complete");
-    display.display();
-    return;
-  }
-
-  unsigned long em = elapsed / 60;
-  unsigned long es = elapsed % 60;
-  unsigned long rm = rem / 60;
-  unsigned long rs = rem % 60;
+  if (total == 0) total = durationForSlot(zone, 1);
+  unsigned long rem = (elapsed < total ? total - elapsed : 0);
   int pct = (total > 0) ? (int)((elapsed * 100UL) / total) : 0;
   if (pct < 0) pct = 0;
   if (pct > 100) pct = 100;
 
   const int W = tft.width();
   const int H = tft.height();
-  const int pad = 8;
-  const int topY = 40;
-  int statsH = 64;
-  int meterH = 74;
-  int infoH = 60;
-  int statsY = topY;
-  int meterY = statsY + statsH + 6;
-  int infoY = meterY + meterH + 6;
-  int bottomGap = H - infoY - infoH - 8;
-  if (bottomGap < 0) {
-    meterH += bottomGap;
-    if (meterH < 58) meterH = 58;
-    infoY = meterY + meterH + 6;
-    bottomGap = H - infoY - infoH - 8;
-    if (bottomGap < 0) {
-      infoH += bottomGap;
-      if (infoH < 50) infoH = 50;
-      infoY = meterY + meterH + 6;
-    }
-  }
-  const int barX = pad + 14;
-  const int barY = meterY + 40;
-  const int barW = W - (pad + 14) * 2;
-  const int barH = 18;
-  const uint16_t C_RUN_INFO = RGB(20, 29, 47);
-  const uint16_t C_RUN_STATS = RGB(17, 25, 40);
-  const uint16_t C_RUN_METER = RGB(14, 21, 34);
-  const uint16_t C_LIVE = RGB(95, 182, 255);
+  tft.fillScreen(C_BG);
 
-  static bool runInit = false;
-  static int lastZone = -1;
-  static int lastW = -1, lastH = -1;
-  static unsigned long lastElapsed = 0xFFFFFFFFUL;
-  static unsigned long lastRemain = 0xFFFFFFFFUL;
-  static unsigned long lastTotal = 0xFFFFFFFFUL;
-  static int lastPct = -1;
-  static int lastPulseFrame = -1;
+  // Draw Zone Number (large)
+  tft.setTextSize(4);
+  tft.setTextColor(C_GOOD);
+  tft.setCursor(24, 24);
+  tft.print("Z");
+  tft.print(zone + 1);
 
-  bool layoutChanged = (g_forceRunReset || !runInit || lastZone != zone || lastW != W || lastH != H);
-  if (layoutChanged) {
-    tft.fillScreen(C_BG);
-    drawTopBar("RUNNING", "LIVE", C_GOOD);
-    drawCard(pad, statsY, W - 2 * pad, statsH, C_RUN_STATS, C_EDGE);
-    drawCard(pad, meterY, W - 2 * pad, meterH, C_RUN_METER, C_EDGE);
-    drawCard(pad, infoY, W - 2 * pad, infoH, C_RUN_INFO, C_EDGE);
-    tft.drawFastHLine(pad + 1, statsY + 24, W - 2 * pad - 2, C_EDGE);
-    tft.drawFastHLine(pad + 1, meterY + 24, W - 2 * pad - 2, C_EDGE);
-    tft.drawFastHLine(pad + 1, infoY + 22, W - 2 * pad - 2, C_EDGE);
-    tft.drawRect(barX, barY, barW, barH, C_EDGE);
-    for (int tick = 1; tick < 10; ++tick) {
-      int tx = barX + (tick * (barW - 2)) / 10;
-      tft.drawFastVLine(tx, barY + 2, barH - 4, RGB(44, 62, 90));
-    }
-    tft.setTextSize(1);
-    tft.setTextColor(C_MUTED);
-    tft.setCursor(pad + 10, statsY + 8); tft.print("ELAPSED");
-    tft.setCursor(pad + 112, statsY + 8); tft.print("REMAIN");
-    tft.setCursor(pad + 10, meterY + 8); tft.print("FLOW PROGRESS");
-    tft.setCursor(pad + 10, infoY + 8);  tft.print("ACTIVE ZONE");
-    tft.setCursor(W - 78, infoY + 8);    tft.print("LIVE");
-    runInit = true;
-    lastZone = zone;
-    lastW = W;
-    lastH = H;
-    lastElapsed = 0xFFFFFFFFUL;
-    lastRemain = 0xFFFFFFFFUL;
-    lastTotal = 0xFFFFFFFFUL;
-    lastPct = -1;
-    lastPulseFrame = -1;
-    g_forceRunReset = false;
-  }
+  // Draw Zone Name (centered, medium)
+  tft.setTextSize(2);
+  tft.setTextColor(C_TEXT);
+  int16_t x1, y1;
+  uint16_t w, h;
+  String zoneLabel = zoneNames[zone];
+  tft.getTextBounds(zoneLabel.c_str(), 0, 0, &x1, &y1, &w, &h);
+  int nameX = (W - w) / 2;
+  tft.setCursor(nameX, 80);
+  tft.print(zoneLabel);
 
-  char elapsedBuf[8], remainBuf[8], totalBuf[8];
-  snprintf(elapsedBuf, sizeof(elapsedBuf), "%02lu:%02lu", em, es);
-  snprintf(remainBuf, sizeof(remainBuf), "%02lu:%02lu", rm, rs);
-  unsigned long tm = total / 60;
-  unsigned long ts = total % 60;
-  snprintf(totalBuf, sizeof(totalBuf), "%02lu:%02lu", tm, ts);
+  // Draw Progress Bar (large)
+  int barW = W - 48;
+  int barH = 32;
+  int barX = 24;
+  int barY = H / 2 + 16;
+  tft.drawRect(barX, barY, barW, barH, C_EDGE);
+  tft.fillRect(barX + 2, barY + 2, (pct * (barW - 4)) / 100, barH - 4, C_GOOD);
 
-  if (layoutChanged || lastZone != zone) {
-    tft.fillRect(pad + 10, infoY + 28, W - 2 * pad - 20, infoH - 36, C_RUN_INFO);
-    tft.setTextSize(2);
-    tft.setTextColor(C_TEXT);
-    tft.setCursor(pad + 12, infoY + 30);
-    tft.print("Z");
-    tft.print(zone + 1);
-    tft.print("  ");
-    tft.print(zoneNames[zone]);
-    tft.setTextSize(1);
-    tft.setTextColor(C_MUTED);
-    tft.setCursor(pad + 12, infoY + infoH - 14);
-    tft.print("TOTAL ");
-    tft.setTextColor(C_TEXT);
-    tft.print(totalBuf);
-    lastZone = zone;
-  }
+  // Draw countdown inside bar
+  tft.setTextSize(2);
+  tft.setTextColor(ST77XX_WHITE); // Timer text in progress bar is now white
+  char remBuf[12];
+  unsigned long rm = rem / 60;
+  unsigned long rs = rem % 60;
+  snprintf(remBuf, sizeof(remBuf), "%02lu:%02lu", rm, rs);
+  int16_t remX1, remY1;
+  uint16_t remW, remH;
+  tft.getTextBounds(remBuf, 0, 0, &remX1, &remY1, &remW, &remH);
+  int remTextX = barX + (barW - remW) / 2;
+  int remTextY = barY + (barH - remH) / 2;
+  tft.setCursor(remTextX, remTextY);
+  tft.print(remBuf);
 
-  if (layoutChanged || elapsed != lastElapsed || rem != lastRemain || total != lastTotal) {
-    tft.fillRect(pad + 10, statsY + 30, W - 2 * pad - 20, statsH - 38, C_RUN_STATS);
-    tft.setTextSize(2);
-    tft.setTextColor(C_ACCENT);
-    tft.setCursor(pad + 12, statsY + 34);
-    tft.print(elapsedBuf);
-    tft.setTextColor(C_GOOD);
-    tft.setCursor(pad + 116, statsY + 34);
-    tft.print(remainBuf);
-    lastElapsed = elapsed;
-    lastRemain = rem;
-    lastTotal = total;
-  }
-
-  if (layoutChanged || pct != lastPct) {
-    tft.fillRect(pad + 10, meterY + 28, W - 2 * pad - 20, 18, C_RUN_METER);
-    tft.setTextSize(2);
-    tft.setTextColor(C_LIVE);
-    tft.setCursor(pad + 12, meterY + 28);
-    tft.print("Progress");
-    tft.setTextColor(C_TEXT);
-    tft.setCursor(W - 78, meterY + 28);
-    tft.print(pct);
-    tft.print("%");
-
-    tft.fillRect(barX + 1, barY + 1, barW - 2, barH - 2, C_BG);
-    int fillW = (pct * (barW - 2)) / 100;
-    if (fillW > 0) {
-      tft.fillRect(barX + 1, barY + 1, fillW, barH - 2, C_GOOD);
-      if (fillW > 6) tft.fillRect(barX + 1, barY + 1, fillW - 4, 4, RGB(145, 234, 192));
-    }
-    lastPct = pct;
-  }
-
-  int pulseFrame = (int)((now / 450UL) & 1UL);
-  if (layoutChanged || pulseFrame != lastPulseFrame) {
-    const int px = W - 26;
-    const int py = infoY + 12;
-    tft.fillRect(px - 7, py - 7, 20, 16, C_RUN_INFO);
-    tft.fillCircle(px, py, 4, pulseFrame ? C_GOOD : RGB(34, 60, 48));
-    tft.drawCircle(px, py, 6, C_EDGE);
-    lastPulseFrame = pulseFrame;
-  }
+  tft.setTextWrap(true);
+  // No flashing indicator drawn
 }
 
 void RainScreen(){
@@ -5966,6 +5875,11 @@ void handleSubmit() {
 
 // ---------- Event Log Page ----------
 void handleLogPage() {
+    // Prepare runtime display strings
+    unsigned long schedMin = totalScheduledRuntimeSec / 60;
+    unsigned long schedSec = totalScheduledRuntimeSec % 60;
+    unsigned long manualMin = totalManualRuntimeSec / 60;
+    unsigned long manualSec = totalManualRuntimeSec % 60;
   HttpScope _scope;
   File f = LittleFS.open("/events.csv","r");
   if (!f) {
@@ -6132,7 +6046,8 @@ void handleLogPage() {
   html += F(" filtered events</span><button id='themeBtn' class='btn-ghost' title='Toggle theme'>Theme</button></div></div></nav>");
   html += F("<div class='wrap'>");
   html += F("<section class='glass hero-shell'><div class='hero-grid'><div class='hero-copy'><div class='hero-kicker'>System History</div><h1 class='hero-title'>Irrigation event log</h1><p class='hero-text'>Review run starts, stops, and scheduled weather delays when rain or wind prevents a zone from starting on time.</p><div class='hero-actions'><a class='btn' href='/'>Home</a><a class='btn btn-secondary' href='/setup'>Setup</a><a class='btn btn-secondary' href='/download/events.csv'>Download CSV</a></div></div>");
-  html += F("<div class='hero-mini-grid'><div class='hero-mini hero-mini-strong'><div class='hero-mini-label'>Latest Event</div><div class='hero-mini-value'>");
+  html += F("<div class='hero-mini-grid'>");
+  html += F("<div class='hero-mini hero-mini-strong'><div class='hero-mini-label'>Latest Event</div><div class='hero-mini-value'>");
   html += latestTs;
   html += F("</div><div class='hero-mini-sub'>Most recent matching log timestamp</div></div>");
   html += F("<div class='hero-mini'><div class='hero-mini-label'>Start Events</div><div class='hero-mini-value'>");
@@ -6143,7 +6058,12 @@ void handleLogPage() {
   html += F("</div><div class='hero-mini-sub'>Completed or interrupted watering runs</div></div>");
   html += F("<div class='hero-mini'><div class='hero-mini-label'>Weather Delays</div><div class='hero-mini-value'>");
   html += String(weatherDelayCount);
-  html += F("</div><div class='hero-mini-sub'>Scheduled starts blocked by rain or queued by wind</div></div></div></div></section>");
+  html += F("</div><div class='hero-mini-sub'>Scheduled starts blocked by rain or queued by wind</div></div>");
+  html += F("<div class='hero-mini'><div class='hero-mini-label'>Total Scheduled Runtime</div><div class='hero-mini-value'>");
+  html += String(schedMin); html += F(":"); if (schedSec < 10) html += F("0"); html += String(schedSec); html += F("</div><div class='hero-mini-sub'>Minutes:Seconds for scheduled runs</div></div>");
+  html += F("<div class='hero-mini'><div class='hero-mini-label'>Total Manual Runtime</div><div class='hero-mini-value'>");
+  html += String(manualMin); html += F(":"); if (manualSec < 10) html += F("0"); html += String(manualSec); html += F("</div><div class='hero-mini-sub'>Minutes:Seconds for manual runs</div></div>");
+  html += F("</div></div></section>");
   html += F("<div class='section-head'><div><div class='section-kicker'>Audit Trail</div><h2>Recent events</h2></div><p class='section-note'>Newest entries stay at the top, including scheduled rain and wind delay events alongside run starts and stops.</p></div>");
   html += F("<section class='card'><div class='toolbar'><form method='POST' action='/clearevents'><button class='btn btn-danger' type='submit'>Clear Events</button></form><form method='POST' action='/stopall'><button class='btn btn-warn' type='submit'>Stop All</button></form></div><div class='table-wrap'><table><thead><tr>");
   html += F("<th>Time</th><th>Zone</th><th>Event</th><th>Source</th><th>Rain Delay</th><th>Details</th></tr></thead><tbody>");
@@ -6999,6 +6919,8 @@ void handleConfigure() {
 
 void handleClearEvents() {
   HttpScope _scope;
+  totalScheduledRuntimeSec = 0;
+  totalManualRuntimeSec = 0;
   if (LittleFS.exists("/events.csv")) {
     LittleFS.remove("/events.csv");
   }
