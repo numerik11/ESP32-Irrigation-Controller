@@ -6050,6 +6050,13 @@ void handleLogPage() {
   html += F(".btn:focus-visible,.btn-ghost:focus-visible,.pill:focus-visible{outline:2px solid var(--primary);outline-offset:2px}");
   html += F(".toolbar{margin:14px 0 0}");
   html += F(".toolbar form{display:inline-flex;margin:0}");
+  html += F(".filter-toggle{display:inline-flex;align-items:center;gap:10px;padding:10px 14px;border-radius:14px;border:1px solid var(--glass-brd);background:rgba(255,255,255,.08);color:var(--ink);font-weight:700}");
+  html += F(".filter-toggle input[type=checkbox]{appearance:none;-webkit-appearance:none;width:18px;height:18px;margin:0;flex:0 0 18px;display:inline-grid;place-content:center;cursor:pointer;border:1.6px solid rgba(255,255,255,.7);border-radius:6px;background:rgba(255,255,255,.06)}");
+  html += F(".filter-toggle input[type=checkbox]::before{content:'';display:block;width:5px;height:9px;border-right:2px solid #fff;border-bottom:2px solid #fff;transform:rotate(45deg) scale(0);margin-top:-1px;transition:transform .12s ease}");
+  html += F(".filter-toggle input[type=checkbox]:checked{border-color:#ffffff;background:transparent;box-shadow:none}");
+  html += F(".filter-toggle input[type=checkbox]:checked::before{transform:rotate(45deg) scale(1)}");
+  html += F(".filter-toggle input[type=checkbox]:focus-visible{outline:none;border-color:#ffffff;box-shadow:0 0 0 3px rgba(31,138,112,.2)}");
+  html += F(".filter-toggle small{display:block;color:var(--muted);font-weight:600;font-size:.78rem}");
   html += F(".table-wrap{overflow:auto;border-radius:18px;border:1px solid var(--glass-brd);background:linear-gradient(180deg,rgba(255,255,255,.18),rgba(255,255,255,.05));box-shadow:var(--shadow)}");
   html += F("table{width:100%;border-collapse:separate;border-spacing:0;min-width:820px}");
   html += F("th,td{padding:12px 14px;border-bottom:1px solid var(--line);font-size:.94rem;text-align:left;white-space:nowrap;vertical-align:top}");
@@ -6072,6 +6079,10 @@ void handleLogPage() {
   html += F("html[data-theme='dark'] .hero-mini.hero-mini-strong{background:linear-gradient(135deg,rgba(31,138,112,.18),rgba(16,39,43,.94))}");
   html += F("html[data-theme='dark'] .table-wrap{background:linear-gradient(180deg,rgba(12,28,31,.9),rgba(12,28,31,.72))}");
   html += F("html[data-theme='dark'] tbody tr{background:rgba(255,255,255,.015)}");
+  html += F("html[data-theme='light'] .filter-toggle{background:rgba(255,255,255,.82)}");
+  html += F("html[data-theme='light'] .filter-toggle input[type=checkbox]{border-color:#8aa59c;background:rgba(255,255,255,.78);box-shadow:inset 0 1px 0 rgba(255,255,255,.75)}");
+  html += F("html[data-theme='light'] .filter-toggle input[type=checkbox]::before{border-right-color:#17666b;border-bottom-color:#17666b}");
+  html += F("html[data-theme='light'] .filter-toggle input[type=checkbox]:checked{border-color:#1f8a70;background:#ffffff;box-shadow:0 0 0 3px rgba(31,138,112,.12)}");
   html += F("html[data-theme='light'] th{background:rgba(20,91,99,.94)}");
   html += F("html[data-theme='light'] tbody tr{background:rgba(255,255,255,.8)}");
   html += F("html[data-theme='light'] tbody tr:nth-child(even){background:rgba(248,251,248,.92)}");
@@ -6125,7 +6136,9 @@ void handleLogPage() {
 
     String row;
     row.reserve(320);
-    row += F("<tr><td>"); row += ts;
+    const bool isManualRunEvent = (src == "MANUAL" && (ev == "START" || ev == "STOPPED"));
+    row += F("<tr data-manual='"); row += (isManualRunEvent ? "1" : "0");
+    row += F("'><td>"); row += ts;
     row += F("</td><td>"); row += zone;
     row += F("</td><td><span class='event-chip ");
     if (ev == "START") row += F("start'>Start");
@@ -6141,19 +6154,19 @@ void handleLogPage() {
     eventRows = row + eventRows;
   }
   f.close();
-  html += F("<nav class='nav'><div class='in'><div class='brand'><span class='dot'></span><div class='brand-copy'><span class='brand-title'>ESP32 Irrigation</span><span class='brand-sub'>Event History</span></div></div><div class='meta'><span class='pill'>");
+  html += F("<nav class='nav'><div class='in'><div class='brand'><span class='dot'></span><div class='brand-copy'><span class='brand-title'>ESP32 Irrigation</span><span class='brand-sub'>Event History</span></div></div><div class='meta'><span id='eventCountBadge' class='pill'>");
   html += String(eventCount);
   html += F(" filtered events</span><button id='themeBtn' class='btn-ghost' title='Toggle theme'>Theme</button></div></div></nav>");
   html += F("<div class='wrap'>");
   html += F("<section class='glass hero-shell'><div class='hero-grid'><div class='hero-copy'><div class='hero-kicker'>System History</div><h1 class='hero-title'>Irrigation event log</h1><p class='hero-text'>Review run starts, stops, and scheduled weather delays when rain or wind prevents a zone from starting on time.</p><div class='hero-actions'><a class='btn' href='/'>Home</a><a class='btn btn-secondary' href='/setup'>Setup</a><a class='btn btn-secondary' href='/download/events.csv'>Download CSV</a></div></div>");
   html += F("<div class='hero-mini-grid'>");
-  html += F("<div class='hero-mini hero-mini-strong'><div class='hero-mini-label'>Latest Event</div><div class='hero-mini-value'>");
+  html += F("<div class='hero-mini hero-mini-strong'><div class='hero-mini-label'>Latest Event</div><div id='latestEventValue' class='hero-mini-value'>");
   html += latestTs;
   html += F("</div><div class='hero-mini-sub'>Most recent matching log timestamp</div></div>");
-  html += F("<div class='hero-mini'><div class='hero-mini-label'>Start Events</div><div class='hero-mini-value'>");
+  html += F("<div class='hero-mini'><div class='hero-mini-label'>Start Events</div><div id='startCountValue' class='hero-mini-value'>");
   html += String(startCount);
   html += F("</div><div class='hero-mini-sub'>Zone starts recorded in this filtered view</div></div>");
-  html += F("<div class='hero-mini'><div class='hero-mini-label'>Stopped Events</div><div class='hero-mini-value'>");
+  html += F("<div class='hero-mini'><div class='hero-mini-label'>Stopped Events</div><div id='stopCountValue' class='hero-mini-value'>");
   html += String(stopCount);
   html += F("</div><div class='hero-mini-sub'>Completed or interrupted watering runs</div></div>");
   html += F("<div class='hero-mini'><div class='hero-mini-label'>Weather Delays</div><div class='hero-mini-value'>");
@@ -6165,18 +6178,27 @@ void handleLogPage() {
   html += String(manualMin); html += F(":"); if (manualSec < 10) html += F("0"); html += String(manualSec); html += F("</div><div class='hero-mini-sub'>Total Irrigation Runtime (Manual)</div></div>");
   html += F("</div></div></section>");
   html += F("<div class='section-head'><div><div class='section-kicker'>Audit Trail</div><h2>Recent events</h2></div><p class='section-note'>Newest entries stay at the top, including scheduled rain and wind delay events alongside run starts and stops.</p></div>");
-  html += F("<section class='card'><div class='toolbar'><form method='POST' action='/clearevents'><button class='btn btn-danger' type='submit'>Clear Events</button></form><form method='POST' action='/stopall'><button class='btn btn-warn' type='submit'>Stop All</button></form></div><div class='table-wrap'><table><thead><tr>");
+  html += F("<section class='card'><div class='toolbar'><form method='POST' action='/clearevents'><button class='btn btn-danger' type='submit'>Clear Events</button></form><form method='POST' action='/stopall'><button class='btn btn-warn' type='submit'>Stop All</button></form><label class='filter-toggle'><input id='hideManualRuns' type='checkbox'><span>Hide Manual Starts/Stops<small>Filter manual run entries from this view</small></span></label></div><div class='table-wrap'><table><thead><tr>");
   html += F("<th>Time</th><th>Zone</th><th>Event</th><th>Source</th><th>Rain Delay</th><th>Details</th></tr></thead><tbody>");
-  if (eventCount == 0) {
-    html += F("<tr><td colspan='6' class='empty-state'>No run or weather-delay entries are available in the current event log.</td></tr>");
-  } else {
-    html += eventRows;
-  }
+  html += eventRows;
+  html += F("<tr id='events-empty-row'"); html += (eventCount == 0 ? "" : " hidden");
+  html += F("><td colspan='6' class='empty-state'>No run or weather-delay entries are available in the current event log.</td></tr>");
   html += F("</tbody></table></div></section></div>");
   html += F("<script>");
   html += F("function applyTheme(t){document.documentElement.setAttribute('data-theme',t==='dark'?'dark':'light');}");
   html += F("(function(){let saved=localStorage.getItem('theme');if(saved!=='dark'&&saved!=='light'){saved=(window.matchMedia&&window.matchMedia('(prefers-color-scheme: dark)').matches)?'dark':'light';localStorage.setItem('theme',saved);}applyTheme(saved);})();");
   html += F("document.getElementById('themeBtn')?.addEventListener('click',()=>{const cur=(document.documentElement.getAttribute('data-theme')==='dark')?'dark':'light';const nxt=(cur==='dark')?'light':'dark';applyTheme(nxt);localStorage.setItem('theme',nxt);});");
+  html += F("const manualFilterKey='eventsHideManualRuns';");
+  html += F("const hideManualBox=document.getElementById('hideManualRuns');");
+  html += F("const rows=[...document.querySelectorAll('tbody tr[data-manual]')];");
+  html += F("function refreshEventView(){const hideManual=!!hideManualBox?.checked;let visible=0,starts=0,stops=0;let latest='-';");
+  html += F("rows.forEach(row=>{const isManual=row.dataset.manual==='1';const keep=!(hideManual&&isManual);row.hidden=!keep;if(!keep)return;visible++;const cells=row.cells;if(visible===1&&cells[0])latest=cells[0].textContent.trim();const ev=(cells[2]?.textContent||'').trim().toUpperCase();if(ev==='START')starts++;else if(ev==='STOPPED')stops++;});");
+  html += F("const empty=document.getElementById('events-empty-row'); if(empty) empty.hidden=visible!==0;");
+  html += F("const badge=document.getElementById('eventCountBadge'); if(badge) badge.textContent=visible+' filtered events';");
+  html += F("const latestEl=document.getElementById('latestEventValue'); if(latestEl) latestEl.textContent=latest;");
+  html += F("const startEl=document.getElementById('startCountValue'); if(startEl) startEl.textContent=String(starts);");
+  html += F("const stopEl=document.getElementById('stopCountValue'); if(stopEl) stopEl.textContent=String(stops);}");
+  html += F("if(hideManualBox){hideManualBox.checked=localStorage.getItem(manualFilterKey)==='1';hideManualBox.addEventListener('change',()=>{localStorage.setItem(manualFilterKey,hideManualBox.checked?'1':'0');refreshEventView();});refreshEventView();}");
   html += F("function addRipple(e){const t=e.currentTarget; if(t.disabled) return; const rect=t.getBoundingClientRect();");
   html += F("const size=Math.max(rect.width,rect.height); const x=(e.clientX|| (rect.left+rect.width/2)) - rect.left - size/2;");
   html += F("const y=(e.clientY|| (rect.top+rect.height/2)) - rect.top - size/2;");
