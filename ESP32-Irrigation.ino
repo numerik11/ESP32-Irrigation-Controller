@@ -1,10 +1,3 @@
-#include <Ticker.h>
-// ---------- Runtime Totals ----------
-static unsigned long totalScheduledRuntimeSec = 0;
-static unsigned long totalManualRuntimeSec = 0;
-//ESP32/ESP32-s3 - Irrigation Controller  
-//OLED or TFT NOW SELECTED IN SETUP
-
 #ifndef ENABLE_DEBUG_ROUTES
   #define ENABLE_DEBUG_ROUTES 0   // set to 1 when you need them
 #endif
@@ -27,6 +20,7 @@ static unsigned long totalManualRuntimeSec = 0;
 #include <HTTPClient.h>
 #include <Wire.h>
 #include <LittleFS.h>
+#include <Ticker.h>
 #include <PCF8574.h> // (Must use Library from Github)
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
@@ -226,6 +220,9 @@ static ManualButtonState g_manualSelectBtn;
 static ManualButtonState g_manualStartBtn;
 
 // ---------- Config / State ----------
+static unsigned long totalScheduledRuntimeSec = 0;
+static unsigned long totalManualRuntimeSec = 0;
+
 float  meteoLat = NAN;
 float  meteoLon = NAN;
 String meteoLocation; // Open-Meteo display label (optional)
