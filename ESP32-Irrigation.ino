@@ -436,6 +436,9 @@ bool isValidAdcPin(int pin);
 bool isValidGpioPin(int pin);
 bool isValidPhotoPin(int pin);
 void updateStatusPixel();
+static inline unsigned long durationForSlot(int z, int slot);
+time_t parseEventTimestamp(const String& ts);
+void rebuildRuntimeCountersFromEvents();
 void statusPixelSet(uint8_t r,uint8_t g,uint8_t b);
 uint8_t statusPixelPulseLevel(uint16_t periodMs, uint8_t low, uint8_t high);
 bool statusPixelWindowOn(uint16_t periodMs, uint16_t startMs, uint16_t widthMs);
@@ -589,6 +592,107 @@ static bool hasActiveManualZone() {
     if (zoneActive[z] && zoneStartedManual[z]) return true;
   }
   return false;
+}
+
+static unsigned long elapsedRunSec(int zone) {
+  if (zone < 0 || zone >= (int)MAX_ZONES) return 0;
+  if (zoneStartMs[zone] == 0) return 0;
+
+  unsigned long elapsed = (millis() - zoneStartMs[zone]) / 1000UL;
+  unsigned long total = zoneRunTotalSec[zone];
+  if (total == 0) total = durationForSlot(zone, 1);
+  if (total != 0 && elapsed > total) elapsed = total;
+  return elapsed;
+}
+
+time_t parseEventTimestamp(const String& ts) {
+  int year = 0, mon = 0, day = 0, hour = 0, min = 0, sec = 0;
+  if (sscanf(ts.c_str(), "%d-%d-%d %d:%d:%d", &year, &mon, &day, &hour, &min, &sec) != 6) {
+    return (time_t)-1;
+  }
+
+  struct tm t = {};
+  t.tm_year = year - 1900;
+  t.tm_mon  = mon - 1;
+  t.tm_mday = day;
+  t.tm_hour = hour;
+  t.tm_min  = min;
+  t.tm_sec  = sec;
+  t.tm_isdst = -1;
+  return mktime(&t);
+}
+
+void rebuildRuntimeCountersFromEvents() {
+  totalScheduledRuntimeSec = 0;
+  totalManualRuntimeSec = 0;
+
+  File f = LittleFS.open("/events.csv", "r");
+  if (!f) return;
+
+  String activeZone[MAX_ZONES];
+  time_t activeStart[MAX_ZONES] = {};
+  bool activeManual[MAX_ZONES] = {};
+  bool activeUsed[MAX_ZONES] = {};
+
+  while (f.available()) {
+    String line = f.readStringUntil('\n');
+    line.trim();
+    if (line.length() < 5) continue;
+
+    int i1 = line.indexOf(',');
+    int i2 = line.indexOf(',', i1 + 1);
+    int i3 = line.indexOf(',', i2 + 1);
+    int i4 = line.indexOf(',', i3 + 1);
+    if (i1 < 0 || i2 < 0 || i3 < 0 || i4 < 0) continue;
+
+    String ts   = line.substring(0, i1);
+    String zone = line.substring(i1 + 1, i2);
+    String ev   = line.substring(i2 + 1, i3);
+    String src  = line.substring(i3 + 1, i4);
+    time_t epoch = parseEventTimestamp(ts);
+    if (epoch == (time_t)-1) continue;
+
+    int slot = -1;
+    for (int i = 0; i < (int)MAX_ZONES; ++i) {
+      if (activeUsed[i] && activeZone[i] == zone) {
+        slot = i;
+        break;
+      }
+    }
+
+    if (ev == "START") {
+      if (slot < 0) {
+        for (int i = 0; i < (int)MAX_ZONES; ++i) {
+          if (!activeUsed[i]) {
+            slot = i;
+            break;
+          }
+        }
+      }
+      if (slot < 0) continue;
+
+      activeUsed[slot] = true;
+      activeZone[slot] = zone;
+      activeManual[slot] = (src == "MANUAL");
+      activeStart[slot] = epoch;
+      continue;
+    }
+
+    if (ev != "STOPPED" || slot < 0 || !activeUsed[slot]) continue;
+
+    if (epoch >= activeStart[slot]) {
+      unsigned long dur = (unsigned long)(epoch - activeStart[slot]);
+      if (activeManual[slot] || src == "MANUAL") totalManualRuntimeSec += dur;
+      else totalScheduledRuntimeSec += dur;
+    }
+
+    activeUsed[slot] = false;
+    activeZone[slot] = "";
+    activeManual[slot] = false;
+    activeStart[slot] = 0;
+  }
+
+  f.close();
 }
 
 static void stopAutoZonesForBlock() {
@@ -1657,6 +1761,7 @@ void setup() {
       tcheck.tm_hour, tcheck.tm_min, tcheck.tm_sec,
       (tcheck.tm_isdst>0) ? "DST" : "STD", (int)tzMode);
   }
+  rebuildRuntimeCountersFromEvents();
 
   // OTA
   #if ENABLE_OTA
@@ -3022,11 +3127,7 @@ void logEvent(int zone, const char* eventType, const char* source, bool rainDela
       if (zone >= 0 && zone < MAX_ZONES) {
         isManual = zoneStartedManual[zone];
       }
-      unsigned long dur = 0;
-      if (zone >= 0 && zone < MAX_ZONES) {
-        dur = zoneRunTotalSec[zone];
-        if (dur == 0) dur = durationForSlot(zone, 1);
-      }
+      unsigned long dur = elapsedRunSec(zone);
       if (isManual) totalManualRuntimeSec += dur;
       else totalScheduledRuntimeSec += dur;
     }
@@ -4058,9 +4159,7 @@ void turnOffZone(int z) {
   bool wasDelayed = rainActive || windActive || isPausedNow() ||
                     !systemMasterEnabled ||
                     (rainCooldownUntilEpoch > time(nullptr));
-  if (!zoneStartedManual[z]) {
-    logEvent(z, "STOPPED", src, wasDelayed);
-  }
+  logEvent(z, "STOPPED", zoneStartedManual[z] ? "MANUAL" : src, wasDelayed);
 
   const bool usePcf = useExpanderForZone(z);
 
@@ -4074,7 +4173,6 @@ void turnOffZone(int z) {
 
   zoneActive[z] = false;
   zoneStartedManual[z] = false;
-  zoneRunTotalSec[z] = 0;
   zoneRunTotalSec[z] = 0;
 
   bool anyStillOn = false;
@@ -4153,7 +4251,7 @@ void turnOnValveManual(int z) {
     setWaterSourceRelays(mainsOn, tankOn);
   }
 
-  // Manual starts are not logged
+  logEvent(z, "START", "MANUAL", false);
   manualScreenUntilMs = 0;  // leave zone-select overlay immediately
   g_forceManualReset = true;
   g_forceRunReset = true;
@@ -4183,6 +4281,8 @@ void turnOffValveManual(int z) {
     // PCF8574 path: keep active-LOW semantics (HIGH = OFF)
     pcfOut.digitalWrite(PCH[z], HIGH);
   }
+
+  logEvent(z, "STOPPED", "MANUAL", false);
 
   zoneActive[z] = false;
   zoneStartedManual[z] = false;
@@ -6060,9 +6160,9 @@ void handleLogPage() {
   html += String(weatherDelayCount);
   html += F("</div><div class='hero-mini-sub'>Scheduled starts blocked by rain or queued by wind</div></div>");
   html += F("<div class='hero-mini'><div class='hero-mini-label'>Total Scheduled Runtime</div><div class='hero-mini-value'>");
-  html += String(schedMin); html += F(":"); if (schedSec < 10) html += F("0"); html += String(schedSec); html += F("</div><div class='hero-mini-sub'>Minutes:Seconds for scheduled runs</div></div>");
+  html += String(schedMin); html += F(":"); if (schedSec < 10) html += F("0"); html += String(schedSec); html += F("</div><div class='hero-mini-sub'>Total Irrigation Runtime (Scheduled)</div></div>");
   html += F("<div class='hero-mini'><div class='hero-mini-label'>Total Manual Runtime</div><div class='hero-mini-value'>");
-  html += String(manualMin); html += F(":"); if (manualSec < 10) html += F("0"); html += String(manualSec); html += F("</div><div class='hero-mini-sub'>Minutes:Seconds for manual runs</div></div>");
+  html += String(manualMin); html += F(":"); if (manualSec < 10) html += F("0"); html += String(manualSec); html += F("</div><div class='hero-mini-sub'>Total Irrigation Runtime (Manual)</div></div>");
   html += F("</div></div></section>");
   html += F("<div class='section-head'><div><div class='section-kicker'>Audit Trail</div><h2>Recent events</h2></div><p class='section-note'>Newest entries stay at the top, including scheduled rain and wind delay events alongside run starts and stops.</p></div>");
   html += F("<section class='card'><div class='toolbar'><form method='POST' action='/clearevents'><button class='btn btn-danger' type='submit'>Clear Events</button></form><form method='POST' action='/stopall'><button class='btn btn-warn' type='submit'>Stop All</button></form></div><div class='table-wrap'><table><thead><tr>");
