@@ -157,6 +157,17 @@ static void fmtMMSS(char* out, size_t n, unsigned long sec){
   snprintf(out, n, "%02lum%02lus", m, s);
 }
 
+static String formatRuntimeClock(unsigned long totalSec) {
+  unsigned long hours = totalSec / 3600UL;
+  unsigned long minutes = (totalSec / 60UL) % 60UL;
+  unsigned long seconds = totalSec % 60UL;
+
+  char buf[16];
+  if (hours > 0) snprintf(buf, sizeof(buf), "%lu:%02lu:%02lu", hours, minutes, seconds);
+  else snprintf(buf, sizeof(buf), "%lu:%02lu", minutes, seconds);
+  return String(buf);
+}
+
 WiFiManager wifiManager;
 WebServer server(80);
 
@@ -5973,10 +5984,8 @@ void handleSubmit() {
 // ---------- Event Log Page ----------
 void handleLogPage() {
     // Prepare runtime display strings
-    unsigned long schedMin = totalScheduledRuntimeSec / 60;
-    unsigned long schedSec = totalScheduledRuntimeSec % 60;
-    unsigned long manualMin = totalManualRuntimeSec / 60;
-    unsigned long manualSec = totalManualRuntimeSec % 60;
+    String schedRuntime = formatRuntimeClock(totalScheduledRuntimeSec);
+    String manualRuntime = formatRuntimeClock(totalManualRuntimeSec);
   HttpScope _scope;
   File f = LittleFS.open("/events.csv","r");
   if (!f) {
@@ -6170,9 +6179,9 @@ void handleLogPage() {
   html += String(weatherDelayCount);
   html += F("</div><div class='hero-mini-sub'>Scheduled starts blocked by rain or queued by wind</div></div>");
   html += F("<div class='hero-mini'><div class='hero-mini-label'>Total Scheduled Runtime</div><div class='hero-mini-value'>");
-  html += String(schedMin); html += F(":"); if (schedSec < 10) html += F("0"); html += String(schedSec); html += F("</div><div class='hero-mini-sub'>Total Irrigation Runtime (Scheduled)</div></div>");
+  html += schedRuntime; html += F("</div><div class='hero-mini-sub'>Total Irrigation Runtime (Scheduled)</div></div>");
   html += F("<div class='hero-mini'><div class='hero-mini-label'>Total Manual Runtime</div><div class='hero-mini-value'>");
-  html += String(manualMin); html += F(":"); if (manualSec < 10) html += F("0"); html += String(manualSec); html += F("</div><div class='hero-mini-sub'>Total Irrigation Runtime (Manual)</div></div>");
+  html += manualRuntime; html += F("</div><div class='hero-mini-sub'>Total Irrigation Runtime (Manual)</div></div>");
   html += F("</div></div></section>");
   html += F("<div class='section-head'><div><div class='section-kicker'>Audit Trail</div><h2>Recent events</h2></div><p class='section-note'>Newest entries stay at the top, including scheduled rain and wind delay events alongside run starts and stops.</p></div>");
   html += F("<section class='card'><div class='toolbar'><form method='POST' action='/clearevents'><button class='btn btn-danger' type='submit'>Clear Events</button></form><form method='POST' action='/stopall'><button class='btn btn-warn' type='submit'>Stop All</button></form><label class='filter-toggle'><input id='hideManualRuns' type='checkbox'><span>Hide Manual Starts/Stops<small>Filter manual run entries from this view</small></span></label></div><div class='table-wrap'><table><thead><tr>");
