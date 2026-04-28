@@ -32,6 +32,7 @@
 #include "esp_heap_caps.h"
 extern "C" {
   #include "esp_log.h"
+  #include "esp_system.h"
   #include "esp_wifi.h"
 }
 #include <time.h>
@@ -419,6 +420,8 @@ void handleSetupPage();
 void handleConfigure();
 void handleLogPage();
 void handleClearEvents();
+void handleDiagnosticsPage();
+void handleDiagnosticsJson();
 void handleTankCalibration();
 String fetchWeather();
 String fetchWeatherHourlyForCurrent(const String& model, float lat, float lon, bool useForecastEndpoint);
@@ -495,13 +498,18 @@ WiFiClient   _mqttNetCli;
 PubSubClient _mqtt(_mqttNetCli);
 uint32_t     _lastMqttPub = 0;
 uint32_t     _lastMqttAttempt = 0;
+uint32_t     _mqttReconnectDelayMs = 15000;
+uint8_t      _mqttReconnectFailures = 0;
+
+static const uint32_t MQTT_RECONNECT_DELAY_MIN_MS = 15000;
+static const uint32_t MQTT_RECONNECT_DELAY_MAX_MS = 300000;
 
 void mqttSetup(){
   if (!mqttEnabled || mqttBroker.length()==0) return;
   _mqtt.setServer(mqttBroker.c_str(), mqttPort);
   _mqtt.setBufferSize(2048);
   _mqtt.setKeepAlive(30);
-  _mqtt.setSocketTimeout(5);
+  _mqtt.setSocketTimeout(1);
   _mqtt.setCallback([](char* topic, byte* payload, unsigned int len){
     String t(topic), msg; msg.reserve(len);
     for (unsigned i=0;i<len;i++) msg += (char)payload[i];
@@ -528,9 +536,13 @@ void mqttSetup(){
 void mqttEnsureConnected(){
   if (!mqttEnabled || mqttBroker.length()==0) return;
   if (WiFi.status() != WL_CONNECTED) return;
-  if (_mqtt.connected()) return;
+  if (_mqtt.connected()) {
+    _mqttReconnectFailures = 0;
+    _mqttReconnectDelayMs = MQTT_RECONNECT_DELAY_MIN_MS;
+    return;
+  }
   const uint32_t now = millis();
-  if (now - _lastMqttAttempt < 5000) return;
+  if (now - _lastMqttAttempt < _mqttReconnectDelayMs) return;
   _lastMqttAttempt = now;
   String cid = "espirrigation-" + WiFi.macAddress();
   bool ok = false;
@@ -540,9 +552,22 @@ void mqttEnsureConnected(){
     ok = _mqtt.connect(cid.c_str());
   }
   if (ok) {
+    _mqttReconnectFailures = 0;
+    _mqttReconnectDelayMs = MQTT_RECONNECT_DELAY_MIN_MS;
     _mqtt.subscribe( (mqttBase + "/cmd/#").c_str() );
   } else {
-    Serial.printf("[MQTT] connect failed, rc=%d\n", _mqtt.state());
+    if (_mqttReconnectFailures < 8) _mqttReconnectFailures++;
+    uint32_t nextDelay = MQTT_RECONNECT_DELAY_MIN_MS;
+    for (uint8_t i = 0; i < _mqttReconnectFailures; ++i) {
+      if (nextDelay >= MQTT_RECONNECT_DELAY_MAX_MS / 2) {
+        nextDelay = MQTT_RECONNECT_DELAY_MAX_MS;
+        break;
+      }
+      nextDelay *= 2;
+    }
+    _mqttReconnectDelayMs = nextDelay;
+    Serial.printf("[MQTT] connect failed, rc=%d; retry in %lus\n",
+                  _mqtt.state(), (unsigned long)(_mqttReconnectDelayMs / 1000UL));
   }
 }
 
@@ -1565,6 +1590,220 @@ static void tickAutoBacklight(){
     tftBacklight(autoOn);
   }
 }
+
+static const char* resetReasonText(esp_reset_reason_t reason) {
+  switch (reason) {
+    case ESP_RST_POWERON:   return "power_on";
+    case ESP_RST_EXT:       return "external";
+    case ESP_RST_SW:        return "software";
+    case ESP_RST_PANIC:     return "panic";
+    case ESP_RST_INT_WDT:   return "interrupt_watchdog";
+    case ESP_RST_TASK_WDT:  return "task_watchdog";
+    case ESP_RST_WDT:       return "other_watchdog";
+    case ESP_RST_DEEPSLEEP: return "deep_sleep";
+    case ESP_RST_BROWNOUT:  return "brownout";
+    case ESP_RST_SDIO:      return "sdio";
+    default:                return "unknown";
+  }
+}
+
+void handleDiagnosticsJson() {
+  HttpScope _scope;
+
+  JsonDocument doc;
+  const uint32_t nowMs = millis();
+  const uint32_t uptimeSec = (nowMs - bootMillis) / 1000UL;
+  const time_t nowEpoch = time(nullptr);
+
+  doc["device"] = kHost;
+  doc["uptimeSec"] = uptimeSec;
+  doc["uptime"] = formatRuntimeClock(uptimeSec);
+  doc["epoch"] = (uint32_t)nowEpoch;
+  doc["sdk"] = ESP.getSdkVersion();
+  doc["chipModel"] = ESP.getChipModel();
+  doc["chipRevision"] = ESP.getChipRevision();
+  doc["cpuMHz"] = ESP.getCpuFreqMHz();
+  doc["flashSize"] = ESP.getFlashChipSize();
+  doc["sketchSize"] = ESP.getSketchSize();
+  doc["freeSketchSpace"] = ESP.getFreeSketchSpace();
+  doc["resetReason"] = resetReasonText(esp_reset_reason());
+
+  JsonObject heap = doc["heap"].to<JsonObject>();
+  heap["free"] = ESP.getFreeHeap();
+  heap["minFree"] = ESP.getMinFreeHeap();
+  heap["maxAlloc"] = ESP.getMaxAllocHeap();
+  heap["psramSize"] = ESP.getPsramSize();
+  heap["psramFree"] = ESP.getFreePsram();
+
+  JsonObject fs = doc["littleFs"].to<JsonObject>();
+  fs["total"] = LittleFS.totalBytes();
+  fs["used"] = LittleFS.usedBytes();
+  fs["configExists"] = LittleFS.exists("/config.txt");
+  fs["scheduleExists"] = LittleFS.exists("/schedule.txt");
+  fs["eventsExists"] = LittleFS.exists("/events.csv");
+
+  JsonObject wifi = doc["wifi"].to<JsonObject>();
+  wifi["connected"] = (WiFi.status() == WL_CONNECTED);
+  wifi["ssid"] = WiFi.SSID();
+  wifi["ip"] = WiFi.localIP().toString();
+  wifi["rssi"] = WiFi.RSSI();
+  wifi["mac"] = WiFi.macAddress();
+  wifi["hostname"] = WiFi.getHostname();
+
+  JsonObject mqtt = doc["mqtt"].to<JsonObject>();
+  mqtt["enabled"] = mqttEnabled;
+  mqtt["connected"] = _mqtt.connected();
+  mqtt["broker"] = mqttBroker;
+  mqtt["port"] = mqttPort;
+  mqtt["baseTopic"] = mqttBase;
+  mqtt["lastState"] = _mqtt.state();
+  mqtt["reconnectDelaySec"] = _mqttReconnectDelayMs / 1000UL;
+  mqtt["reconnectFailures"] = _mqttReconnectFailures;
+
+  JsonObject io = doc["io"].to<JsonObject>();
+  io["i2cSda"] = i2cSdaPin;
+  io["i2cScl"] = i2cSclPin;
+  io["gpioFallback"] = useGpioFallback;
+  io["i2cFailCount"] = i2cFailCount;
+  JsonArray devices = io["i2cDevices"].to<JsonArray>();
+  for (uint8_t addr = 1; addr < 127; ++addr) {
+    I2Cbus.beginTransmission(addr);
+    if (I2Cbus.endTransmission() == 0) {
+      char buf[6];
+      snprintf(buf, sizeof(buf), "0x%02X", addr);
+      devices.add(buf);
+    }
+  }
+
+  JsonObject display = doc["display"].to<JsonObject>();
+  display["type"] = displayUseTft ? "tft" : "oled";
+  display["tftWidth"] = tftPanelWidth;
+  display["tftHeight"] = tftPanelHeight;
+  display["tftRotation"] = tftRotation;
+  display["backlightPin"] = tftBlPin;
+  display["backlightOn"] = g_tftBlOn;
+  display["displayOn"] = g_tftDisplayOn;
+  display["pwm"] = g_tftPwmReady;
+  display["brightnessPct"] = (int)lroundf((float)g_tftBrightness * 100.0f / 255.0f);
+
+  JsonObject water = doc["water"].to<JsonObject>();
+  water["zonesCount"] = zonesCount;
+  water["sourceMode"] = sourceModeText();
+  water["tankEnabled"] = tankEnabled;
+  water["tankPct"] = tankPercent();
+  water["tankLow"] = isTankLow();
+  water["masterOn"] = systemMasterEnabled;
+  water["paused"] = isPausedNow();
+  water["rainDelayActive"] = rainActive;
+  water["windDelayActive"] = windActive;
+  water["rainDelayCause"] = rainDelayCauseText();
+
+  JsonObject weather = doc["weather"].to<JsonObject>();
+  weather["location"] = meteoLocationLabel();
+  weather["model"] = meteoModel;
+  weather["currentValid"] = curWeatherValid;
+  weather["lastCurrentHttp"] = lastWeatherHttpCode;
+  weather["lastForecastHttp"] = lastForecastHttpCode;
+  weather["lastCurrentAgeSec"] = lastWeatherUpdate ? (nowMs - lastWeatherUpdate) / 1000UL : 0;
+  weather["lastForecastAgeSec"] = lastForecastUpdate ? (nowMs - lastForecastUpdate) / 1000UL : 0;
+  if (lastWeatherError.length()) weather["lastCurrentError"] = lastWeatherError;
+  if (lastForecastError.length()) weather["lastForecastError"] = lastForecastError;
+
+  String out;
+  out.reserve(2600);
+  serializeJson(doc, out);
+  server.send(200, "application/json", out);
+}
+
+void handleDiagnosticsPage() {
+  HttpScope _scope;
+
+  const uint32_t nowMs = millis();
+  const uint32_t uptimeSec = (nowMs - bootMillis) / 1000UL;
+  const uint32_t fsTotal = LittleFS.totalBytes();
+  const uint32_t fsUsed = LittleFS.usedBytes();
+  const int activeZones = []() {
+    int n = 0;
+    for (int i = 0; i < (int)zonesCount; ++i) if (zoneActive[i]) ++n;
+    return n;
+  }();
+
+  String i2cList;
+  for (uint8_t addr = 1; addr < 127; ++addr) {
+    I2Cbus.beginTransmission(addr);
+    if (I2Cbus.endTransmission() == 0) {
+      char buf[8];
+      snprintf(buf, sizeof(buf), "%s0x%02X", i2cList.length() ? " " : "", addr);
+      i2cList += buf;
+    }
+  }
+  if (!i2cList.length()) i2cList = "none";
+
+  String html;
+  html.reserve(5200);
+  html += F("<!doctype html><html lang='en'><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'>");
+  html += F("<title>ESP32 Diagnostics</title><style>");
+  html += F(":root{color-scheme:light dark;--bg:#eef4f1;--panel:#fff;--ink:#14232b;--muted:#60736d;--line:#ccddd5;--ok:#21885f;--warn:#b7791f;--bad:#c53030}");
+  html += F("@media(prefers-color-scheme:dark){:root{--bg:#081315;--panel:#102126;--ink:#e6f0ec;--muted:#9ab4ad;--line:#27464d}}");
+  html += F("*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font-family:Segoe UI,Arial,sans-serif;line-height:1.4}.wrap{max-width:1100px;margin:0 auto;padding:18px}");
+  html += F(".nav{display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:18px}.brand{font-weight:800;font-size:1.3rem}.links{display:flex;gap:8px;flex-wrap:wrap}");
+  html += F("a,.btn{display:inline-flex;align-items:center;justify-content:center;border:1px solid var(--line);border-radius:8px;padding:8px 12px;color:inherit;text-decoration:none;background:var(--panel);font-weight:650}");
+  html += F(".grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:12px}.card{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:14px}");
+  html += F("h1,h2{margin:0}h2{font-size:1rem;margin-bottom:10px}.k{color:var(--muted);font-size:.82rem;text-transform:uppercase;letter-spacing:.08em}.v{font-size:1.35rem;font-weight:800;word-break:break-word}");
+  html += F("table{width:100%;border-collapse:collapse;font-size:.95rem}td{padding:7px 0;border-top:1px solid var(--line)}td:last-child{text-align:right;font-weight:650}.ok{color:var(--ok)}.warn{color:var(--warn)}.bad{color:var(--bad)}code{font-family:Consolas,monospace}</style></head><body><main class='wrap'>");
+  html += F("<div class='nav'><div><div class='k'>Controller Health</div><h1>Diagnostics</h1></div><div class='links'><a href='/'>Home</a><a href='/setup'>Setup</a><a href='/events'>Events</a><a href='/diagnostics.json'>JSON</a></div></div>");
+
+  html += F("<section class='grid'>");
+  html += F("<div class='card'><div class='k'>Uptime</div><div class='v'>"); html += formatRuntimeClock(uptimeSec); html += F("</div></div>");
+  html += F("<div class='card'><div class='k'>WiFi</div><div class='v "); html += (WiFi.status() == WL_CONNECTED ? "ok" : "bad"); html += F("'>");
+  html += (WiFi.status() == WL_CONNECTED ? WiFi.localIP().toString() : String("Disconnected")); html += F("</div><div class='k'>RSSI ");
+  html += String(WiFi.RSSI()); html += F(" dBm</div></div>");
+  html += F("<div class='card'><div class='k'>Heap Free</div><div class='v'>"); html += String(ESP.getFreeHeap()); html += F(" B</div><div class='k'>Min ");
+  html += String(ESP.getMinFreeHeap()); html += F(" B</div></div>");
+  html += F("<div class='card'><div class='k'>LittleFS</div><div class='v'>"); html += String(fsUsed); html += F(" / "); html += String(fsTotal); html += F(" B</div></div>");
+  html += F("</section>");
+
+  html += F("<section class='grid' style='margin-top:12px'>");
+  html += F("<div class='card'><h2>Runtime</h2><table>");
+  html += F("<tr><td>Device</td><td>"); html += kHost; html += F("</td></tr>");
+  html += F("<tr><td>Reset reason</td><td>"); html += resetReasonText(esp_reset_reason()); html += F("</td></tr>");
+  html += F("<tr><td>SDK</td><td>"); html += ESP.getSdkVersion(); html += F("</td></tr>");
+  html += F("<tr><td>CPU</td><td>"); html += String(ESP.getCpuFreqMHz()); html += F(" MHz</td></tr>");
+  html += F("<tr><td>Sketch</td><td>"); html += String(ESP.getSketchSize()); html += F(" B</td></tr>");
+  html += F("</table></div>");
+
+  html += F("<div class='card'><h2>Network</h2><table>");
+  html += F("<tr><td>SSID</td><td>"); html += WiFi.SSID(); html += F("</td></tr>");
+  html += F("<tr><td>Hostname</td><td>"); html += WiFi.getHostname(); html += F("</td></tr>");
+  html += F("<tr><td>MQTT</td><td class='"); html += (_mqtt.connected() ? "ok" : (mqttEnabled ? "warn" : "")); html += F("'>");
+  html += (mqttEnabled ? (_mqtt.connected() ? "connected" : "offline") : "disabled"); html += F("</td></tr>");
+  html += F("<tr><td>Base topic</td><td>"); html += mqttBase; html += F("</td></tr>");
+  html += F("</table></div>");
+
+  html += F("<div class='card'><h2>Hardware</h2><table>");
+  html += F("<tr><td>I2C pins</td><td>"); html += String(i2cSdaPin); html += F(" / "); html += String(i2cSclPin); html += F("</td></tr>");
+  html += F("<tr><td>I2C devices</td><td><code>"); html += i2cList; html += F("</code></td></tr>");
+  html += F("<tr><td>GPIO fallback</td><td>"); html += (useGpioFallback ? "yes" : "no"); html += F("</td></tr>");
+  html += F("<tr><td>Display</td><td>"); html += (displayUseTft ? "TFT" : "OLED"); html += F("</td></tr>");
+  html += F("</table></div>");
+
+  html += F("<div class='card'><h2>Irrigation</h2><table>");
+  html += F("<tr><td>Zones</td><td>"); html += String(activeZones); html += F(" active / "); html += String(zonesCount); html += F("</td></tr>");
+  html += F("<tr><td>Source</td><td>"); html += sourceModeText(); html += F("</td></tr>");
+  html += F("<tr><td>Tank</td><td>"); html += String(tankPercent()); html += F("%</td></tr>");
+  html += F("<tr><td>Delay</td><td>"); html += rainDelayCauseText(); html += F("</td></tr>");
+  html += F("</table></div>");
+
+  html += F("<div class='card'><h2>Weather</h2><table>");
+  html += F("<tr><td>Location</td><td>"); html += meteoLocationLabel(); html += F("</td></tr>");
+  html += F("<tr><td>Model</td><td>"); html += meteoModel; html += F("</td></tr>");
+  html += F("<tr><td>Current HTTP</td><td>"); html += String(lastWeatherHttpCode); html += F("</td></tr>");
+  html += F("<tr><td>Forecast HTTP</td><td>"); html += String(lastForecastHttpCode); html += F("</td></tr>");
+  html += F("</table></div>");
+  html += F("</section></main></body></html>");
+
+  server.send(200, "text/html", html);
+}
 // ---------- Setup ----------
 void setup() {
   Serial.begin(115200);
@@ -1790,6 +2029,8 @@ void setup() {
   server.on("/clearevents", HTTP_POST, handleClearEvents);
 
   server.on("/tank", HTTP_GET, handleTankCalibration);
+  server.on("/diagnostics", HTTP_GET, handleDiagnosticsPage);
+  server.on("/diagnostics.json", HTTP_GET, handleDiagnosticsJson);
 
   // /status JSON
   server.on("/status", HTTP_GET, [](){
@@ -2181,7 +2422,7 @@ void setup() {
 
   // MQTT
   mqttSetup();
-  mqttEnsureConnected();
+  _lastMqttAttempt = millis();
 }
 
 // ---------- Loop ----------
@@ -4474,7 +4715,7 @@ void handleRoot() {
   };
   html += F("<!doctype html><html lang='en' data-theme='light'><head>");
   html += F("<meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'>");
-  html += F("<meta name='theme-color' content='#145b63'><meta name='color-scheme' content='light dark'>");
+  html += F("<meta name='theme-color' content='#1e40af'><meta name='color-scheme' content='light dark'>");
   html += F("<title>ESP32 Irrigation</title>");
   html += F("<style>");
   html += F("@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@500;700&family=Sora:wght@400;600;700;800&display=swap');");
@@ -4711,6 +4952,30 @@ void handleRoot() {
   html += F(".action-copy p{margin:8px 0 0;color:var(--muted)}");
   html += F("#clock,.hero-mini-value{font-variant-numeric:tabular-nums}");
   html += F("@media(max-width:980px){.hero-grid{grid-template-columns:1fr}.section-head{flex-direction:column;align-items:flex-start}.section-note{text-align:left}.summary-grid .weather-card,.summary-grid .next-card{grid-column:auto}.metric-tile.metric-wide{grid-column:auto}.dash-nav{top:68px}}");
+  html += F(":root{--radius:8px;--radius-sm:8px;--shadow:0 10px 28px rgba(15,23,42,.12)}");
+  html += F(":root[data-theme='light']{--bg:#f4f7f4;--bg2:#fbfcfb;--glass:rgba(255,255,255,.78);--glass-brd:#d8e3dd;--card:#ffffff;--line:#dde7e1;--muted:#60726e;--ring:#e8f0ec;--ring2:#f3e8cf}");
+  html += F(":root[data-theme='dark']{--bg:#0a1114;--bg2:#111d21;--glass:rgba(16,29,33,.78);--glass-brd:#264148;--card:#101d21;--line:#263f45;--chip:#13282d;--chip-brd:#2b4a51;--shadow:0 12px 30px rgba(0,0,0,.34)}");
+  html += F(":root[data-theme='light']{--bg:#f3f7fc;--bg2:#fbfdff;--glass-brd:#d7e2f0;--line:#dbe6f3;--muted:#5f6f84;--primary:#2563eb;--primary-2:#1e40af;--chip:#edf4ff;--chip-brd:#c9daf5;--ring:#e6eefb;--ring2:#dbeafe}");
+  html += F(":root[data-theme='dark']{--bg:#08111f;--bg2:#0d1b2f;--glass:rgba(13,27,47,.8);--glass-brd:#24405f;--card:#0f1d31;--line:#263f60;--primary:#60a5fa;--primary-2:#2563eb;--chip:#10233d;--chip-brd:#294b73}");
+  html += F("html,body{background:linear-gradient(180deg,var(--bg2),var(--bg));letter-spacing:0}");
+  html += F("body::before,body::after,.hero-shell::before,.hero-shell::after{display:none}");
+  html += F(".nav{background:linear-gradient(180deg,#1e40af,#172554);box-shadow:0 8px 22px rgba(0,0,0,.18)}");
+  html += F(".wrap{margin:16px auto}.glass,.card,.hero-mini,.summary-link,.metric-tile,.sched-card,.zone-row,.zone-summary-card,.action-card{border-radius:8px}");
+  html += F(".hero-shell{padding:22px;margin:16px 0;background:linear-gradient(135deg,var(--glass),rgba(37,99,235,.08));border-color:var(--glass-brd)}");
+  html += F(".hero-title{font-size:clamp(1.7rem,3vw,2.55rem);max-width:none}.hero-text:empty{display:none}");
+  html += F(".hero-mini{min-height:118px;background:var(--card);box-shadow:none}.hero-mini.hero-mini-strong{background:linear-gradient(135deg,rgba(37,99,235,.16),var(--card))}");
+  html += F(".dash-nav{top:62px;background:rgba(255,255,255,.76);box-shadow:0 8px 22px rgba(15,23,42,.08)}html[data-theme='dark'] .dash-nav{background:rgba(16,29,33,.82)}");
+  html += F(".card{box-shadow:0 8px 24px rgba(15,23,42,.08)}.card:hover{transform:none;box-shadow:0 10px 28px rgba(15,23,42,.12)}");
+  html += F(".card h3{border-bottom:1px solid var(--line);font-size:1.02rem;letter-spacing:0}.card::before{height:2px}");
+  html += F(".btn,.btn-ghost,.btn-secondary,.pill,.mini-chip,.badge,.chip,.day span,.toggle-inline,.in{border-radius:8px}");
+  html += F(".summary-link,.metric-tile{background:#f8fbf9}.summary-value{letter-spacing:0}.zone-row{box-shadow:0 1px 0 rgba(15,23,42,.03)}");
+  html += F(".card::before{background:linear-gradient(90deg,#2563eb,#60a5fa)}.fill{background:linear-gradient(90deg,#93c5fd,#60a5fa,#2563eb);box-shadow:0 0 30px rgba(96,165,250,.28) inset}");
+  html += F(".summary-note{border-color:rgba(37,99,235,.2);background:linear-gradient(180deg,rgba(37,99,235,.1),rgba(37,99,235,.03))}.zone-summary-card{background:linear-gradient(160deg,var(--panel),rgba(37,99,235,.08))}");
+  html += F(".day input:checked + span{border-color:rgba(37,99,235,.46);background:linear-gradient(180deg,rgba(37,99,235,.18),rgba(37,99,235,.05));box-shadow:0 10px 20px rgba(37,99,235,.12)}");
+  html += F(".sched-card input[type=checkbox]:focus-visible{box-shadow:0 0 0 3px rgba(37,99,235,.18)}html[data-theme='light'] .sched-card input[type=checkbox]::before{border-right-color:#1e40af;border-bottom-color:#1e40af}");
+  html += F("html[data-theme='light'] .sched-card input[type=checkbox]:checked,html[data-theme='light'] .sched-card input[type=checkbox]:focus-visible{border-color:#2563eb;box-shadow:0 0 0 3px rgba(37,99,235,.12)}");
+  html += F("html[data-theme='dark'] .summary-link,html[data-theme='dark'] .metric-tile,html[data-theme='dark'] .hero-mini{background:#102126}");
+  html += F("@media(max-width:720px){.wrap{padding:0 12px;margin:12px auto}.nav .meta{width:100%}.pill,#themeBtn{flex:1 1 auto;justify-content:center}.dash-nav{top:116px;border-radius:8px}.hero-shell{padding:16px}.section-head{margin-bottom:10px}.card{padding:16px}}");
   html += F("@media(max-width:720px){.nav{padding-top:8px}.chip{font-size:.88rem}.hero-shell{padding:18px}.hero-title{max-width:none;font-size:1.95rem}.hero-mini-grid{grid-template-columns:1fr}.zone-row{grid-template-columns:1fr}.zone-row-status,.zone-row-actions{justify-content:flex-start}.zone-row-actions .btn{flex:1 1 140px}.brand-title{letter-spacing:.55px}.summary-card{min-height:auto}.summary-link{min-height:0}.summary-metric-grid{grid-template-columns:1fr 1fr}.summary-metric-grid.metric-pair{grid-template-columns:1fr}.summary-meta.status-pills{grid-template-columns:1fr}.dash-nav{top:120px;overflow:auto;flex-wrap:nowrap;padding-bottom:8px}.dash-nav a{white-space:nowrap}.sched-top{padding:16px}.sched-body{padding:16px}.sched-tools .btn{flex:1 1 140px}}");
   html += F("</style></head><body>");
   flush();
@@ -4738,7 +5003,7 @@ void handleRoot() {
   html += F("<div class='hero-copy'><div class='hero-kicker'>Smart dashboard</div>");
   html += F("<h1 class='hero-title'>ESP32 Irrigation.</h1>");
   html += F("<p class='hero-text'></p>");
-  html += F("<div class='hero-actions'><a class='btn' href='/setup'>Setup</a><a class='btn btn-secondary' href='/events'>Events</a><a class='btn btn-secondary' href='/status'>Status JSON</a></div></div>");
+  html += F("<div class='hero-actions'><a class='btn' href='/setup'>Setup</a><a class='btn btn-secondary' href='/events'>Events</a><a class='btn btn-secondary' href='/diagnostics'>Diagnostics</a><a class='btn btn-secondary' href='/status'>Status JSON</a></div></div>");
   html += F("<div class='hero-mini-grid'>");
   html += F("<div class='hero-mini hero-mini-strong'><span class='hero-mini-label'>System</span><span class='hero-mini-value' id='heroMasterState'>");
   html += heroSystemValue;
@@ -5229,7 +5494,7 @@ void handleSetupPage() {
   String setupTzLabel = (tzMode == TZ_FIXED) ? String("Fixed offset") : String("POSIX timezone");
 
   html += F("<!DOCTYPE html><html><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'>");
-  html += F("<meta name='theme-color' content='#145b63'><meta name='color-scheme' content='light dark'>");
+  html += F("<meta name='theme-color' content='#1e40af'><meta name='color-scheme' content='light dark'>");
   html += F("<title>Setup - ESP32 Irrigation</title>");
   html += F("<style>");
   html += F("@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@500;700&family=Sora:wght@400;600;700;800&display=swap');");
@@ -5406,6 +5671,19 @@ void handleSetupPage() {
   html += F("@keyframes rise{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}");
   html += F("html[data-theme='light'] body{background:radial-gradient(900px 470px at 0% -10%,rgba(31,138,112,.18),transparent),radial-gradient(900px 450px at 110% 6%,rgba(82,194,102,.12),transparent),#f1f5f1}");
   html += F("html[data-theme='light'] .page-head{background:rgba(255,255,255,.72);border-color:#d4dfd8}");
+  html += F("body{background:linear-gradient(180deg,#0d1b2f,#08111f);letter-spacing:0}.wrap{margin:20px auto}");
+  html += F(".page-head,.setup-hero,.setup-nav,.setup-actions-top,.card,.panel-split>div,input[type=text],input[type=number],select,.btn,.btn-alt,.chip{border-radius:8px}");
+  html += F(".page-head{background:#0f1d31;border-color:#24405f;box-shadow:0 8px 24px rgba(0,0,0,.18)}.setup-hero{background:#0f1d31;border-color:#24405f;box-shadow:0 10px 28px rgba(0,0,0,.2)}");
+  html += F(".setup-badge{border-radius:8px;background:#10233d;border-color:#294b73}.setup-nav,.setup-actions-top{border-color:#24405f;box-shadow:0 8px 22px rgba(0,0,0,.18)}");
+  html += F(".page-kicker{color:#93c5fd}.card{border-color:#24405f;box-shadow:0 8px 24px rgba(0,0,0,.22)}.card:hover{transform:none;box-shadow:0 10px 28px rgba(0,0,0,.26)}.card h3{border-bottom:1px solid #294b73;letter-spacing:0}");
+  html += F(".slider{border-color:#294b73}.switch input:checked + .slider{background:#2563eb;border-color:#2563eb}.btn{background:linear-gradient(180deg,#2563eb,#1e40af);box-shadow:0 6px 16px rgba(37,99,235,.22)}");
+  html += F(".row{gap:10px 14px}details.collapse summary:after{content:'>';border-radius:8px}input:focus-visible,select:focus-visible,input[type=text]:focus-visible,input[type=number]:focus-visible{outline-color:#60a5fa;box-shadow:0 0 0 3px rgba(37,99,235,.18)}");
+  html += F("html[data-theme='light'] body{background:linear-gradient(180deg,#fbfdff,#f3f7fc)}html[data-theme='light'] .page-head,html[data-theme='light'] .setup-hero,html[data-theme='light'] .card{box-shadow:0 8px 24px rgba(16,24,40,.08)}");
+  html += F("html[data-theme='light'] .page-kicker{color:#2563eb}html[data-theme='light'] .card h3{border-bottom-color:#2563eb}html[data-theme='light'] .btn{background:linear-gradient(180deg,#2563eb,#1e40af)}html[data-theme='light'] .setup-badge{background:linear-gradient(180deg,#ffffff,#eef5ff);border-color:#d7e2f0}");
+  html += F(".setup-nav a:hover{background:rgba(37,99,235,.18);border-color:rgba(147,197,253,.36);box-shadow:0 10px 24px rgba(37,99,235,.16)}details.collapse[open] summary:after{background:rgba(37,99,235,.16);border-color:rgba(147,197,253,.3)}");
+  html += F("input[type=checkbox]:not(#themeToggle):focus-visible,input[type=radio]:focus-visible{box-shadow:0 0 0 3px rgba(37,99,235,.2)}html[data-theme='light'] input[type=checkbox]:not(#themeToggle)::before{border-right-color:#1e40af;border-bottom-color:#1e40af}");
+  html += F("html[data-theme='light'] input[type=radio]::before{background:#1e40af}html[data-theme='light'] input[type=checkbox]:not(#themeToggle):checked,html[data-theme='light'] input[type=radio]:checked{border-color:#2563eb;box-shadow:0 0 0 3px rgba(37,99,235,.12)}");
+  html += F("html[data-theme='light'] input[type=checkbox]:not(#themeToggle):focus-visible,html[data-theme='light'] input[type=radio]:focus-visible{border-color:#2563eb;box-shadow:0 0 0 3px rgba(37,99,235,.14)}html[data-theme='light'] .setup-nav a:hover{background:#eef5ff;border-color:#bfdbfe;box-shadow:0 10px 24px rgba(37,99,235,.08)}");
   html += F("@media(max-width:760px){.page-head{padding:10px 12px}.page-head h1{font-size:1.2rem}.setup-hero{grid-template-columns:1fr}.setup-badges{grid-template-columns:1fr 1fr}.setup-nav{top:8px;flex-wrap:nowrap;overflow:auto;padding-bottom:6px}.setup-nav a{white-space:nowrap}.setup-actions-top{top:68px;z-index:9;padding:10px;border-radius:14px;background:rgba(13,23,24,.88);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);border:1px solid rgba(92,131,125,.2)}.row{padding-top:8px;flex-direction:column;align-items:stretch}.row label{min-width:0;width:100%}.row .btn,.row .btn-alt{width:100%}.switchline{align-items:flex-start}}");
   html += F("</style></head><body>");
 
@@ -5995,7 +6273,7 @@ void handleLogPage() {
 
   String html; html.reserve(18000);
   html += F("<!doctype html><html lang='en' data-theme='light'><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'>");
-  html += F("<meta name='theme-color' content='#145b63'><meta name='color-scheme' content='light dark'>");
+  html += F("<meta name='theme-color' content='#1e40af'><meta name='color-scheme' content='light dark'>");
   html += F("<title>ESP32 Irrigation Events</title>");
   html += F("<style>");
   html += F("@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@500;700&family=Sora:wght@400;600;700;800&display=swap');");
@@ -6093,6 +6371,20 @@ void handleLogPage() {
   html += F("html[data-theme='light'] tbody tr{background:rgba(255,255,255,.8)}");
   html += F("html[data-theme='light'] tbody tr:nth-child(even){background:rgba(248,251,248,.92)}");
   html += F("@media(max-width:980px){.hero-grid{grid-template-columns:1fr}.hero-mini-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}");
+  html += F(":root{--shadow:0 10px 28px rgba(15,23,42,.12)}:root[data-theme='light']{--bg:#f4f7f4;--bg2:#fbfcfb;--glass:rgba(255,255,255,.78);--glass-brd:#d8e3dd;--line:#dde7e1;--ring:#e8f0ec;--ring2:#f3e8cf}");
+  html += F(":root[data-theme='dark']{--bg:#0a1114;--bg2:#111d21;--glass:rgba(16,29,33,.78);--glass-brd:#264148;--card:#101d21;--line:#263f45;--chip:#13282d;--chip-brd:#2b4a51;--shadow:0 12px 30px rgba(0,0,0,.34)}");
+  html += F(":root[data-theme='light']{--bg:#f3f7fc;--bg2:#fbfdff;--glass-brd:#d7e2f0;--line:#dbe6f3;--primary:#2563eb;--primary-2:#1e40af;--chip:#edf4ff;--chip-brd:#c9daf5;--ring:#e6eefb;--ring2:#dbeafe}");
+  html += F(":root[data-theme='dark']{--bg:#08111f;--bg2:#0d1b2f;--glass:rgba(13,27,47,.8);--glass-brd:#24405f;--card:#0f1d31;--line:#263f60;--primary:#60a5fa;--primary-2:#2563eb;--chip:#10233d;--chip-brd:#294b73}");
+  html += F("body{background:linear-gradient(180deg,var(--bg2),var(--bg));letter-spacing:0}.hero-shell::before,.hero-shell::after{display:none}");
+  html += F(".nav{background:linear-gradient(180deg,#1e40af,#172554);box-shadow:0 8px 22px rgba(0,0,0,.18)}.wrap{margin:16px auto}");
+  html += F(".glass,.card,.hero-mini,.table-wrap,.btn,.btn-ghost,.pill,.filter-toggle,.event-chip{border-radius:8px}");
+  html += F(".hero-shell{padding:22px;background:linear-gradient(135deg,var(--glass),rgba(37,99,235,.08));border-color:var(--glass-brd)}.hero-title{font-size:clamp(1.7rem,3vw,2.45rem);max-width:none}");
+  html += F(".hero-mini{min-height:112px;background:var(--card);box-shadow:none}.card{box-shadow:0 8px 24px rgba(15,23,42,.08)}.card:hover{transform:none;box-shadow:0 10px 28px rgba(15,23,42,.12)}");
+  html += F(".table-wrap{box-shadow:0 8px 24px rgba(15,23,42,.08)}th{background:#1e40af}tbody tr:hover{background:rgba(37,99,235,.09)}td:last-child{min-width:320px}.btn{box-shadow:0 6px 16px rgba(37,99,235,.22)}");
+  html += F(".event-chip.queued{background:rgba(37,99,235,.12);border-color:rgba(37,99,235,.32);color:var(--primary)}.filter-toggle input[type=checkbox]:focus-visible{box-shadow:0 0 0 3px rgba(37,99,235,.2)}");
+  html += F("html[data-theme='light'] .filter-toggle input[type=checkbox]::before{border-right-color:#1e40af;border-bottom-color:#1e40af}html[data-theme='light'] .filter-toggle input[type=checkbox]:checked{border-color:#2563eb;box-shadow:0 0 0 3px rgba(37,99,235,.12)}");
+  html += F("html[data-theme='light'] th{background:#1e40af}");
+  html += F("html[data-theme='dark'] .hero-mini{background:#102126}html[data-theme='dark'] .table-wrap{box-shadow:0 12px 30px rgba(0,0,0,.34)}");
   html += F("@media(max-width:720px){.wrap{padding:0 12px}.nav{padding:10px}.hero-mini-grid{grid-template-columns:1fr}.toolbar,.hero-actions{flex-direction:column}.toolbar form{display:flex}.btn,.btn-ghost{width:100%}.section{padding:16px}th,td{padding:10px 12px}}");
   html += F("@media (prefers-reduced-motion: reduce){*{animation:none!important;transition:none!important}}");
   html += F("</style></head><body>");
@@ -6226,19 +6518,19 @@ void handleTankCalibration() {
   html += F("<!DOCTYPE html><html><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'>");
   html += F("<title>Tank Calibration</title>");
   html += F("<style>@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@500;700&family=Sora:wght@400;600;700;800&display=swap');");
-  html += F("body{font-family:'Sora','Avenir Next','Trebuchet MS',sans-serif;background:radial-gradient(900px 500px at 5% -10%,rgba(43,123,228,.2),transparent),#0f1522;color:#e8eef6;margin:0;font-size:15px}");
-  html += F(".wrap{max-width:620px;margin:34px auto;padding:0 16px}.card{background:#0b1220;border:1px solid #22314f;border-radius:16px;padding:20px 16px;box-shadow:0 18px 34px rgba(0,0,0,.28);position:relative;overflow:hidden}");
-  html += F(".card:before{content:'';position:absolute;left:0;right:0;top:0;height:3px;background:linear-gradient(90deg,#2b7be4,#22c55e)}");
+  html += F("body{font-family:'Sora','Avenir Next','Trebuchet MS',sans-serif;background:linear-gradient(180deg,#0d1b2f,#08111f);color:#e8eef6;margin:0;font-size:15px;letter-spacing:0}");
+  html += F(".wrap{max-width:620px;margin:28px auto;padding:0 16px}.card{background:#0f1d31;border:1px solid #24405f;border-radius:8px;padding:20px 16px;box-shadow:0 10px 28px rgba(0,0,0,.24);position:relative;overflow:hidden}");
+  html += F(".card:before{content:'';position:absolute;left:0;right:0;top:0;height:3px;background:linear-gradient(90deg,#2563eb,#60a5fa)}");
   html += F("h2{margin:0 0 12px 0;font-size:1.25em;letter-spacing:.8px;text-transform:uppercase}");
   html += F("p b:first-child{font-family:'JetBrains Mono','Consolas',monospace}");
-  html += F(".btn{background:linear-gradient(180deg,#2b7be4,#1f62c8);color:#fff;border:1px solid rgba(0,0,0,.18);border-radius:12px;padding:10px 16px;font-weight:700;cursor:pointer;font-size:.95rem}.row{display:flex;gap:12px;justify-content:space-between;margin-top:12px;flex-wrap:wrap}");
+  html += F(".btn{background:linear-gradient(180deg,#2563eb,#1e40af);color:#fff;border:1px solid rgba(0,0,0,.18);border-radius:8px;padding:10px 16px;font-weight:700;cursor:pointer;font-size:.95rem;box-shadow:0 6px 16px rgba(37,99,235,.22)}.row{display:flex;gap:12px;justify-content:space-between;margin-top:12px;flex-wrap:wrap}");
   html += F(".btn{transition:transform .06s ease,box-shadow .06s ease,filter .06s ease}");
   html += F(".btn:active{transform:translateY(1px);box-shadow:inset 0 2px 6px rgba(0,0,0,.25)}");
   html += F(".btn{position:relative;overflow:hidden}");
   html += F(".ripple{position:absolute;border-radius:999px;transform:scale(0);background:rgba(255,255,255,.35);animation:ripple .5s ease-out;pointer-events:none}");
   html += F("@keyframes ripple{to{transform:scale(3.2);opacity:0;}}");
   html += F("@media(max-width:600px){.btn{width:100%}.row form{flex:1 1 100%}}");
-  html += F("a{color:#a9cbff}</style></head><body><div class='wrap'><h2>Tank Calibration</h2><div class='card'>");
+  html += F("a{color:#bfdbfe}</style></head><body><div class='wrap'><h2>Tank Calibration</h2><div class='card'>");
 
   html += F("<p>Raw: <b>"); html += String(raw); html += F("</b></p>");
   html += F("<p>Calibrated range: <b>"); html += String(tankEmptyRaw); html += F("</b> to <b>"); html += String(tankFullRaw); html += F("</b></p>");
