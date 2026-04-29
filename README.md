@@ -318,7 +318,7 @@ Then configure:
 
 ### Main Dashboard
 
-<img width="427" height="867" alt="image" src="https://github.com/user-attachments/assets/4765ee0f-5aaf-42bc-8865-22b2933e4e87" />
+<img width="432" height="934" alt="image" src="https://github.com/user-attachments/assets/db0b085c-d2f0-456b-85e4-010884bfb1f3" />
 
 ### ESP32-S3 + 6 Zone/Relay + 24V AC
 
