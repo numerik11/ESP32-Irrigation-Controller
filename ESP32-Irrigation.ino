@@ -70,7 +70,7 @@ extern uint32_t bootMillis;
 // ---------- ST7789 (1.9") TFT ----------
 // Common ST7789 sizes are 170x320 and 240x320.
 // Kept runtime-configurable so the Setup page can persist the panel geometry.
-static constexpr int16_t TFT_W_DEFAULT = 240;
+static constexpr int16_t TFT_W_DEFAULT = 170;
 static constexpr int16_t TFT_H_DEFAULT = 320;
 
 // Choose pins that do NOT clash with your I2C (4/15) or other IO.
@@ -98,7 +98,7 @@ static int tftRstPin  = TFT_RST_DEFAULT;
 static int tftBlPin   = TFT_BL_DEFAULT;
 static int16_t tftPanelWidth  = TFT_W_DEFAULT;
 static int16_t tftPanelHeight = TFT_H_DEFAULT;
-static uint8_t tftRotation = 3; // ST7789 rotation: 0..3
+static uint8_t tftRotation = 0; // ST7789 rotation: 0..3
 
 Adafruit_ST7789 tft(&SPI, -1, -1, -1);
 
@@ -960,6 +960,41 @@ static String formatWindDirection(float deg) {
   return String(buf);
 }
 
+static void drawWindCompass(int cx, int cy, int r, float deg, uint16_t bg) {
+  tft.fillRect(cx - r - 3, cy - r - 8, r * 2 + 7, r * 2 + 14, bg);
+  tft.drawCircle(cx, cy, r, C_EDGE);
+  tft.drawFastVLine(cx, cy - r + 2, r * 2 - 3, C_EDGE);
+  tft.drawFastHLine(cx - r + 2, cy, r * 2 - 3, C_EDGE);
+
+  tft.setTextSize(1);
+  tft.setTextColor(C_MUTED);
+  tft.setCursor(cx - 3, cy - r - 7);
+  tft.print("N");
+
+  float norm = normalizeDegrees360(deg);
+  if (!isfinite(norm)) {
+    tft.setTextColor(C_MUTED);
+    tft.setCursor(cx - 3, cy - 3);
+    tft.print("-");
+    return;
+  }
+
+  float rad = norm * PI / 180.0f;
+  int tipX = cx + (int)lroundf(sinf(rad) * (r - 2));
+  int tipY = cy - (int)lroundf(cosf(rad) * (r - 2));
+  int tailX = cx - (int)lroundf(sinf(rad) * 4.0f);
+  int tailY = cy + (int)lroundf(cosf(rad) * 4.0f);
+  tft.drawLine(tailX, tailY, tipX, tipY, C_ACCENT);
+  tft.fillCircle(tipX, tipY, 2, C_ACCENT);
+
+  const char* dir = meteoWindDirectionToCompass(norm);
+  tft.setTextColor(C_TEXT);
+  int16_t bx, by; uint16_t bw, bh;
+  tft.getTextBounds(dir, 0, 0, &bx, &by, &bw, &bh);
+  tft.setCursor(cx - (int)bw / 2, cy + r + 2);
+  tft.print(dir);
+}
+
 static time_t parseLocalIsoTime(const char* s) {
   if (!s) return 0;
   if (strlen(s) < 16) return 0;
@@ -1444,6 +1479,13 @@ static bool g_forceRainReset = false; // force full RainScreen repaint
 static bool g_forceManualReset = false; // force full Manual screen repaint
 static bool g_forceRunReset = false; // force full Running screen repaint
 
+static bool anyZoneActive() {
+  for (int i = 0; i < (int)zonesCount && i < (int)MAX_ZONES; ++i) {
+    if (zoneActive[i]) return true;
+  }
+  return false;
+}
+
 // ---------- LEDC PWM compatibility (ESP32 Arduino core 2.x vs 3.x) ----------
 #if defined(ESP_ARDUINO_VERSION_MAJOR) && (ESP_ARDUINO_VERSION_MAJOR >= 3)
 static bool ledcAttachCompat(int pin, uint32_t freq, uint8_t resBits) {
@@ -1622,6 +1664,9 @@ void handleDiagnosticsJson() {
   doc["sdk"] = ESP.getSdkVersion();
   doc["chipModel"] = ESP.getChipModel();
   doc["chipRevision"] = ESP.getChipRevision();
+  float chipTemp = NAN;
+  if (readChipTempC(chipTemp)) doc["chipTempC"] = chipTemp;
+  else                         doc["chipTempC"] = nullptr;
   doc["cpuMHz"] = ESP.getCpuFreqMHz();
   doc["flashSize"] = ESP.getFlashChipSize();
   doc["sketchSize"] = ESP.getSketchSize();
@@ -3432,53 +3477,245 @@ void updateLCDForZone(int zone) {
   if (pct < 0) pct = 0;
   if (pct > 100) pct = 100;
 
-  const int W = tft.width();
-  const int H = tft.height();
-  tft.fillScreen(C_BG);
-
-  // Draw Zone Number (large)
-  tft.setTextSize(4);
-  tft.setTextColor(C_GOOD);
-  tft.setCursor(24, 24);
-  tft.print("Z");
-  tft.print(zone + 1);
-
-  // Draw Zone Name (centered, medium)
-  tft.setTextSize(2);
-  tft.setTextColor(C_TEXT);
-  int16_t x1, y1;
-  uint16_t w, h;
-  String zoneLabel = zoneNames[zone];
-  tft.getTextBounds(zoneLabel.c_str(), 0, 0, &x1, &y1, &w, &h);
-  int nameX = (W - w) / 2;
-  tft.setCursor(nameX, 80);
-  tft.print(zoneLabel);
-
-  // Draw Progress Bar (large)
-  int barW = W - 48;
-  int barH = 32;
-  int barX = 24;
-  int barY = H / 2 + 16;
-  tft.drawRect(barX, barY, barW, barH, C_EDGE);
-  tft.fillRect(barX + 2, barY + 2, (pct * (barW - 4)) / 100, barH - 4, C_GOOD);
-
-  // Draw countdown inside bar
-  tft.setTextSize(2);
-  tft.setTextColor(ST77XX_WHITE); // Timer text in progress bar is now white
   char remBuf[12];
+  char totalBuf[12];
+  char elapsedBuf[12];
   unsigned long rm = rem / 60;
   unsigned long rs = rem % 60;
+  unsigned long em = elapsed / 60;
+  unsigned long es = elapsed % 60;
+  unsigned long tm = total / 60;
+  unsigned long ts = total % 60;
   snprintf(remBuf, sizeof(remBuf), "%02lu:%02lu", rm, rs);
+  snprintf(elapsedBuf, sizeof(elapsedBuf), "%02lu:%02lu", em, es);
+  snprintf(totalBuf, sizeof(totalBuf), "%02lu:%02lu", tm, ts);
+
+  const char* src = "None";
+  bool mainsOn = false, tankOn = false;
+  chooseWaterSource(src, mainsOn, tankOn);
+  int activeCount = 0;
+  for (int i = 0; i < (int)zonesCount; ++i) if (zoneActive[i]) activeCount++;
+  int tankPct = constrain(tankPercent(), 0, 100);
+
+  static bool runInit = false;
+  static bool lastModeTft = false;
+  static int lastRunZone = -1;
+  static int lastRunW = -1;
+  static int lastRunH = -1;
+  static unsigned long lastRunTotal = 0;
+  static int lastRunTank = -1;
+  static int lastRunActiveCount = -1;
+  static char lastRunSource[12] = "";
+  const int dispW = displayUseTft ? tft.width() : SCREEN_WIDTH;
+  const int dispH = displayUseTft ? tft.height() : SCREEN_HEIGHT;
+  const bool layoutChanged = g_forceRunReset || !runInit || lastModeTft != displayUseTft ||
+                             lastRunZone != zone || lastRunW != dispW || lastRunH != dispH ||
+                             lastRunTotal != total || lastRunTank != tankPct ||
+                             lastRunActiveCount != activeCount || strcmp(lastRunSource, src) != 0;
+
+  if (!displayUseTft) {
+    if (layoutChanged) {
+      display.clearDisplay();
+      display.setTextColor(SSD1306_WHITE);
+      display.fillRect(0, 0, SCREEN_WIDTH, 11, SSD1306_WHITE);
+      display.setTextColor(SSD1306_BLACK);
+      display.setTextSize(1);
+      display.setCursor(2, 2);
+      display.print("RUNNING");
+      display.setCursor(88, 2);
+      display.print("Z");
+      display.print(zone + 1);
+
+      display.setTextColor(SSD1306_WHITE);
+      display.setTextSize(1);
+      String zoneLabel = zoneNames[zone];
+      if (zoneLabel.length() > 18) zoneLabel = zoneLabel.substring(0, 18);
+      display.setCursor(0, 36);
+      display.print(zoneLabel);
+
+      int barX = 0;
+      int barY = 47;
+      int barW = SCREEN_WIDTH;
+      int barH = 8;
+      display.drawRect(barX, barY, barW, barH, SSD1306_WHITE);
+    }
+
+    display.fillRect(0, 14, SCREEN_WIDTH, 18, SSD1306_BLACK);
+    display.setTextColor(SSD1306_WHITE);
+    display.setTextSize(2);
+    int timerX = 18;
+    display.setCursor(timerX, 16);
+    display.print(remBuf);
+
+    int barX = 0;
+    int barY = 47;
+    int barW = SCREEN_WIDTH;
+    int barH = 8;
+    display.fillRect(barX + 1, barY + 1, barW - 2, barH - 2, SSD1306_BLACK);
+    int fillW = ((barW - 2) * pct) / 100;
+    if (fillW > 0) display.fillRect(barX + 1, barY + 1, fillW, barH - 2, SSD1306_WHITE);
+
+    display.fillRect(0, 56, SCREEN_WIDTH, 8, SSD1306_BLACK);
+    display.setTextSize(1);
+    display.setCursor(0, 57);
+    display.print(elapsedBuf);
+    display.print("/");
+    display.print(totalBuf);
+    display.setCursor(78, 57);
+    display.print(src);
+    display.display();
+    runInit = true;
+    lastModeTft = false;
+    lastRunZone = zone;
+    lastRunW = dispW;
+    lastRunH = dispH;
+    lastRunTotal = total;
+    lastRunTank = tankPct;
+    lastRunActiveCount = activeCount;
+    strncpy(lastRunSource, src, sizeof(lastRunSource));
+    lastRunSource[sizeof(lastRunSource) - 1] = '\0';
+    g_forceRunReset = false;
+    return;
+  }
+
+  const int W = tft.width();
+  const int H = tft.height();
+
+  const int pad = 10;
+  const int headerH = 32;
+
+  int16_t bx, by;
+  uint16_t bw, bh;
+  int cardX = pad;
+  int cardY = headerH + 8;
+  int cardW = W - pad * 2;
+  int cardH = H - cardY - 10;
+
+  tft.setTextSize((W >= 300 && H >= 220) ? 5 : 4);
+  tft.setTextColor(C_ACCENT);
   int16_t remX1, remY1;
   uint16_t remW, remH;
   tft.getTextBounds(remBuf, 0, 0, &remX1, &remY1, &remW, &remH);
-  int remTextX = barX + (barW - remW) / 2;
-  int remTextY = barY + (barH - remH) / 2;
-  tft.setCursor(remTextX, remTextY);
+  int timerY = cardY + 42;
+  int timerX = cardX + (cardW - (int)remW) / 2;
+
+  int barX = cardX + 12;
+  int barY = timerY + (int)remH + 12;
+  int barW = cardW - 24;
+  int barH = 16;
+
+  if (layoutChanged) {
+    tft.fillScreen(C_BG);
+
+    tft.fillRect(0, 0, W, headerH, C_PANEL);
+    tft.drawFastHLine(0, headerH, W, C_EDGE);
+    tft.setTextSize(1);
+    tft.setTextColor(C_MUTED);
+    tft.setCursor(pad, 6);
+    tft.print("IRRIGATION");
+    tft.setTextColor(C_GOOD);
+    tft.setCursor(pad, 18);
+    tft.print("RUNNING");
+
+    char zonePill[10];
+    snprintf(zonePill, sizeof(zonePill), "ZONE %d", zone + 1);
+    tft.getTextBounds(zonePill, 0, 0, &bx, &by, &bw, &bh);
+    int pillW = (int)bw + 14;
+    int pillX = W - pillW - pad;
+    tft.fillRoundRect(pillX, 8, pillW, 18, 5, C_GOOD);
+    tft.setTextColor(ST77XX_BLACK);
+    tft.setCursor(pillX + 7, 13);
+    tft.print(zonePill);
+
+    drawCard(cardX, cardY, cardW, cardH, C_PANEL, C_EDGE);
+
+    String zoneLabel = zoneNames[zone];
+    uint8_t nameSize = 2;
+    int16_t x1, y1;
+    uint16_t w, h;
+    tft.setTextSize(nameSize);
+    tft.getTextBounds(zoneLabel.c_str(), 0, 0, &x1, &y1, &w, &h);
+    if ((int)w > cardW - 24) {
+      nameSize = 1;
+      tft.setTextSize(nameSize);
+      tft.getTextBounds(zoneLabel.c_str(), 0, 0, &x1, &y1, &w, &h);
+    }
+    tft.fillRect(cardX + 8, cardY + 8, cardW - 16, 24, C_PANEL);
+    tft.setTextColor(C_TEXT);
+    int nameX = cardX + (cardW - (int)w) / 2;
+    if (nameX < cardX + 8) nameX = cardX + 8;
+    tft.setCursor(nameX, cardY + 12);
+    tft.print(zoneLabel);
+
+    tft.drawRoundRect(barX, barY, barW, barH, 5, C_EDGE);
+  }
+
+  tft.fillRect(cardX + 8, timerY - 2, cardW - 16, (int)remH + 6, C_PANEL);
+  tft.setTextSize((W >= 300 && H >= 220) ? 5 : 4);
+  tft.setTextColor(C_ACCENT);
+  tft.getTextBounds(remBuf, 0, 0, &remX1, &remY1, &remW, &remH);
+  timerX = cardX + (cardW - (int)remW) / 2;
+  tft.setCursor(timerX, timerY);
   tft.print(remBuf);
 
+  tft.fillRect(barX + 2, barY + 2, barW - 4, barH - 4, C_PANEL);
+  int fillW = ((barW - 4) * pct) / 100;
+  if (fillW > 0) tft.fillRoundRect(barX + 2, barY + 2, fillW, barH - 4, 4, C_GOOD);
+
+  char pctBuf[8];
+  snprintf(pctBuf, sizeof(pctBuf), "%d%%", pct);
+  tft.fillRect(barX, barY + barH + 4, barW, 12, C_PANEL);
+  tft.setTextSize(1);
+  tft.setTextColor(C_MUTED);
+  tft.setCursor(barX, barY + barH + 6);
+  tft.print(elapsedBuf);
+  tft.print(" / ");
+  tft.print(totalBuf);
+  tft.getTextBounds(pctBuf, 0, 0, &bx, &by, &bw, &bh);
+  tft.setCursor(barX + barW - (int)bw, barY + barH + 6);
+  tft.setTextColor(C_TEXT);
+  tft.print(pctBuf);
+
+  int metaY = barY + barH + 24;
+  int metaH = cardY + cardH - metaY - 10;
+  if (layoutChanged && metaH >= 30) {
+    int boxGap = 6;
+    int boxW = (cardW - 24 - boxGap * 2) / 3;
+    int boxH = min(42, metaH);
+    int boxX = cardX + 12;
+    auto drawMini = [&](int x, const char* label, const char* value, uint16_t valueColor) {
+      tft.fillRect(x, metaY, boxW, boxH, RGB(11, 16, 28));
+      tft.drawRect(x, metaY, boxW, boxH, C_EDGE);
+      tft.setTextSize(1);
+      tft.setTextColor(C_MUTED);
+      tft.setCursor(x + 5, metaY + 5);
+      tft.print(label);
+      tft.setTextColor(valueColor);
+      tft.setCursor(x + 5, metaY + 20);
+      tft.print(value);
+    };
+
+    char tankBuf[12];
+    snprintf(tankBuf, sizeof(tankBuf), "%d%%", tankPct);
+    char activeBuf[12];
+    snprintf(activeBuf, sizeof(activeBuf), "%d/%d", activeCount, (int)zonesCount);
+    drawMini(boxX, "SOURCE", src, C_TEXT);
+    drawMini(boxX + boxW + boxGap, "TANK", tankBuf, tankPct <= (int)tankLowThresholdPct ? C_BAD : C_GOOD);
+    drawMini(boxX + (boxW + boxGap) * 2, "ACTIVE", activeBuf, C_GOOD);
+  }
+
   tft.setTextWrap(true);
-  // No flashing indicator drawn
+  runInit = true;
+  lastModeTft = true;
+  lastRunZone = zone;
+  lastRunW = dispW;
+  lastRunH = dispH;
+  lastRunTotal = total;
+  lastRunTank = tankPct;
+  lastRunActiveCount = activeCount;
+  strncpy(lastRunSource, src, sizeof(lastRunSource));
+  lastRunSource[sizeof(lastRunSource) - 1] = '\0';
+  g_forceRunReset = false;
 }
 
 void RainScreen(){
@@ -3741,48 +3978,93 @@ void RainScreen(){
 
 void HomeScreen() {
   if (!displayUseTft) {
-    float tempOled = curTempC;
-    int   humOled  = curHumidityPct;
-    int   pctOled  = tankPercent();
+    const int OW = display.width();
+    const int pctOled = constrain(tankPercent(), 0, 100);
+    const bool masterOff = !systemMasterEnabled;
+    const bool paused = isPausedNow();
+    const bool delayed = (rainActive || windActive);
+    const char* statusStr = masterOff ? "MASTER OFF" : (paused ? "PAUSED" : (delayed ? "DELAY" : "READY"));
+
+    int running = 0;
+    int queued = 0;
+    for (int i = 0; i < (int)zonesCount; ++i) {
+      if (zoneActive[i]) running++;
+      if (pendingStart[i]) queued++;
+    }
+
+    char timeBuf[6] = "--:--";
+    char dateBuf[8] = "--/--";
     time_t nowOled = time(nullptr);
-    struct tm* tOled = localtime(&nowOled);
+    struct tm tOled;
+    if (localtime_r(&nowOled, &tOled)) {
+      snprintf(timeBuf, sizeof(timeBuf), "%02d:%02d", tOled.tm_hour, tOled.tm_min);
+      snprintf(dateBuf, sizeof(dateBuf), "%02d/%02d", tOled.tm_mday, tOled.tm_mon + 1);
+    }
+
+    char envBuf[32];
+    const char* condOled = (curWeatherCode >= 0) ? meteoCodeToMain(curWeatherCode) : "--";
+    if (isnan(curTempC) && curHumidityPct < 0) {
+      snprintf(envBuf, sizeof(envBuf), "--C --%% %s", condOled);
+    } else if (curHumidityPct < 0) {
+      snprintf(envBuf, sizeof(envBuf), "%.0fC --%% %s", curTempC, condOled);
+    } else if (isnan(curTempC)) {
+      snprintf(envBuf, sizeof(envBuf), "--C %d%% %s", curHumidityPct, condOled);
+    } else {
+      snprintf(envBuf, sizeof(envBuf), "%.0fC %d%% %s", curTempC, curHumidityPct, condOled);
+    }
+
+    char nextBuf[28] = "Next none";
+    NextWaterInfo nwOled = computeNextWatering();
+    if (nwOled.zone >= 0) {
+      struct tm tnw;
+      localtime_r(&nwOled.epoch, &tnw);
+      long diff = (long)difftime(nwOled.epoch, nowOled);
+      if (diff < 0) diff = 0;
+      int mins = (int)(diff / 60L);
+      if (mins >= 60) {
+        snprintf(nextBuf, sizeof(nextBuf), "Next Z%d %02d:%02d %dh%02d",
+                 nwOled.zone + 1, tnw.tm_hour, tnw.tm_min, mins / 60, mins % 60);
+      } else {
+        snprintf(nextBuf, sizeof(nextBuf), "Next Z%d %02d:%02d %dm",
+                 nwOled.zone + 1, tnw.tm_hour, tnw.tm_min, mins);
+      }
+    }
 
     display.clearDisplay();
-    display.setTextSize(2);
-    display.setCursor(0,0); display.printf("%02d:%02d", tOled ? tOled->tm_hour : 0, tOled ? tOled->tm_min : 0);
+    display.setTextColor(SSD1306_WHITE);
+    display.fillRect(0, 0, OW, 12, SSD1306_WHITE);
+    display.setTextColor(SSD1306_BLACK);
     display.setTextSize(1);
-    if (tOled) {
-      display.setCursor(80,3); display.printf("%02d/%02d", tOled->tm_mday, tOled->tm_mon+1);
-      display.setCursor(66,3); display.print((tOled->tm_isdst>0) ? "DST" : "STD");
-    }
-    display.setCursor(0,20);
-    if (!isnan(tempOled) && humOled >= 0) display.printf("T:%2.0fC H:%02d%%", tempOled, humOled);
-    else display.print("T:-- H:--");
-    display.setCursor(0,32);
-    if (tankEnabled) { display.printf("Tank:%3d%% ", pctOled); display.print(isTankLow()? "(Mains)":"(Tank)"); }
-    else { display.print("Zones: "); display.print(zonesCount); }
-    for (int i=0;i<i_min(2,(int)zonesCount);i++){
-      int x=(i==0)?0:64;
-      display.setCursor(x,44);
-      if (zoneActive[i]) {
-        unsigned long elapsed=(millis()-zoneStartMs[i])/1000;
-        unsigned long total=zoneRunTotalSec[i];
-        if (total==0) total = durationForSlot(i,1);
-        unsigned long rem=(elapsed<total?total-elapsed:0);
-        display.printf("Z%d:%02d:%02d", i+1, (int)(rem/60),(int)(rem%60));
-      } else display.printf("Z%d:Off", i+1);
-    }
-    for (int i=2;i<i_min(4,(int)zonesCount);i++){
-      int x=(i==2)?0:64;
-      display.setCursor(x,56);
-      if (zoneActive[i]) {
-        unsigned long elapsed=(millis()-zoneStartMs[i])/1000;
-        unsigned long total=zoneRunTotalSec[i];
-        if (total==0) total = durationForSlot(i,1);
-        unsigned long rem=(elapsed<total?total-elapsed:0);
-        display.printf("Z%d:%02d:%02d", i+1, (int)(rem/60),(int)(rem%60));
-      } else display.printf("Z%d:Off", i+1);
-    }
+    display.setCursor(3, 2);
+    display.print(statusStr);
+    display.setCursor(OW - 66, 2);
+    display.print(timeBuf);
+    display.print(" ");
+    display.print(dateBuf);
+
+    display.setTextColor(SSD1306_WHITE);
+    display.setTextSize(1);
+    display.setCursor(0, 16);
+    display.print(envBuf);
+    display.setCursor(0, 28);
+    display.print("Tank ");
+    display.print(pctOled);
+    display.print("%");
+    display.drawRect(62, 29, OW - 64, 7, SSD1306_WHITE);
+    int barFill = ((OW - 66) * pctOled) / 100;
+    if (barFill > 0) display.fillRect(63, 30, barFill, 5, SSD1306_WHITE);
+
+    display.drawFastHLine(0, 40, OW, SSD1306_WHITE);
+    display.setCursor(0, 44);
+    display.print(nextBuf);
+    display.setCursor(0, 56);
+    display.print("Run ");
+    display.print(running);
+    display.print(" Q ");
+    display.print(queued);
+    display.print(" MQTT ");
+    display.print(_mqtt.connected() ? "up" : "down");
+
     display.display();
     return;
   }
@@ -3803,85 +4085,626 @@ void HomeScreen() {
 
   const bool landscape = (H < W);
 
-  // Common metrics
+  const int curMinute = tmv ? tmv->tm_min : -1;
+
+  // Legacy fallback metrics retained for the older branch below.
   const int pad = 6;
   const int gap = 6;
   const int topY = 44;
 
-  // Header: big date + status pill + RSSI
-  static char lastTopDate[16] = "";
-  static int  lastTopRssi = 9999;
-  static int  lastTopMinute = -1;
-  static int  lastTopStatus = -1;
-  static uint32_t lastTopDrawMs = 0;
-  char topDate[16] = "--/--/----";
-  if (tmv) snprintf(topDate, sizeof(topDate), "%02d/%02d/%04d", tmv->tm_mday, tmv->tm_mon + 1, tmv->tm_year + 1900);
-  int topRssi = WiFi.RSSI();
-  int curMinute = tmv ? tmv->tm_min : -1;
+  if (landscape) {
+    static bool modernInit = false;
+    static int lastW = -1;
+    static int lastH = -1;
+    static int lastMinute = -1;
+    static int lastStatus = -1;
+    static int lastTemp = -1000;
+    static int lastHum = -2;
+    static int lastPct = -1;
+    static int lastWindTenths = 10000;
+    static int lastWindDir = -1;
+    static int lastCondCode = -999;
+    static int lastRunning = -1;
+    static int lastQueued = -1;
+    static int lastSystemStatus = -1;
+    static int lastNextZone = -2;
+    static time_t lastNextEpoch = 0;
+    static int lastRssi = 9999;
+    static int lastRain1h = -1;
+    static int lastRain24h = -1;
+    static int lastGust = -1;
+    static int lastMqtt = -1;
+    static int lastCompassWindDir = -1;
+    static int lastCompassWindTenths = 10000;
+    static int lastCompassGust = -1;
 
-  // Only redraw when date changes OR minute ticks OR RSSI changes notably (>=2dB) with a 15s debounce
-  bool minuteChanged = (tmv && curMinute != lastTopMinute);
-  bool dateChanged   = (strcmp(topDate, lastTopDate) != 0);
-  bool rssiChanged   = (abs(topRssi - lastTopRssi) >= 2) && (nowMs - lastTopDrawMs >= 15000U);
-  int statusId = !systemMasterEnabled ? 3 : (isPausedNow() ? 2 : ((rainActive || windActive) ? 1 : 0));
-  bool statusChanged = (statusId != lastTopStatus);
+    int running = 0;
+    int queued = 0;
+    for (int i = 0; i < (int)zonesCount; ++i) {
+      if (zoneActive[i]) running++;
+      if (pendingStart[i]) queued++;
+    }
+    NextWaterInfo nw = computeNextWatering();
+    int tempRounded = isnan(temp) ? -1000 : (int)lroundf(temp);
+    int pctClamped = constrain(pct, 0, 100);
+    int windTenths = isfinite(windNow) ? (int)lroundf(windNow * 10.0f) : 10000;
+    int windDirRounded = isfinite(curWindDirDeg) ? (int)lroundf(normalizeDegrees360(curWindDirDeg)) : -1;
+    int rssi = WiFi.RSSI();
+    bool fullRedraw = g_forceHomeReset || !modernInit || lastW != W || lastH != H;
 
-  if (g_forceHomeReset) {
-    lastTopDate[0] = '\0';
-    lastTopRssi = 9999;
-    lastTopMinute = -1;
-    lastTopStatus = -1;
-    lastTopDrawMs = 0;
-  }
+    // Additional weather data
+    int rain1hVal = (int)(rain1hNow * 10); // tenths of mm
+    int rain24hVal = (int)(lastRainAmount * 10);
+    int gustVal = isfinite(curGustMs) ? (int)lroundf(curGustMs * 10) : -1;
+    bool mqttUp = _mqtt.connected();
 
-  if (dateChanged || minuteChanged || rssiChanged || statusChanged) {
-    tft.fillRect(0, 0, W, topY - 8, C_BG);
+    // Header height for layout calculations (declared here for broader scope)
+    int headerH = 24;
 
-    // Date (left)
-    tft.setTextSize(3);
-    tft.setTextColor(C_ACCENT);
-    tft.setCursor(6, 6);
-    tft.print(topDate);
+    if (fullRedraw) {
+      tft.fillScreen(C_BG);
+      modernInit = true;
+      lastW = W;
+      lastH = H;
+      lastMinute = -1;
+      lastStatus = -1;
+      lastTemp = -1000;
+      lastHum = -2;
+      lastPct = -1;
+      lastWindTenths = 10000;
+      lastWindDir = -1;
+      lastCondCode = -999;
+      lastRunning = -1;
+      lastQueued = -1;
+      lastSystemStatus = -1;
+      lastNextZone = -2;
+      lastNextEpoch = 0;
+      lastRssi = 9999;
+      lastRain1h = -1;
+      lastRain24h = -1;
+      lastGust = -1;
+      lastMqtt = -1;
+      lastCompassWindDir = -1;
+      lastCompassWindTenths = 10000;
+      lastCompassGust = -1;
+      g_forceHomeReset = false;
 
-    // Status pill (right)
-    const char* statusText = "READY";
-    uint16_t statusColor = C_GOOD;
-    if (!systemMasterEnabled) { statusText = "MASTER OFF"; statusColor = C_BAD; }
-    else if (isPausedNow())   { statusText = "PAUSED";     statusColor = C_WARN; }
-    else if (rainActive || windActive) { statusText = "DELAY"; statusColor = C_WARN; }
+      // ========== MODERN HEADER ==========
+      tft.fillRect(0, 0, W, headerH + 1, C_PANEL);
+      tft.drawFastHLine(0, headerH, W, C_EDGE);
 
-    tft.setTextSize(1);
-    int16_t pbx, pby; uint16_t pbw, pbh;
-    tft.getTextBounds(statusText, 0, 0, &pbx, &pby, &pbw, &pbh);
-    int pillW = (int)pbw + 10;
-    int pillH = (int)pbh + 6;
-    int pillX = W - pillW - 6;
-    int pillY = 8;
-    tft.fillRoundRect(pillX, pillY, pillW, pillH, 4, statusColor);
-    tft.drawRoundRect(pillX, pillY, pillW, pillH, 4, C_EDGE);
-    tft.setTextColor(ST77XX_BLACK);
-    tft.setCursor(pillX + 5, pillY + 3);
-    tft.print(statusText);
+      // ========== MODERN CARD LAYOUT ==========
+      int cardY = headerH + 6;
+      int cardH = H - cardY - 6;
+      
+      // Left column - Time & Next Water
+      int leftW = 96;
+      drawCard(6, cardY, leftW, cardH, C_PANEL, C_EDGE);
+      
+      // Center - Weather & Tank
+      int centerX = leftW + 12;
+      int centerW = 88;
+      int centerGap = 6;
+      int weatherH = (cardH * 2) / 5;
+      int minTankH = 64;
+      if (cardH - centerGap - weatherH < minTankH) weatherH = cardH - centerGap - minTankH;
+      if (weatherH < 44) weatherH = max(24, cardH / 2 - 3);
+      int tankCardY = cardY + weatherH + centerGap;
+      int tankCardH = cardY + cardH - tankCardY;
+      drawCard(centerX, cardY, centerW, weatherH, C_PANEL, C_EDGE);
+      drawCard(centerX, tankCardY, centerW, tankCardH, C_PANEL, C_EDGE);
+      
+      // Right - System Status
+      int rightX = centerX + centerW + 10;
+      int rightW = W - rightX - 6;
+      drawCard(rightX, cardY, rightW, cardH, C_PANEL, C_EDGE);
 
-    // RSSI (small, left of pill if space)
-    tft.setTextSize(1);
-    uint16_t rssiColor = (topRssi > -60) ? C_GOOD : (topRssi > -75 ? C_WARN : C_BAD);
-    tft.setTextColor(rssiColor);
-    char rssiTxt[16]; snprintf(rssiTxt, sizeof(rssiTxt), "%ddBm", topRssi);
-    int16_t rbx, rby; uint16_t rbw, rbh;
-    tft.getTextBounds(rssiTxt, 0, 0, &rbx, &rby, &rbw, &rbh);
-    int rssiX = pillX - (int)rbw - 6;
-    if (rssiX > 6) {
-      tft.setCursor(rssiX, 12);
-      tft.print(rssiTxt);
+      // Labels
+      tft.setTextSize(1);
+      tft.setTextColor(C_MUTED);
+      tft.setCursor(12, cardY + 6);
+      tft.print("CLOCK");
+      tft.drawFastHLine(12, cardY + 54, leftW - 12, C_EDGE);
+      tft.setCursor(12, cardY + 58);
+      tft.print("NEXT WATER");
+      
+      tft.setCursor(centerX + 6, cardY + 6);
+      tft.print("WEATHER");
+      tft.setCursor(centerX + 6, tankCardY + 6);
+      tft.print("TANK LEVEL");
+      
+      tft.setCursor(rightX + 6, cardY + 6);
+      tft.print("SYSTEM");
     }
 
-    strncpy(lastTopDate, topDate, sizeof(lastTopDate));
-    lastTopDate[sizeof(lastTopDate) - 1] = '\0';
-    lastTopRssi = topRssi;
-    lastTopMinute = curMinute;
-    lastTopStatus = statusId;
-    lastTopDrawMs = nowMs;
+    int cardY = headerH + 6;
+    int cardH = H - cardY - 6;
+    int leftW = 96;
+    int centerX = leftW + 12;
+    int centerW = 88;
+    int centerGap = 6;
+    int weatherH = (cardH * 2) / 5;
+    int minTankH = 64;
+    if (cardH - centerGap - weatherH < minTankH) weatherH = cardH - centerGap - minTankH;
+    if (weatherH < 44) weatherH = max(24, cardH / 2 - 3);
+    int tankCardY = cardY + weatherH + centerGap;
+    int tankCardH = cardY + cardH - tankCardY;
+    int rightX = centerX + centerW + 10;
+    int rightW = W - rightX - 6;
+    int status = !systemMasterEnabled ? 3 : (isPausedNow() ? 2 : ((rainActive || windActive) ? 1 : 0));
+
+    // ========== STATUS PILL (top right) ==========
+    if (fullRedraw || curMinute != lastMinute || status != lastStatus || abs(rssi - lastRssi) >= 3) {
+      tft.fillRect(0, 0, W, headerH, C_PANEL);
+      tft.drawFastHLine(0, headerH, W, C_EDGE);
+
+      tft.setTextSize(1);
+      tft.setTextColor(C_TEXT);
+      tft.setCursor(8, 8);
+      tft.print("IRRIGATION");
+      tft.setTextColor(C_MUTED);
+      tft.print(" ");
+      tft.print(zonesCount);
+      tft.print(" Zone");
+
+      const char* statusText = "READY";
+      uint16_t statusColor = C_GOOD;
+      if (!systemMasterEnabled) { statusText = "MASTER OFF"; statusColor = C_BAD; }
+      else if (isPausedNow()) { statusText = "PAUSED"; statusColor = C_WARN; }
+      else if (rainActive || windActive) { statusText = "DELAY"; statusColor = C_WARN; }
+      int16_t bx, by; uint16_t bw, bh;
+      tft.setTextSize(1);
+      tft.getTextBounds(statusText, 0, 0, &bx, &by, &bw, &bh);
+      int pillW = (int)bw + 14;
+      int pillX = W - pillW - 8;
+      tft.fillRoundRect(pillX, 3, pillW, 18, 5, statusColor);
+      tft.setTextColor(ST77XX_BLACK);
+      tft.setCursor(pillX + 7, 8);
+      tft.print(statusText);
+      tft.setTextColor((rssi > -60) ? C_GOOD : (rssi > -75 ? C_WARN : C_BAD));
+      char rssiBuf[14];
+      snprintf(rssiBuf, sizeof(rssiBuf), "%ddBm", rssi);
+      tft.getTextBounds(rssiBuf, 0, 0, &bx, &by, &bw, &bh);
+      if (pillX - (int)bw - 8 > 120) {
+        tft.setCursor(pillX - (int)bw - 8, 8);
+        tft.print(rssiBuf);
+      }
+      lastStatus = status;
+      lastRssi = rssi;
+    }
+
+    // ========== TIME DISPLAY ==========
+    char tbuf[6] = "--:--";
+    char dbuf[16] = "--/--";
+    char dayBuf[6] = "---";
+    if (tmv) {
+      snprintf(tbuf, sizeof(tbuf), "%02d:%02d", tmv->tm_hour, tmv->tm_min);
+      snprintf(dbuf, sizeof(dbuf), "%02d/%02d", tmv->tm_mday, tmv->tm_mon + 1);
+      static const char* days[] = {"SUN","MON","TUE","WED","THU","FRI","SAT"};
+      if (tmv->tm_wday >= 0 && tmv->tm_wday <= 6) strncpy(dayBuf, days[tmv->tm_wday], 5);
+    }
+    if (fullRedraw || curMinute != lastMinute) {
+      tft.fillRect(12, cardY + 16, leftW - 12, 34, C_PANEL);
+      tft.setTextSize(2);
+      tft.setTextColor(C_ACCENT);
+      tft.setCursor(14, cardY + 22);
+      tft.print(tbuf);
+      tft.setTextSize(1);
+      tft.setTextColor(C_TEXT);
+      tft.setCursor(12, cardY + 42);
+      tft.print(dayBuf);
+      tft.print(" ");
+      tft.print(dbuf);
+      lastMinute = curMinute;
+    }
+
+    // ========== NEXT WATER ==========
+    if (fullRedraw || nw.zone != lastNextZone || nw.epoch != lastNextEpoch) {
+      tft.fillRect(12, cardY + 70, leftW - 12, 34, C_PANEL);
+      tft.setTextSize(1);
+      tft.setTextColor(C_TEXT);
+      if (nw.zone >= 0) {
+        struct tm tnw;
+        localtime_r(&nw.epoch, &tnw);
+        tft.setCursor(16, cardY + 72);
+        tft.print("Z");
+        tft.print(nw.zone + 1);
+        char nbuf[6];
+        snprintf(nbuf, sizeof(nbuf), "%02d:%02d", tnw.tm_hour, tnw.tm_min);
+        tft.print(" ");
+        tft.print(nbuf);
+        long diff = (long)difftime(nw.epoch, now);
+        if (diff < 0) diff = 0;
+        int mins = (int)(diff / 60L);
+        tft.setTextSize(1);
+        tft.setTextColor(C_MUTED);
+        tft.setCursor(16, cardY + 88);
+        if (mins >= 60) { tft.print(mins / 60); tft.print("h "); tft.print(mins % 60); tft.print("m"); }
+        else { tft.print("in "); tft.print(mins); tft.print("m"); }
+      } else {
+        tft.setCursor(16, cardY + 72);
+        tft.print("None");
+        tft.setTextSize(1);
+        tft.setTextColor(C_MUTED);
+        tft.setCursor(16, cardY + 88);
+        tft.print("No schedule");
+      }
+      lastNextZone = nw.zone;
+      lastNextEpoch = nw.epoch;
+    }
+
+    // ========== WEATHER CARD ==========
+    if (fullRedraw || tempRounded != lastTemp || hum != lastHum || curWeatherCode != lastCondCode ||
+        windTenths != lastWindTenths || windDirRounded != lastWindDir ||
+        rain1hVal != lastRain1h || gustVal != lastGust) {
+      tft.fillRect(centerX + 4, cardY + 20, centerW - 8, max(20, weatherH - 24), C_PANEL);
+      
+      // Temperature and humidity
+      tft.setTextSize(2);
+      tft.setTextColor(C_TEXT);
+      tft.setCursor(centerX + 8, cardY + 22);
+      if (isnan(temp)) tft.print("--");
+      else { tft.print(temp, 0); tft.print("C"); }
+      
+      tft.setTextSize(1);
+      tft.setTextColor(C_MUTED);
+      tft.setCursor(centerX + 58, cardY + 25);
+      if (hum >= 0) { tft.print(hum); tft.print("%"); }
+      else tft.print("--%");
+      
+      // Condition
+      tft.setCursor(centerX + 8, cardY + 42);
+      const char* cond = (curWeatherCode >= 0) ? meteoCodeToMain(curWeatherCode) : "--";
+      tft.setTextColor(C_TEXT);
+      tft.print(cond);
+      
+      lastTemp = tempRounded;
+      lastHum = hum;
+      lastCondCode = curWeatherCode;
+      lastWindTenths = windTenths;
+      lastWindDir = windDirRounded;
+      lastRain1h = rain1hVal;
+      lastGust = gustVal;
+    }
+
+    // ========== TANK CARD ==========
+    if (fullRedraw || pctClamped != lastPct) {
+      int tankY = tankCardY + 20;
+      tft.fillRect(centerX + 4, tankY, centerW - 8, max(20, tankCardH - 24), C_PANEL);
+      
+      // Tank percentage
+      tft.setTextSize(2);
+      tft.setTextColor(pctClamped <= (int)tankLowThresholdPct ? C_BAD : C_GOOD);
+      tft.setCursor(centerX + 8, tankY + 6);
+      tft.print(pctClamped);
+      tft.setTextSize(1);
+      tft.print("%");
+      
+      // Tank bar
+      int barX = centerX + 8;
+      int barY = tankY + 28;
+      int barW = centerW - 16;
+      tft.drawRect(barX, barY, barW, 8, C_EDGE);
+      tft.fillRect(barX + 1, barY + 1, barW - 2, 6, C_PANEL);
+      int fillW = (barW - 2) * pctClamped / 100;
+      if (fillW > 0) tft.fillRect(barX + 1, barY + 1, fillW, 6, pctClamped <= (int)tankLowThresholdPct ? C_BAD : C_GOOD);
+      
+      // Tank status text
+      tft.setTextSize(1);
+      tft.setTextColor(C_MUTED);
+      if (tankCardH >= 72) {
+        tft.setCursor(centerX + 8, tankY + 44);
+        if (pctClamped <= (int)tankLowThresholdPct) tft.print("LOW!");
+        else if (pctClamped >= 80) tft.print("Full");
+        else tft.print("Normal");
+      }
+      
+      lastPct = pctClamped;
+    }
+
+    // ========== SYSTEM STATUS CARD ==========
+    if (fullRedraw || running != lastRunning || queued != lastQueued || status != lastSystemStatus ||
+        mqttUp != (bool)lastMqtt || windDirRounded != lastCompassWindDir ||
+        windTenths != lastCompassWindTenths || gustVal != lastCompassGust) {
+      tft.fillRect(rightX + 4, cardY + 20, rightW - 8, 94, C_PANEL);
+
+      // Master status
+      tft.setTextSize(1);
+      tft.setTextColor(C_MUTED);
+      tft.setCursor(rightX + 8, cardY + 26);
+      tft.print("Master:");
+      tft.setTextColor(systemMasterEnabled ? C_GOOD : C_BAD);
+      tft.print(systemMasterEnabled ? " ON" : " OFF");
+      
+      // MQTT status
+      tft.setTextColor(C_MUTED);
+      tft.setCursor(rightX + 8, cardY + 42);
+      tft.print("MQTT:");
+      tft.setTextColor(mqttUp ? C_GOOD : C_BAD);
+      tft.print(mqttUp ? " Up" : " Down");
+      
+      // WiFi RSSI
+      tft.setTextColor(C_MUTED);
+      tft.setCursor(rightX + 8, cardY + 58);
+      tft.print("WiFi:");
+      tft.setTextColor((rssi > -60) ? C_GOOD : (rssi > -75 ? C_WARN : C_BAD));
+      tft.print(rssi);
+      tft.print("dBm");
+
+      tft.setTextColor(C_MUTED);
+      tft.setCursor(rightX + 8, cardY + 74);
+      tft.print("Queued:");
+      tft.setTextColor(queued > 0 ? C_WARN : C_MUTED);
+      tft.print(queued);
+      
+      // Rain delay indicator
+      if (rainActive || windActive) {
+        tft.setTextColor(C_WARN);
+        tft.setCursor(rightX + 8, cardY + 90);
+        tft.print("Rain delay!");
+      }
+
+      int compassX = rightX + rightW - 24;
+      int compassY = cardY + cardH - 28;
+      drawWindCompass(compassX, compassY, 14, curWindDirDeg, C_PANEL);
+      tft.setTextSize(1);
+      tft.setTextColor(C_MUTED);
+      tft.setCursor(rightX + 8, compassY - 5);
+      if (isfinite(windNow)) tft.print(windNow, 1);
+      else tft.print("--");
+      tft.print("m/s");
+      if (gustVal >= 0) {
+        tft.setCursor(rightX + 8, compassY + 7);
+        tft.print("G ");
+        tft.print(gustVal / 10);
+      }
+      
+      lastRunning = running;
+      lastQueued = queued;
+      lastSystemStatus = status;
+      lastMqtt = mqttUp ? 1 : 0;
+      lastCompassWindDir = windDirRounded;
+      lastCompassWindTenths = windTenths;
+      lastCompassGust = gustVal;
+    }
+
+    return;
+  }
+
+  if (!landscape) {
+    static bool portraitInit = false;
+    static int lastW = -1;
+    static int lastH = -1;
+    static int lastMinute = -1;
+    static int lastStatus = -1;
+    static int lastTemp = -1000;
+    static int lastHum = -2;
+    static int lastPct = -1;
+    static int lastWindTenths = 10000;
+    static int lastWindDir = -1;
+    static int lastCondCode = -999;
+    static int lastNextZone = -2;
+    static time_t lastNextEpoch = 0;
+    static int lastRunning = -1;
+    static int lastQueued = -1;
+    static int lastSystemStatus = -1;
+    static int lastMqtt = -1;
+
+    int running = 0;
+    int queued = 0;
+    for (int i = 0; i < (int)zonesCount; ++i) {
+      if (zoneActive[i]) running++;
+      if (pendingStart[i]) queued++;
+    }
+    NextWaterInfo nw = computeNextWatering();
+    int tempRounded = isnan(temp) ? -1000 : (int)lroundf(temp);
+    int pctClamped = constrain(pct, 0, 100);
+    int windTenths = isfinite(windNow) ? (int)lroundf(windNow * 10.0f) : 10000;
+    int windDirRounded = isfinite(curWindDirDeg) ? (int)lroundf(normalizeDegrees360(curWindDirDeg)) : -1;
+    int status = !systemMasterEnabled ? 3 : (isPausedNow() ? 2 : ((rainActive || windActive) ? 1 : 0));
+    bool fullRedraw = g_forceHomeReset || !portraitInit || lastW != W || lastH != H;
+    const int side = 8;
+    const int cardW = W - 2 * side;
+    const int clockY = 8;
+    const int clockH = 82;
+    const int tankY = 98;
+    const int tankH = 92;
+    const int nextY = 198;
+    const int nextH = 50;
+    const int envY = 256;
+    const int envH = max(48, H - envY - 8);
+
+    if (fullRedraw) {
+      tft.fillScreen(C_BG);
+      portraitInit = true;
+      lastW = W;
+      lastH = H;
+      lastMinute = -1;
+      lastStatus = -1;
+      lastTemp = -1000;
+      lastHum = -2;
+      lastPct = -1;
+      lastWindTenths = 10000;
+      lastWindDir = -1;
+      lastCondCode = -999;
+      lastNextZone = -2;
+      lastNextEpoch = 0;
+      lastRunning = -1;
+      lastQueued = -1;
+      lastSystemStatus = -1;
+      lastMqtt = -1;
+      g_forceHomeReset = false;
+
+      drawCard(side, clockY, cardW, clockH, C_PANEL, C_EDGE);
+      drawCard(side, tankY, cardW, tankH, C_PANEL, C_EDGE);
+      drawCard(side, nextY, cardW, nextH, C_PANEL, C_EDGE);
+      drawCard(side, envY, cardW, envH, C_PANEL, C_EDGE);
+      tft.setTextSize(1);
+      tft.setTextColor(C_MUTED);
+      tft.setCursor(16, nextY + 6);
+      tft.print("NEXT WATER");
+      tft.setCursor(16, envY + 6);
+      tft.print("ENVIRONMENT");
+    }
+
+    char tbuf[6] = "--:--";
+    char dbuf[16] = "--/--";
+    if (tmv) {
+      snprintf(tbuf, sizeof(tbuf), "%02d:%02d", tmv->tm_hour, tmv->tm_min);
+      snprintf(dbuf, sizeof(dbuf), "%02d/%02d/%02d", tmv->tm_mday, tmv->tm_mon + 1, (tmv->tm_year + 1900) % 100);
+    }
+    if (fullRedraw || curMinute != lastMinute || status != lastStatus) {
+      tft.fillRect(16, clockY + 10, W - 32, clockH - 16, C_PANEL);
+      tft.setTextSize(3);
+      tft.setTextColor(C_ACCENT);
+      int16_t tx1, ty1; uint16_t tw, th;
+      tft.getTextBounds(tbuf, 0, 0, &tx1, &ty1, &tw, &th);
+      tft.setCursor((W - (int)tw) / 2, clockY + 18);
+      tft.print(tbuf);
+      tft.setTextSize(1);
+      tft.setTextColor(C_TEXT);
+      tft.setCursor(18, clockY + 60);
+      tft.print(dbuf);
+      const char* statusText = (status == 3) ? "MASTER OFF" : (status == 2 ? "PAUSED" : (status == 1 ? "DELAY" : "READY"));
+      uint16_t statusColor = (status == 0) ? C_GOOD : (status == 3 ? C_BAD : C_WARN);
+      tft.setTextSize(1);
+      int16_t bx, by; uint16_t bw, bh;
+      tft.getTextBounds(statusText, 0, 0, &bx, &by, &bw, &bh);
+      int pillW = (int)bw + 14;
+      int pillX = W - pillW - 16;
+      tft.fillRoundRect(pillX, clockY + 55, pillW, 18, 5, statusColor);
+      tft.setTextColor(ST77XX_BLACK);
+      tft.setCursor(pillX + 7, clockY + 60);
+      tft.print(statusText);
+      lastMinute = curMinute;
+      lastStatus = status;
+    }
+
+    if (fullRedraw || nw.zone != lastNextZone || nw.epoch != lastNextEpoch) {
+      tft.fillRect(16, nextY + 18, W - 32, nextH - 22, C_PANEL);
+      tft.setTextSize(2);
+      tft.setTextColor(C_TEXT);
+      tft.setCursor(16, nextY + 22);
+      if (nw.zone >= 0) {
+        struct tm tnw;
+        localtime_r(&nw.epoch, &tnw);
+        char nbuf[6];
+        snprintf(nbuf, sizeof(nbuf), "%02d:%02d", tnw.tm_hour, tnw.tm_min);
+        tft.print("Z");
+        tft.print(nw.zone + 1);
+        tft.print(" ");
+        tft.print(nbuf);
+      } else {
+        tft.print("None");
+      }
+      lastNextZone = nw.zone;
+      lastNextEpoch = nw.epoch;
+    }
+
+    if (fullRedraw || pctClamped != lastPct || status != lastSystemStatus) {
+      const char* waterSrc = "";
+      bool mainsOn = false;
+      bool tankOn = false;
+      chooseWaterSource(waterSrc, mainsOn, tankOn);
+      const bool lowTank = pctClamped <= (int)tankLowThresholdPct;
+      const uint16_t tankColor = lowTank ? C_BAD : (pctClamped < 35 ? C_WARN : C_GOOD);
+      const int gaugeX = 22;
+      const int gaugeY = tankY + 33;
+      const int gaugeW = 42;
+      const int gaugeH = 44;
+      const int innerH = gaugeH - 4;
+      const int fillH = (innerH * pctClamped) / 100;
+
+      tft.fillRect(16, tankY + 5, W - 32, tankH - 11, C_PANEL);
+      tft.setTextSize(1);
+      tft.setTextColor(C_TEXT);
+      tft.setCursor(16, tankY + 7);
+      tft.print("TANK LEVEL");
+      tft.drawRoundRect(gaugeX, gaugeY, gaugeW, gaugeH, 6, C_EDGE);
+      tft.drawFastHLine(gaugeX + 10, gaugeY - 4, gaugeW - 20, C_EDGE);
+      tft.fillRect(gaugeX + 3, gaugeY + 3, gaugeW - 6, innerH, RGB(8, 12, 20));
+      if (fillH > 0) {
+        tft.fillRect(gaugeX + 3, gaugeY + 3 + innerH - fillH, gaugeW - 6, fillH, tankColor);
+      }
+      int thresholdY = gaugeY + 3 + innerH - ((innerH * tankLowThresholdPct) / 100);
+      tft.drawFastHLine(gaugeX + gaugeW - 7, thresholdY, 9, C_WARN);
+
+      char pctBuf[8];
+      snprintf(pctBuf, sizeof(pctBuf), "%d", pctClamped);
+      tft.setTextSize(3);
+      tft.setTextColor(tankColor);
+      tft.setCursor(78, tankY + 34);
+      tft.print(pctBuf);
+      tft.setTextSize(2);
+      tft.print("%");
+
+      tft.setTextSize(1);
+      tft.setTextColor(lowTank ? C_BAD : C_MUTED);
+      tft.setCursor(78, tankY + 64);
+      if (!tankEnabled) tft.print("DISABLED");
+      else if (lowTank) tft.print("LOW - MAINS");
+      else if (pctClamped >= 80) tft.print("FULL");
+      else tft.print("NORMAL");
+
+      tft.setTextColor(C_MUTED);
+      tft.setCursor(78, tankY + 78);
+      tft.print("Source ");
+      tft.setTextColor(tankOn ? C_GOOD : (mainsOn ? C_WARN : C_TEXT));
+      tft.print(waterSrc && waterSrc[0] ? waterSrc : "--");
+    }
+
+    if (fullRedraw || tempRounded != lastTemp || hum != lastHum || pctClamped != lastPct ||
+        windTenths != lastWindTenths || windDirRounded != lastWindDir || curWeatherCode != lastCondCode ||
+        status != lastSystemStatus || (int)_mqtt.connected() != lastMqtt) {
+      tft.fillRect(16, envY + 18, W - 32, envH - 24, C_PANEL);
+      tft.setTextSize(2);
+      tft.setTextColor(C_TEXT);
+      tft.setCursor(16, envY + 20);
+      if (isnan(temp)) tft.print("--C");
+      else { tft.print(temp, 0); tft.print("C"); }
+      tft.setTextColor(C_MUTED);
+      tft.print("  ");
+      if (hum < 0) tft.print("--%");
+      else { tft.print(hum); tft.print("%"); }
+      tft.setTextSize(1);
+      tft.setTextColor(C_MUTED);
+      tft.setCursor(16, envY + 42);
+      tft.print((curWeatherCode >= 0) ? meteoCodeToMain(curWeatherCode) : "--");
+      if (H >= 320) {
+        const int compassX = W - 28;
+        const int compassY = envY + 52;
+        drawWindCompass(compassX, compassY, 12, curWindDirDeg, C_PANEL);
+        tft.setTextSize(1);
+        tft.setTextColor(C_WARN);
+        tft.setCursor(16, envY + 56);
+        tft.print(isfinite(curWindDirDeg) ? meteoWindDirectionToCompass(curWindDirDeg) : "--");
+        tft.setTextColor(C_MUTED);
+        tft.print(" ");
+        if (isfinite(windNow)) tft.print(windNow, 1);
+        else tft.print("--");
+        tft.print("m/s");
+        tft.setTextColor(C_MUTED);
+        tft.setCursor(16, envY + 68);
+        tft.print("Master ");
+        tft.setTextColor(systemMasterEnabled ? C_GOOD : C_BAD);
+        tft.print(systemMasterEnabled ? "On" : "Off");
+        tft.setTextColor(C_MUTED);
+        tft.setCursor(86, envY + 68);
+        tft.print("MQTT ");
+        tft.setTextColor(_mqtt.connected() ? C_GOOD : C_BAD);
+        tft.print(_mqtt.connected() ? "Up" : "Down");
+      }
+      lastTemp = tempRounded;
+      lastHum = hum;
+      lastPct = pctClamped;
+      lastWindTenths = windTenths;
+      lastWindDir = windDirRounded;
+      lastCondCode = curWeatherCode;
+      lastSystemStatus = status;
+      lastMqtt = _mqtt.connected() ? 1 : 0;
+    }
+
+    return;
   }
 
   // -------- LANDSCAPE (H < W): two-column layout --------
@@ -4424,10 +5247,7 @@ void turnOffZone(int z) {
   zoneStartedManual[z] = false;
   zoneRunTotalSec[z] = 0;
 
-  bool anyStillOn = false;
-  for (int i = 0; i < (int)zonesCount; i++) {
-    if (zoneActive[i]) { anyStillOn = true; break; }
-  }
+  bool anyStillOn = anyZoneActive();
   if (anyStillOn) {
     setWaterSourceRelays(mainsOn, tankOn);
   } else {
@@ -4446,6 +5266,7 @@ void turnOffZone(int z) {
   if (displayUseTft) {
     g_forceHomeReset = true;
     g_forceRunReset = true;
+    if (!anyStillOn) tft.fillScreen(C_BG);
   }
 
   // Ensure the display returns to Home after showing the OFF banner
@@ -4874,16 +5695,22 @@ void handleRoot() {
   html += F(".sched-tools{display:flex;gap:10px;flex-wrap:wrap;align-items:center}");
   html += F(".sched-ctr{--schedW:360px;--gap:var(--gap);max-width:100%;margin:0 auto}");
   html += F(".sched-body{padding:18px}");
-  html += F(".sched-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:var(--gap)}");
-  html += F(".sched-card{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius-sm);padding:var(--pad)}");
+  html += F(".sched-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,420px),1fr));gap:var(--gap)}");
+  html += F(".sched-card{min-width:0;background:var(--panel);border:1px solid var(--line);border-radius:var(--radius-sm);padding:var(--pad)}");
   html += F(".sched-card h4{margin:0 0 10px 0;font-size:1.05rem;font-weight:800;color:var(--ink);display:flex;align-items:center;gap:8px}");
   html += F(".sched-badge{background:var(--chip);border:1px solid var(--chip-brd);border-radius:999px;padding:4px 9px;font-size:.8rem;font-weight:700;color:var(--muted)}");
-  html += F(".rowx{display:grid;grid-template-columns:110px 1fr;gap:10px;align-items:center;margin:10px 0}");
+  html += F(".rowx{display:grid;grid-template-columns:96px minmax(0,1fr);gap:10px;align-items:center;margin:10px 0}");
   html += F(".rowx label{min-width:0;font-size:.82rem;color:var(--muted);font-weight:700;letter-spacing:.4px;text-transform:uppercase}");
-  html += F(".field{display:flex;align-items:center;gap:8px;flex-wrap:wrap}");
+  html += F(".field{display:flex;align-items:center;gap:8px;flex-wrap:wrap;min-width:0}");
   html += F(".field.inline .in{width:72px}");
   html += F(".field .sep{color:var(--muted);font-weight:700}");
   html += F(".field .unit{color:var(--muted);font-size:.85rem}");
+  html += F(".time-spin{display:inline-grid;grid-template-columns:auto 10px auto auto;align-items:center;gap:7px;max-width:100%;padding:6px;border:1px solid var(--line);border-radius:12px;background:rgba(255,255,255,.04)}");
+  html += F(".time-part{display:grid;grid-template-columns:auto 22px;grid-template-rows:18px 18px;align-items:stretch;justify-items:stretch;gap:2px}");
+  html += F(".time-btn{appearance:none;-webkit-appearance:none;border:1px solid var(--chip-brd);background:var(--chip);color:var(--ink);border-radius:8px;cursor:pointer;font-weight:900;line-height:1;touch-action:manipulation}");
+  html += F(".time-arrow{width:22px;height:18px;padding:0;font-size:.58rem;border-radius:6px}.time-val{grid-row:1/3;width:48px;height:38px;font-size:1rem;font-variant-numeric:tabular-nums}.time-ampm{align-self:center;width:54px;height:38px;font-size:.9rem}");
+  html += F(".time-colon{color:var(--muted);font-weight:900;font-size:1.2rem}.time-btn:hover{filter:brightness(1.05)}.time-btn:active{transform:translateY(1px)}.time-btn:focus-visible{outline:2px solid var(--primary);outline-offset:2px}");
+  html += F(".duration-spin{grid-template-columns:auto auto auto auto}.duration-spin .time-val{width:58px}.duration-unit{color:var(--muted);font-size:.78rem;font-weight:800;text-transform:uppercase}");
   html += F(".toggle-inline{display:inline-flex;align-items:center;gap:6px;font-size:.85rem;color:var(--muted);padding:7px 11px;border-radius:999px;border:1px solid var(--chip-brd);background:transparent}");
   html += F(".sched-card input[type=checkbox]{appearance:none;-webkit-appearance:none;width:18px;height:18px;margin:0;flex:0 0 18px;display:inline-grid;place-content:center;cursor:pointer;");
   html += F("border:1.6px solid rgba(230,240,236,.78);border-radius:6px;background:transparent;box-shadow:none;transition:border-color .12s ease,box-shadow .12s ease,transform .06s ease}");
@@ -4901,8 +5728,8 @@ void handleRoot() {
   html += F(".day input:checked + span{border-color:rgba(31,138,112,.46);background:linear-gradient(180deg,rgba(31,138,112,.18),rgba(31,138,112,.05));color:var(--ink);box-shadow:0 10px 20px rgba(20,91,99,.12)}");
   html += F(".day input:focus-visible + span{outline:2px solid var(--primary);outline-offset:2px}");
   html += F(".day input:active + span{transform:translateY(1px)}");
-  html += F("@media(max-width:720px){.nav .in{flex-direction:column;align-items:flex-start}.zones{grid-template-columns:1fr}.sched-grid{grid-template-columns:1fr}.rowx{grid-template-columns:1fr}.rowx label{margin-bottom:4px}.days-grid{grid-template-columns:repeat(3,minmax(0,1fr))}.day span{min-height:42px}}");
-  html += F("@media(max-width:460px){.days-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}");
+  html += F("@media(max-width:720px){.nav .in{flex-direction:column;align-items:flex-start}.zones{grid-template-columns:1fr}.sched-grid{grid-template-columns:1fr}.rowx{grid-template-columns:1fr}.rowx label{margin-bottom:4px}.days-grid{grid-template-columns:repeat(3,minmax(0,1fr))}.day span{min-height:42px}.time-spin{width:100%;grid-template-columns:auto 10px auto auto;justify-content:flex-start}}");
+  html += F("@media(max-width:460px){.days-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.duration-spin{grid-template-columns:auto auto}.duration-unit{margin-right:6px}}");
   html += F(".collapse{cursor:pointer;user-select:none;display:flex;align-items:center;justify-content:space-between;font-size:1.05rem}");
   html += F(".collapse .arr{font-size:1rem;opacity:.8;margin-left:6px}");
   html += F(".sched-title{display:flex;flex-direction:column;gap:2px}");
@@ -5003,7 +5830,7 @@ void handleRoot() {
   html += F("<div class='hero-copy'><div class='hero-kicker'>Smart dashboard</div>");
   html += F("<h1 class='hero-title'>ESP32 Irrigation.</h1>");
   html += F("<p class='hero-text'></p>");
-  html += F("<div class='hero-actions'><a class='btn' href='/setup'>Setup</a><a class='btn btn-secondary' href='/events'>Events</a><a class='btn btn-secondary' href='/diagnostics'>Diagnostics</a><a class='btn btn-secondary' href='/status'>Status JSON</a></div></div>");
+  html += F("<div class='hero-actions'><a class='btn' href='/setup'>Setup</a><a class='btn btn-secondary' href='/events'>Events</a><a class='btn btn-secondary' href='/diagnostics'>Diagnostics</a></div></div>");
   html += F("<div class='hero-mini-grid'>");
   html += F("<div class='hero-mini hero-mini-strong'><span class='hero-mini-label'>System</span><span class='hero-mini-value' id='heroMasterState'>");
   html += heroSystemValue;
@@ -5134,11 +5961,15 @@ void handleRoot() {
 
     // Start 1
     html += F("<div class='rowx'><label>Start Time 1 -</label><div class='field inline'>");
-    html += F("<input class='in' type='text' inputmode='numeric' pattern='[0-9]{1,2}' maxlength='2' name='startHour"); html += String(z);
+    html += F("<div class='time-spin' data-time-spin>");
+    html += F("<input type='hidden' name='startHour"); html += String(z);
     html += F("' value='"); html += pad2(startHour[z]); html += F("'>");
-    html += F("<span class='sep'>:</span>");
-    html += F("<input class='in' type='text' inputmode='numeric' pattern='[0-9]{1,2}' maxlength='2' name='startMin"); html += String(z);
+    html += F("<input type='hidden' name='startMin"); html += String(z);
     html += F("' value='"); html += pad2(startMin[z]); html += F("'>");
+    html += F("<div class='time-part'><button class='time-btn time-val' type='button' data-role='hour' title='Hour'>12</button><button class='time-btn time-arrow' type='button' data-part='hour' data-dir='1' title='Hour up'>&#9650;</button><button class='time-btn time-arrow' type='button' data-part='hour' data-dir='-1' title='Hour down'>&#9660;</button></div>");
+    html += F("<span class='time-colon'>:</span>");
+    html += F("<div class='time-part'><button class='time-btn time-val' type='button' data-role='min' title='Minute'>00</button><button class='time-btn time-arrow' type='button' data-part='min' data-dir='1' title='Minute up'>&#9650;</button><button class='time-btn time-arrow' type='button' data-part='min' data-dir='-1' title='Minute down'>&#9660;</button></div>");
+    html += F("<button class='time-btn time-ampm' type='button' data-role='ampm' title='Toggle AM/PM'>AM</button></div>");
     html += F("</div></div>");
 
     // Start 2 (hide inputs unless enabled)
@@ -5146,11 +5977,15 @@ void handleRoot() {
     html += F("<span id='start2fields"); html += String(z); html += F("' style='display:");
     html += (enableStartTime2[z] ? "inline-flex" : "none");
     html += F(";align-items:center;gap:8px'>");
-    html += F("<input class='in' type='text' inputmode='numeric' pattern='[0-9]{1,2}' maxlength='2' name='startHour2"); html += String(z);
+    html += F("<div class='time-spin' data-time-spin>");
+    html += F("<input type='hidden' name='startHour2"); html += String(z);
     html += F("' value='"); html += pad2(startHour2[z]); html += F("'>");
-    html += F("<span class='sep'>:</span>");
-    html += F("<input class='in' type='text' inputmode='numeric' pattern='[0-9]{1,2}' maxlength='2' name='startMin2"); html += String(z);
+    html += F("<input type='hidden' name='startMin2"); html += String(z);
     html += F("' value='"); html += pad2(startMin2[z]); html += F("'>");
+    html += F("<div class='time-part'><button class='time-btn time-val' type='button' data-role='hour' title='Hour'>12</button><button class='time-btn time-arrow' type='button' data-part='hour' data-dir='1' title='Hour up'>&#9650;</button><button class='time-btn time-arrow' type='button' data-part='hour' data-dir='-1' title='Hour down'>&#9660;</button></div>");
+    html += F("<span class='time-colon'>:</span>");
+    html += F("<div class='time-part'><button class='time-btn time-val' type='button' data-role='min' title='Minute'>00</button><button class='time-btn time-arrow' type='button' data-part='min' data-dir='1' title='Minute up'>&#9650;</button><button class='time-btn time-arrow' type='button' data-part='min' data-dir='-1' title='Minute down'>&#9660;</button></div>");
+    html += F("<button class='time-btn time-ampm' type='button' data-role='ampm' title='Toggle AM/PM'>AM</button></div>");
     html += F("</span>");
     html += F("<label class='toggle-inline'><input type='checkbox' name='enableStartTime2");
     html += String(z); html += F("' "); html += (enableStartTime2[z] ? "checked" : "");
@@ -5158,23 +5993,27 @@ void handleRoot() {
 
     // Duration
     html += F("<div class='rowx'><label>Run Time 1 -</label><div class='field inline'>");
-    html += F("<input class='in' type='text' inputmode='numeric' pattern='[0-9]{1,3}' maxlength='3' name='durationMin"); html += String(z);
-    html += F("' value='"); html += pad2(durationMin[z]); html += F("'>");
-    html += F("<span class='unit'>m</span><span class='sep'>:</span>");
-    html += F("<input class='in' type='text' inputmode='numeric' pattern='[0-9]{1,2}' maxlength='2' name='durationSec"); html += String(z);
+    html += F("<div class='time-spin duration-spin' data-duration-spin>");
+    html += F("<input type='hidden' name='durationMin"); html += String(z);
+    html += F("' value='"); html += String(durationMin[z]); html += F("'>");
+    html += F("<input type='hidden' name='durationSec"); html += String(z);
     html += F("' value='"); html += pad2(durationSec[z]); html += F("'>");
-    html += F("<span class='unit'>s</span></div></div>");
+    html += F("<div class='time-part'><button class='time-btn time-val' type='button' data-role='dmin' title='Minutes'>0</button><button class='time-btn time-arrow' type='button' data-part='min' data-dir='1' title='Minutes up'>&#9650;</button><button class='time-btn time-arrow' type='button' data-part='min' data-dir='-1' title='Minutes down'>&#9660;</button></div><span class='duration-unit'>min</span>");
+    html += F("<div class='time-part'><button class='time-btn time-val' type='button' data-role='dsec' title='Seconds'>00</button><button class='time-btn time-arrow' type='button' data-part='sec' data-dir='1' title='Seconds up'>&#9650;</button><button class='time-btn time-arrow' type='button' data-part='sec' data-dir='-1' title='Seconds down'>&#9660;</button></div><span class='duration-unit'>sec</span></div>");
+    html += F("</div></div>");
 
     // Duration 2 (used when Start 2 fires)
     html += F("<div class='rowx dur2row' id='dur2row"); html += String(z); html += F("' style='display:");
     html += (enableStartTime2[z] ? "grid" : "none");
     html += F("'><label>Run Time 2 -</label><div class='field inline'>");
-    html += F("<input class='in' type='text' inputmode='numeric' pattern='[0-9]{1,3}' maxlength='3' name='duration2Min"); html += String(z);
-    html += F("' value='"); html += pad2(duration2Min[z]); html += F("'>");
-    html += F("<span class='unit'>m</span><span class='sep'>:</span>");
-    html += F("<input class='in' type='text' inputmode='numeric' pattern='[0-9]{1,2}' maxlength='2' name='duration2Sec"); html += String(z);
+    html += F("<div class='time-spin duration-spin' data-duration-spin>");
+    html += F("<input type='hidden' name='duration2Min"); html += String(z);
+    html += F("' value='"); html += String(duration2Min[z]); html += F("'>");
+    html += F("<input type='hidden' name='duration2Sec"); html += String(z);
     html += F("' value='"); html += pad2(duration2Sec[z]); html += F("'>");
-    html += F("'</div></div>");
+    html += F("<div class='time-part'><button class='time-btn time-val' type='button' data-role='dmin' title='Minutes'>0</button><button class='time-btn time-arrow' type='button' data-part='min' data-dir='1' title='Minutes up'>&#9650;</button><button class='time-btn time-arrow' type='button' data-part='min' data-dir='-1' title='Minutes down'>&#9660;</button></div><span class='duration-unit'>min</span>");
+    html += F("<div class='time-part'><button class='time-btn time-val' type='button' data-role='dsec' title='Seconds'>00</button><button class='time-btn time-arrow' type='button' data-part='sec' data-dir='1' title='Seconds up'>&#9650;</button><button class='time-btn time-arrow' type='button' data-part='sec' data-dir='-1' title='Seconds down'>&#9660;</button></div><span class='duration-unit'>sec</span></div>");
+    html += F("</div></div>");
 
     // Days
     html += F("<div class='rowx'><label>Days</label><div class='days-grid'>");
@@ -5439,6 +6278,26 @@ void handleRoot() {
 
   // expose zonesCount & Save All
   html += F("const ZC="); html += String(zonesCount); html += F(";");
+  html += F("function initTimeSpin(el){");
+  html += F("  const hEl=el.querySelector('input[name^=\"startHour\"]'); const mEl=el.querySelector('input[name^=\"startMin\"]'); if(!hEl||!mEl)return;");
+  html += F("  const hv=el.querySelector('[data-role=\"hour\"]'); const mv=el.querySelector('[data-role=\"min\"]'); const ap=el.querySelector('[data-role=\"ampm\"]');");
+  html += F("  const pad=n=>String(n).padStart(2,'0'); const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));");
+  html += F("  function total(){return clamp(parseInt(hEl.value||'0',10)||0,0,23)*60+clamp(parseInt(mEl.value||'0',10)||0,0,59);}");
+  html += F("  function setTotal(t){t=((t%1440)+1440)%1440; const h=Math.floor(t/60), m=t%60; hEl.value=pad(h); mEl.value=pad(m); sync();}");
+  html += F("  function sync(){const h=clamp(parseInt(hEl.value||'0',10)||0,0,23), m=clamp(parseInt(mEl.value||'0',10)||0,0,59); hEl.value=pad(h); mEl.value=pad(m); if(hv)hv.textContent=pad((h%12)||12); if(mv)mv.textContent=pad(m); if(ap)ap.textContent=h>=12?'PM':'AM';}");
+  html += F("  el.querySelectorAll('[data-part]').forEach(btn=>btn.addEventListener('click',()=>{const dir=parseInt(btn.dataset.dir||'0',10)||0; setTotal(total()+dir*(btn.dataset.part==='hour'?60:1));}));");
+  html += F("  if(ap)ap.addEventListener('click',()=>setTotal(total()+720)); sync();");
+  html += F("}");
+  html += F("document.querySelectorAll('[data-time-spin]').forEach(initTimeSpin);");
+  html += F("function initDurationSpin(el){");
+  html += F("  const mEl=el.querySelector('input[name*=\"duration\"][name$=\"Min\"],input[name^=\"durationMin\"],input[name^=\"duration2Min\"]'); const sEl=el.querySelector('input[name*=\"duration\"][name$=\"Sec\"],input[name^=\"durationSec\"],input[name^=\"duration2Sec\"]'); if(!mEl||!sEl)return;");
+  html += F("  const mv=el.querySelector('[data-role=\"dmin\"]'); const sv=el.querySelector('[data-role=\"dsec\"]'); const pad=n=>String(n).padStart(2,'0'); const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));");
+  html += F("  function total(){return clamp(parseInt(mEl.value||'0',10)||0,0,600)*60+clamp(parseInt(sEl.value||'0',10)||0,0,59);}");
+  html += F("  function setTotal(t){t=clamp(t,0,600*60+59); const m=Math.floor(t/60), s=t%60; mEl.value=String(m); sEl.value=pad(s); sync();}");
+  html += F("  function sync(){const m=clamp(parseInt(mEl.value||'0',10)||0,0,600), s=clamp(parseInt(sEl.value||'0',10)||0,0,59); mEl.value=String(m); sEl.value=pad(s); if(mv)mv.textContent=String(m); if(sv)sv.textContent=pad(s);}");
+  html += F("  el.querySelectorAll('[data-part]').forEach(btn=>btn.addEventListener('click',()=>{const dir=parseInt(btn.dataset.dir||'0',10)||0; setTotal(total()+dir*(btn.dataset.part==='min'?60:1));})); sync();");
+  html += F("}");
+  html += F("document.querySelectorAll('[data-duration-spin]').forEach(initDurationSpin);");
   html += F("async function saveAll(){");
   html += F("  const fd=new URLSearchParams();");
   html += F("  for(let z=0; z<ZC; z++){");
