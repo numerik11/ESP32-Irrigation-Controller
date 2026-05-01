@@ -12,6 +12,18 @@ Built for real-world irrigation setups, from small home gardens to larger multi-
 
 ---
 
+## 📸 Screenshots
+
+### Main Dashboard
+
+<img width="432" height="934" alt="image" src="https://github.com/user-attachments/assets/db0b085c-d2f0-456b-85e4-010884bfb1f3" />
+
+### ESP32-S3 + 6 Zone/Relay + 24V AC
+
+<img width="484" height="457" alt="ESP32-S3 6 Zone 24V AC" src="https://github.com/user-attachments/assets/f9d2c234-1e8a-4ff2-8e8d-51a5bdf73905" />
+
+---
+
 ## ✨ Features
 
 - **1–16 irrigation zones**
@@ -314,12 +326,3 @@ Then configure:
 
 ---
 
-## 📸 Screenshots
-
-### Main Dashboard
-
-<img width="432" height="934" alt="image" src="https://github.com/user-attachments/assets/db0b085c-d2f0-456b-85e4-010884bfb1f3" />
-
-### ESP32-S3 + 6 Zone/Relay + 24V AC
-
-<img width="484" height="457" alt="ESP32-S3 6 Zone 24V AC" src="https://github.com/user-attachments/assets/f9d2c234-1e8a-4ff2-8e8d-51a5bdf73905" />
