@@ -1490,6 +1490,7 @@ static bool g_forceHomeReset = false; // force full HomeScreen repaint
 static bool g_forceRainReset = false; // force full RainScreen repaint
 static bool g_forceManualReset = false; // force full Manual screen repaint
 static bool g_forceRunReset = false; // force full Running screen repaint
+static const uint32_t DELAY_SCREEN_SCROLL_MS = 7000;
 
 static bool anyZoneActive() {
   for (int i = 0; i < (int)zonesCount && i < (int)MAX_ZONES; ++i) {
@@ -2501,6 +2502,8 @@ void loop() {
 
   // Track transitions to clear/refresh screens
   static bool lastWasDelayScreen = false;
+  static bool delayScreenShowingHome = false;
+  static uint32_t delayScreenPageSince = 0;
 
   bool manualActive = (manualScreenUntilMs != 0 && (int32_t)(manualScreenUntilMs - now) > 0);
   if (!manualActive && manualScreenUntilMs != 0) {
@@ -2521,8 +2524,36 @@ void loop() {
   }
 
   if (delayScreenActive) {
-    if (!lastWasDelayScreen) g_forceRainReset = true;
-    if (now - lastScreenRefresh >= 1000) { lastScreenRefresh = now; RainScreen(); lastWasDelayScreen = true; }
+    if (!lastWasDelayScreen) {
+      g_forceRainReset = true;
+      g_forceHomeReset = true;
+      delayScreenShowingHome = false;
+      delayScreenPageSince = now;
+      lastScreenRefresh = 0;
+    }
+
+    const bool scrollRainWindScreens = (rainActive || windActive || !systemMasterEnabled);
+    if (scrollRainWindScreens) {
+      if (now - delayScreenPageSince >= DELAY_SCREEN_SCROLL_MS) {
+        delayScreenPageSince = now;
+        delayScreenShowingHome = !delayScreenShowingHome;
+        if (delayScreenShowingHome) g_forceHomeReset = true;
+        else                        g_forceRainReset = true;
+        lastScreenRefresh = 0;
+      }
+    } else if (delayScreenShowingHome) {
+      delayScreenShowingHome = false;
+      delayScreenPageSince = now;
+      g_forceRainReset = true;
+      lastScreenRefresh = 0;
+    }
+
+    if (now - lastScreenRefresh >= 1000) {
+      lastScreenRefresh = now;
+      if (delayScreenShowingHome) HomeScreen();
+      else                        RainScreen();
+      lastWasDelayScreen = true;
+    }
   } else if (lastWasDelayScreen) {
     // Only clear once delay has actually ended
     lastWasDelayScreen = false;
@@ -5944,7 +5975,7 @@ void handleRoot() {
   html += F("</div><div class='summary-support'>Zone <span id='nwZone'>--</span></div></div>");
   html += F("<div class='metric-tile'><span class='metric-k'>ETA</span><div class='metric-v' id='nwETA'>--</div></div>");
   html += F("<div class='metric-tile'><span class='metric-k'>Duration</span><div class='metric-v' id='nwDur'>--</div></div>");
-  html += F("</div><div class='summary-note'>During Rain:Active watering will be stopped, if rain mm threshold is met watering will stop for set hours. If Wind:Active watering will be postponed until wind conditions drop below set threshold.</div></div>");
+  html += F("</div><div class='summary-note'>During Rain: Active, scheduled watering will be stopped, if rain mm threshold is met all watering will stop for set hours. If Wind: Active, scheduled watering will be postponed until wind conditions drop below set m/s threshold.</div></div>");
   html += F("</div></div>"); // end glass / grid
   flush();
 
