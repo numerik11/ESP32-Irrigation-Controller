@@ -3782,8 +3782,8 @@ void RainScreen(){
   const int W = tft.width();
   const int H = tft.height();
   const int pad = 8;
-  const int topY = 38; // start a bit higher for compact cards
-  const int rainH = 60;
+  const int topY = 38;
+  const int rainH = 42;
   const int rainY = topY;
   const int statusY = rainY + rainH + 6;
   int causeH = H - statusY - 8;
@@ -3876,7 +3876,7 @@ void RainScreen(){
   auto updateColValue = [&](int idx, const char* val, char* last, size_t lastLen) {
     if (!layoutChanged && strcmp(val, last) == 0) return;
     int x = pad + idx * colW + 4;
-    int yv = rainY + 24;
+    int yv = rainY + 18;
     int w = colW - 8;
     tft.fillRect(x, yv, w, text2H, C_PANEL);
     tft.setTextSize(2);
@@ -4507,7 +4507,7 @@ void HomeScreen() {
       tft.print("m/s");
       if (gustVal >= 0) {
         tft.setCursor(rightX + 8, compassY + 7);
-        tft.print("G ");
+        tft.print("Gust:");
         tft.print(gustVal / 10);
       }
       
