@@ -40,6 +40,8 @@ extern "C" {
 #include <PubSubClient.h>   // MQTT
 
 // ---------- Hardware ----------
+static const char kFirmwareSignature[] __attribute__((used)) =
+  "Original author: Beau Kaczmarek - https://github.com/numerik11/ESP32-Irrigation-Controller";
 static const uint8_t MAX_ZONES = 16;
 #if defined(CONFIG_IDF_TARGET_ESP32)
 static const int I2C_SDA_DEFAULT = 21;
@@ -1671,6 +1673,7 @@ void handleDiagnosticsJson() {
   const time_t nowEpoch = time(nullptr);
 
   doc["device"] = kHost;
+  doc["signature"] = kFirmwareSignature;
   doc["uptimeSec"] = uptimeSec;
   doc["uptime"] = formatRuntimeClock(uptimeSec);
   doc["epoch"] = (uint32_t)nowEpoch;
@@ -1800,6 +1803,9 @@ void handleDiagnosticsPage() {
   String html;
   html.reserve(5200);
   html += F("<!doctype html><html lang='en'><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'>");
+  html += F("<!-- ");
+  html += kFirmwareSignature;
+  html += F(" -->");
   html += F("<title>ESP32 Diagnostics</title><style>");
   html += F(":root{color-scheme:light dark;--bg:#eef4f1;--panel:#fff;--ink:#14232b;--muted:#60736d;--line:#ccddd5;--ok:#21885f;--warn:#b7791f;--bad:#c53030}");
   html += F("@media(prefers-color-scheme:dark){:root{--bg:#081315;--panel:#102126;--ink:#e6f0ec;--muted:#9ab4ad;--line:#27464d}}");
@@ -6858,7 +6864,7 @@ void handleSetupPage() {
     html += String(photoPin);
     html += F("'><small>ADC1 pin (ESP32: GPIO32-39)</small></div>");
   #else
-    html += F("<div class='row'><label>Photo GPIO</label><input class='in-xs' type='number' min='1' max='40' name='photoPin' value='");
+    html += F("<div class='row'><label>Photo-Resistor GPIO</label><input class='in-xs' type='number' min='1' max='40' name='photoPin' value='");
     html += String(photoPin);
     html += F("'><small>ESP32-S3 photo input range: GPIO1-40</small></div>");
   #endif
