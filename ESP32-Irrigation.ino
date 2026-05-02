@@ -109,6 +109,7 @@ Adafruit_ST7789 tft(&SPI, -1, -1, -1);
 #define OLED_RESET -1
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &I2Cbus, OLED_RESET);
 bool displayUseTft = (ENABLE_TFT != 0); // default mode; can be changed in Setup
+bool clockUse24Hour = true;
 
 // ===================== UI helpers + palette (MUST be before RainScreen/HomeScreen) =====================
 static inline uint16_t RGB(uint8_t r, uint8_t g, uint8_t b){
@@ -156,6 +157,17 @@ static void fmtMMSS(char* out, size_t n, unsigned long sec){
   unsigned long m = sec / 60;
   unsigned long s = sec % 60;
   snprintf(out, n, "%02lum%02lus", m, s);
+}
+
+static void formatClockTime(const struct tm& t, char* out, size_t n) {
+  if (clockUse24Hour) {
+    snprintf(out, n, "%02d:%02d", t.tm_hour, t.tm_min);
+    return;
+  }
+
+  int hour = t.tm_hour % 12;
+  if (hour == 0) hour = 12;
+  snprintf(out, n, "%d:%02d%c", hour, t.tm_min, (t.tm_hour < 12) ? 'a' : 'p');
 }
 
 static String formatRuntimeClock(unsigned long totalSec) {
@@ -2490,10 +2502,18 @@ void loop() {
   // Track transitions to clear/refresh screens
   static bool lastWasDelayScreen = false;
 
+  bool manualActive = (manualScreenUntilMs != 0 && (int32_t)(manualScreenUntilMs - now) > 0);
+  if (!manualActive && manualScreenUntilMs != 0) {
+    manualScreenUntilMs = 0;
+    g_forceHomeReset = true;
+    lastScreenRefresh = 0;
+  }
+
   const bool hardBlock = (!systemMasterEnabled || isPausedNow());
   const bool cooldownActive = isCooldownActiveNow();
   const bool manualDelayBypassActive = hasActiveManualZone();
-  const bool delayScreenActive = !manualDelayBypassActive &&
+  const bool delayScreenActive = !manualActive &&
+                                 !manualDelayBypassActive &&
                                  (hardBlock || cooldownActive || rainActive || windActive);
 
   if (hardBlock || cooldownActive || rainActive || windActive) {
@@ -2584,13 +2604,6 @@ void loop() {
         }
       }
     }
-  }
-
-  bool manualActive = (manualScreenUntilMs != 0 && (int32_t)(manualScreenUntilMs - now) > 0);
-  if (!manualActive && manualScreenUntilMs != 0) {
-    manualScreenUntilMs = 0;
-    g_forceHomeReset = true;
-    lastScreenRefresh = 0;
   }
 
   if (!delayScreenActive && now - lastScreenRefresh >= 1000) {
@@ -2780,12 +2793,16 @@ void drawManualSelection() {
     statusText = "QUEUED";
     statusColor = C_WARN;
     snprintf(detailLine, sizeof(detailLine), "Waiting for wind or active run");
+  } else if (!systemMasterEnabled) {
+    statusId = 4;
+    statusText = "MANUAL";
+    statusColor = C_ACCENT;
+    snprintf(detailLine, sizeof(detailLine), "Master off: manual control ready");
   } else if (isBlockedNow()) {
     statusId = 4;
     statusText = "BLOCKED";
     statusColor = C_BAD;
-    if (!systemMasterEnabled) snprintf(detailLine, sizeof(detailLine), "Master switch is off");
-    else if (isPausedNow()) snprintf(detailLine, sizeof(detailLine), "System pause is active");
+    if (isPausedNow()) snprintf(detailLine, sizeof(detailLine), "System pause is active");
     else snprintf(detailLine, sizeof(detailLine), "After-Rain Delay is active");
   } else if (rainActive) {
     statusId = 5;
@@ -3992,12 +4009,12 @@ void HomeScreen() {
       if (pendingStart[i]) queued++;
     }
 
-    char timeBuf[6] = "--:--";
+    char timeBuf[8] = "--:--";
     char dateBuf[8] = "--/--";
     time_t nowOled = time(nullptr);
     struct tm tOled;
     if (localtime_r(&nowOled, &tOled)) {
-      snprintf(timeBuf, sizeof(timeBuf), "%02d:%02d", tOled.tm_hour, tOled.tm_min);
+      formatClockTime(tOled, timeBuf, sizeof(timeBuf));
       snprintf(dateBuf, sizeof(dateBuf), "%02d/%02d", tOled.tm_mday, tOled.tm_mon + 1);
     }
 
@@ -4022,11 +4039,15 @@ void HomeScreen() {
       if (diff < 0) diff = 0;
       int mins = (int)(diff / 60L);
       if (mins >= 60) {
-        snprintf(nextBuf, sizeof(nextBuf), "Next Z%d %02d:%02d %dh%02d",
-                 nwOled.zone + 1, tnw.tm_hour, tnw.tm_min, mins / 60, mins % 60);
+        char nextTime[8];
+        formatClockTime(tnw, nextTime, sizeof(nextTime));
+        snprintf(nextBuf, sizeof(nextBuf), "Next Z%d %s %dh%02d",
+                 nwOled.zone + 1, nextTime, mins / 60, mins % 60);
       } else {
-        snprintf(nextBuf, sizeof(nextBuf), "Next Z%d %02d:%02d %dm",
-                 nwOled.zone + 1, tnw.tm_hour, tnw.tm_min, mins);
+        char nextTime[8];
+        formatClockTime(tnw, nextTime, sizeof(nextTime));
+        snprintf(nextBuf, sizeof(nextBuf), "Next Z%d %s %dm",
+                 nwOled.zone + 1, nextTime, mins);
       }
     }
 
@@ -4037,7 +4058,7 @@ void HomeScreen() {
     display.setTextSize(1);
     display.setCursor(3, 2);
     display.print(statusStr);
-    display.setCursor(OW - 66, 2);
+    display.setCursor(OW - (clockUse24Hour ? 66 : 78), 2);
     display.print(timeBuf);
     display.print(" ");
     display.print(dateBuf);
@@ -4274,11 +4295,11 @@ void HomeScreen() {
     }
 
     // ========== TIME DISPLAY ==========
-    char tbuf[6] = "--:--";
+    char tbuf[8] = "--:--";
     char dbuf[16] = "--/--";
     char dayBuf[6] = "---";
     if (tmv) {
-      snprintf(tbuf, sizeof(tbuf), "%02d:%02d", tmv->tm_hour, tmv->tm_min);
+      formatClockTime(*tmv, tbuf, sizeof(tbuf));
       snprintf(dbuf, sizeof(dbuf), "%02d/%02d", tmv->tm_mday, tmv->tm_mon + 1);
       static const char* days[] = {"SUN","MON","TUE","WED","THU","FRI","SAT"};
       if (tmv->tm_wday >= 0 && tmv->tm_wday <= 6) strncpy(dayBuf, days[tmv->tm_wday], 5);
@@ -4309,8 +4330,8 @@ void HomeScreen() {
         tft.setCursor(16, cardY + 72);
         tft.print("Z");
         tft.print(nw.zone + 1);
-        char nbuf[6];
-        snprintf(nbuf, sizeof(nbuf), "%02d:%02d", tnw.tm_hour, tnw.tm_min);
+        char nbuf[8];
+        formatClockTime(tnw, nbuf, sizeof(nbuf));
         tft.print(" ");
         tft.print(nbuf);
         long diff = (long)difftime(nw.epoch, now);
@@ -4547,10 +4568,10 @@ void HomeScreen() {
       tft.print("ENVIRONMENT");
     }
 
-    char tbuf[6] = "--:--";
+    char tbuf[8] = "--:--";
     char dbuf[16] = "--/--";
     if (tmv) {
-      snprintf(tbuf, sizeof(tbuf), "%02d:%02d", tmv->tm_hour, tmv->tm_min);
+      formatClockTime(*tmv, tbuf, sizeof(tbuf));
       snprintf(dbuf, sizeof(dbuf), "%02d/%02d/%02d", tmv->tm_mday, tmv->tm_mon + 1, (tmv->tm_year + 1900) % 100);
     }
     if (fullRedraw || curMinute != lastMinute || status != lastStatus) {
@@ -4588,8 +4609,8 @@ void HomeScreen() {
       if (nw.zone >= 0) {
         struct tm tnw;
         localtime_r(&nw.epoch, &tnw);
-        char nbuf[6];
-        snprintf(nbuf, sizeof(nbuf), "%02d:%02d", tnw.tm_hour, tnw.tm_min);
+        char nbuf[8];
+        formatClockTime(tnw, nbuf, sizeof(nbuf));
         tft.print("Z");
         tft.print(nw.zone + 1);
         tft.print(" ");
@@ -4714,7 +4735,7 @@ void HomeScreen() {
     static int lastW = -1;
     static int lastH = -1;
     static int lastZonesCount = -1;
-    static char lastTime[6] = "";
+    static char lastTime[8] = "";
     static char lastDate[20] = "";
     static int lastTemp = -1000;
     static float lastTempF = NAN;
@@ -4790,8 +4811,8 @@ void HomeScreen() {
     }
 
     // Time + date (top bar handles date; keep card for time + status lines)
-    char tbuf[6] = "--:--";
-    if (tmv) snprintf(tbuf, sizeof(tbuf), "%02d:%02d", tmv->tm_hour, tmv->tm_min);
+    char tbuf[8] = "--:--";
+    if (tmv) formatClockTime(*tmv, tbuf, sizeof(tbuf));
     if (layoutChanged || strcmp(tbuf, lastTime) != 0) {
       tft.fillRect(leftX + 4, contentY + 4, leftW - 8, 28, C_PANEL);
       tft.setTextColor(C_ACCENT);
@@ -4814,7 +4835,7 @@ void HomeScreen() {
       snprintf(zoneBuf, sizeof(zoneBuf), "Z%d", nw.zone + 1);
       struct tm tnw;
       localtime_r(&nw.epoch, &tnw);
-      strftime(etaBuf, sizeof(etaBuf), "%H:%M", &tnw);
+      formatClockTime(tnw, etaBuf, sizeof(etaBuf));
       long diff = (long)difftime(nw.epoch, now);
       if (diff < 0) diff = 0;
       int hrs = (int)(diff / 3600L);
@@ -5521,7 +5542,7 @@ void handleRoot() {
                            ? (activeZoneCount > 0
                               ? String(activeZoneCount) + String(activeZoneCount == 1 ? " zone running" : " zones running")
                               : String("Automation ready"))
-                           : String("Outputs are blocked"));
+                           : String("Automation blocked"));
   String heroWeatherValue = isnan(temp) ? String("--") : String(temp, 1) + " C";
 
   // --- HTML ---
@@ -6259,7 +6280,7 @@ void handleRoot() {
   html += F("const hm=document.getElementById('heroMasterState'); const hms=document.getElementById('heroMasterSub');");
   html += F("if(hm){ if(st.systemPaused){ hm.textContent='Paused'; if(hms) hms.textContent='Schedules are temporarily suspended'; }");
   html += F("else if(st.masterOn){ hm.textContent='Master On'; if(hms) hms.textContent=activeCount?(activeCount+' zone'+(activeCount===1?'':'s')+' running'):'Automation ready'; }");
-  html += F("else { hm.textContent='Master Off'; if(hms) hms.textContent='Outputs are blocked'; } }");
+  html += F("else { hm.textContent='Master Off'; if(hms) hms.textContent='Automation blocked'; } }");
 
   // Next Water
   html += F("(function(){ const zEl=document.getElementById('nwZone'); const tEl=document.getElementById('nwTime'); const eEl=document.getElementById('nwETA'); const dEl=document.getElementById('nwDur');");
@@ -6772,6 +6793,13 @@ void handleSetupPage() {
   html += F("<option value='oled'");
   html += (!displayUseTft ? " selected" : "");
   html += F(">OLED (SSD1306)</option></select><small>Applied after reboot</small></div>");
+  html += F("<div class='row'><label>Clock Format</label><select class='in-sm' name='clockFormat'>");
+  html += F("<option value='24'");
+  html += (clockUse24Hour ? " selected" : "");
+  html += F(">24 hour</option>");
+  html += F("<option value='12'");
+  html += (!clockUse24Hour ? " selected" : "");
+  html += F(">12 hour</option></select><small>Controls the clock shown on the screen</small></div>");
   html += F("<div class='row'><label>TFT Rotation</label><select class='in-sm' name='tftRotation'>");
   html += F("<option value='0'"); html += (tftRotation == 0 ? " selected" : ""); html += F(">0</option>");
   html += F("<option value='1'"); html += (tftRotation == 1 ? " selected" : ""); html += F(">1</option>");
@@ -7621,6 +7649,8 @@ void loadConfig() {
     int v = s.toInt();
     if (isValidTftDimension(v)) tftPanelHeight = (int16_t)v;
   }
+  // NEW: screen clock format (optional trailing line, 1=24-hour, 0=12-hour)
+  if (nextTail(s) && s.length()) clockUse24Hour = (s.toInt() != 0);
 
   f.close();
 
@@ -7735,6 +7765,8 @@ void saveConfig() {
   // NEW: TFT panel width/height
   f.println((int)tftPanelWidth);
   f.println((int)tftPanelHeight);
+  // NEW: screen clock format (1=24-hour, 0=12-hour)
+  f.println(clockUse24Hour ? 1 : 0);
 
   f.close();
 }
@@ -7815,6 +7847,7 @@ void handleConfigure() {
   int oldI2cSda  = i2cSdaPin;
   int oldI2cScl  = i2cSclPin;
   bool oldDisplayUseTft = displayUseTft;
+  bool oldClockUse24Hour = clockUse24Hour;
 
   // Weather (Open-Meteo)
   if (server.hasArg("meteoLocation")) {
@@ -7996,6 +8029,9 @@ void handleConfigure() {
     if (dm == "tft") displayUseTft = true;
     else if (dm == "oled") displayUseTft = false;
   }
+  if (server.hasArg("clockFormat")) {
+    clockUse24Hour = (server.arg("clockFormat") != "12");
+  }
   if (server.hasArg("tftRotation")) {
     int r = server.arg("tftRotation").toInt();
     if (r < 0) r = 0;
@@ -8128,6 +8164,7 @@ void handleConfigure() {
 
   bool i2cPinsChanged = (oldI2cSda != i2cSdaPin || oldI2cScl != i2cSclPin);
   bool displayModeChanged = (oldDisplayUseTft != displayUseTft);
+  bool clockFormatChanged = (oldClockUse24Hour != clockUse24Hour);
   bool tftRotationChanged = (oldTftRotation != (int)tftRotation);
 
   // Persist and re-apply runtime things
@@ -8137,6 +8174,10 @@ void handleConfigure() {
   initGpioPinsForZones();
   if (!displayModeChanged && !tftGeometryChanged && displayUseTft && tftRotationChanged) {
     tft.setRotation(tftRotation);
+  }
+  if (clockFormatChanged) {
+    g_forceHomeReset = true;
+    lastScreenRefresh = 0;
   }
 
   // --- NEW: if location/coords changed, force a weather refresh ---
