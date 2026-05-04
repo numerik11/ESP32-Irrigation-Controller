@@ -470,6 +470,8 @@ bool statusPixelWindowOn(uint16_t periodMs, uint16_t startMs, uint16_t widthMs);
 bool initTempSensor();
 bool readChipTempC(float& outC);
 bool physicalRainNowRaw();
+String rainDelayCauseText();
+static inline bool isRainDelayBlockingNow();
 
 
 // ===================== Timezone config =====================
@@ -595,6 +597,8 @@ void mqttPublishStatus(){
   d["paused"]   = (systemPaused && (pauseUntilEpoch==0 || time(nullptr)<(time_t)pauseUntilEpoch));
   d["cooldownRemaining"] = (rainCooldownUntilEpoch>time(nullptr)? (rainCooldownUntilEpoch - time(nullptr)) : 0);
   d["rainActive"] = rainActive;
+  d["rainDelayActive"] = isRainDelayBlockingNow();
+  d["rainDelayCause"] = rainDelayCauseText();
   d["windActive"] = windActive;
   d["tankPct"]    = tankPercent();
   d["sourceMode"] = sourceModeText();
@@ -625,6 +629,10 @@ static inline bool isPausedNow() {
 static inline bool isCooldownActiveNow() {
   time_t now = time(nullptr);
   return (rainCooldownUntilEpoch && now < (time_t)rainCooldownUntilEpoch);
+}
+
+static inline bool isRainDelayBlockingNow() {
+  return rainActive || isCooldownActiveNow();
 }
 
 static inline bool isBlockedNow(){
@@ -1755,7 +1763,9 @@ void handleDiagnosticsJson() {
   water["tankLow"] = isTankLow();
   water["masterOn"] = systemMasterEnabled;
   water["paused"] = isPausedNow();
-  water["rainDelayActive"] = rainActive;
+  water["rainDelayActive"] = isRainDelayBlockingNow();
+  water["rainActive"] = rainActive;
+  water["rainCooldownActive"] = isCooldownActiveNow();
   water["windDelayActive"] = windActive;
   water["rainDelayCause"] = rainDelayCauseText();
 
@@ -2101,7 +2111,12 @@ void setup() {
     HttpScope _scope; // NEW: avoid heavy work while serving
     JsonDocument doc;
 
-  doc["rainDelayActive"] = rainActive;
+  const bool cooldownActiveNow = isCooldownActiveNow();
+  const bool rainDelayBlockingNow = (rainActive || cooldownActiveNow);
+
+  doc["rainDelayActive"] = rainDelayBlockingNow;
+  doc["rainActive"]      = rainActive;
+  doc["rainCooldownActive"] = cooldownActiveNow;
   doc["windDelayActive"] = windActive;
   doc["rainDelayCause"]  = rainDelayCauseText();
   doc["zonesCount"]      = zonesCount;
@@ -3817,7 +3832,8 @@ void RainScreen(){
 
   const bool paused = isPausedNow();
   const bool masterOff = !systemMasterEnabled;
-  const bool delay = (rainActive || windActive);
+  const bool cooldownActive = isCooldownActiveNow();
+  const bool delay = (rainActive || windActive || cooldownActive);
   const int statusId = masterOff ? 3 : (paused ? 2 : (delay ? 1 : 0));
 
   bool layoutChanged = (!init || lastW != W || lastH != H);
@@ -3899,11 +3915,8 @@ void RainScreen(){
 
   String causeS = rainDelayCauseText();
   const time_t now = time(nullptr);
-  const bool cooldownActive = (rainCooldownUntilEpoch && now < (time_t)rainCooldownUntilEpoch);
   char causeBuf[40];
-  if (cooldownActive) {
-    strncpy(causeBuf, "After-Rain Delay", sizeof(causeBuf));
-  } else if (causeS.length()) {
+  if (causeS.length()) {
     strncpy(causeBuf, causeS.c_str(), sizeof(causeBuf));
   } else {
     strncpy(causeBuf, "--", sizeof(causeBuf));
@@ -3919,7 +3932,7 @@ void RainScreen(){
     if (masterOff) causeColor = C_BAD;
     else if (paused || delay || cooldownActive) causeColor = C_WARN;
     else causeColor = C_GOOD;
-    tft.setTextSize(2);
+    tft.setTextSize(strlen(causeBuf) > 14 ? 1 : 2);
     tft.setTextColor(causeColor);
     tft.setCursor(x, yv);
     tft.print(causeBuf);
@@ -4036,7 +4049,7 @@ void HomeScreen() {
     const int pctOled = constrain(tankPercent(), 0, 100);
     const bool masterOff = !systemMasterEnabled;
     const bool paused = isPausedNow();
-    const bool delayed = (rainActive || windActive);
+    const bool delayed = (isRainDelayBlockingNow() || windActive);
     const char* statusStr = masterOff ? "MASTER OFF" : (paused ? "PAUSED" : (delayed ? "DELAY" : "READY"));
 
     int running = 0;
@@ -4136,7 +4149,7 @@ void HomeScreen() {
   struct tm* tmv = localtime(&now);
   uint32_t nowMs = millis();
 
-  const bool delayed = (rainActive || windActive || isPausedNow() || !systemMasterEnabled);
+  const bool delayed = (isRainDelayBlockingNow() || windActive || isPausedNow() || !systemMasterEnabled);
 
   const int W = tft.width();
   const int H = tft.height();
@@ -4289,7 +4302,7 @@ void HomeScreen() {
     int tankCardH = cardY + cardH - tankCardY;
     int rightX = centerX + centerW + 10;
     int rightW = W - rightX - 6;
-    int status = !systemMasterEnabled ? 3 : (isPausedNow() ? 2 : ((rainActive || windActive) ? 1 : 0));
+    int status = !systemMasterEnabled ? 3 : (isPausedNow() ? 2 : ((isRainDelayBlockingNow() || windActive) ? 1 : 0));
 
     // ========== STATUS PILL (top right) ==========
     if (fullRedraw || curMinute != lastMinute || status != lastStatus || abs(rssi - lastRssi) >= 3) {
@@ -4309,7 +4322,7 @@ void HomeScreen() {
       uint16_t statusColor = C_GOOD;
       if (!systemMasterEnabled) { statusText = "MASTER OFF"; statusColor = C_BAD; }
       else if (isPausedNow()) { statusText = "PAUSED"; statusColor = C_WARN; }
-      else if (rainActive || windActive) { statusText = "DELAY"; statusColor = C_WARN; }
+      else if (isRainDelayBlockingNow() || windActive) { statusText = "DELAY"; statusColor = C_WARN; }
       int16_t bx, by; uint16_t bw, bh;
       tft.setTextSize(1);
       tft.getTextBounds(statusText, 0, 0, &bx, &by, &bw, &bh);
@@ -4496,10 +4509,10 @@ void HomeScreen() {
       tft.print(queued);
       
       // Rain delay indicator
-      if (rainActive || windActive) {
+      if (isRainDelayBlockingNow() || windActive) {
         tft.setTextColor(C_WARN);
         tft.setCursor(rightX + 8, cardY + 90);
-        tft.print("Rain delay!");
+        tft.print(isCooldownActiveNow() ? "After-rain!" : "Rain delay!");
       }
 
       int compassX = rightX + rightW - 24;
@@ -4559,7 +4572,7 @@ void HomeScreen() {
     int pctClamped = constrain(pct, 0, 100);
     int windTenths = isfinite(windNow) ? (int)lroundf(windNow * 10.0f) : 10000;
     int windDirRounded = isfinite(curWindDirDeg) ? (int)lroundf(normalizeDegrees360(curWindDirDeg)) : -1;
-    int status = !systemMasterEnabled ? 3 : (isPausedNow() ? 2 : ((rainActive || windActive) ? 1 : 0));
+    int status = !systemMasterEnabled ? 3 : (isPausedNow() ? 2 : ((isRainDelayBlockingNow() || windActive) ? 1 : 0));
     bool fullRedraw = g_forceHomeReset || !portraitInit || lastW != W || lastH != H;
     const int side = 8;
     const int cardW = W - 2 * side;
@@ -5538,7 +5551,8 @@ void handleRoot() {
   char nextWaterTime[6] = "--:--";
   char nextWaterDay[20] = "--";
   String nextWaterLabel = String("--");
-  String nextWaterSub = rainActive ? String("Waiting for rain delay to clear") : String("No queued run");
+  const bool rainDelayBlockingNow = isRainDelayBlockingNow();
+  String nextWaterSub = rainDelayBlockingNow ? String("Waiting for rain delay to clear") : String("No queued run");
   if (nextWater.epoch > 0 && nextWater.zone >= 0 && nextWater.zone < (int)zonesCount) {
     struct tm nextTm;
     localtime_r(&nextWater.epoch, &nextTm);
@@ -5968,8 +5982,8 @@ void handleRoot() {
 
   // Delays + Next Water
   html += F("<div class='card summary-card next-card'><h3>Delays & Next Water</h3><div class='summary-meta status-pills'>");
-  html += F("<div id='rainBadge' class='badge "); html += (rainActive ? "b-bad" : "b-ok"); html += F("'>Rain: <b>");
-  html += (rainActive?"Active":"Off"); html += F("</b></div>");
+  html += F("<div id='rainBadge' class='badge "); html += (rainDelayBlockingNow ? "b-bad" : "b-ok"); html += F("'>Rain: <b>");
+  html += (rainDelayBlockingNow ? causeText : String("Off")); html += F("</b></div>");
   html += F("<div id='windBadge' class='badge "); html += (windActive ? "b-warn" : "b-ok"); html += F("'>Wind: <b>");
   html += (windActive?"Active":"Off"); html += F("</b></div></div>");
   html += F("<div class='summary-metric-grid'>");
@@ -6240,7 +6254,7 @@ void handleRoot() {
   html += F("async function refreshStatus(){try{const r=await fetch('/status');const st=await r.json();");
   html += F("if(typeof st.deviceEpoch==='number' && st.deviceEpoch>0 && _devEpoch===null){ startDeviceClock(st.deviceEpoch); }");
   html += F("const rb=document.getElementById('rainBadge');const wb=document.getElementById('windBadge');");
-  html += F("if(rb){rb.className='badge '+(st.rainDelayActive?'b-bad':'b-ok');rb.innerHTML='Rain: <b>'+(st.rainDelayActive?'Active':'Off')+'</b>';}");
+  html += F("if(rb){const rc=st.rainDelayCause||'Active';rb.className='badge '+(st.rainDelayActive?'b-bad':'b-ok');rb.innerHTML='Rain: <b>'+(st.rainDelayActive?rc:'Off')+'</b>';}");
   html += F("if(wb){wb.className='badge '+(st.windDelayActive?'b-warn':'b-ok');wb.innerHTML='Wind: <b>'+(st.windDelayActive?'Active':'Off')+'</b>';}");
   html += F("const cause=document.getElementById('rainCauseBadge'); if(cause) cause.textContent=st.rainDelayCause||'Off';");
   html += F("const pct=st.tankPct||0; const tf=document.getElementById('tankFill'); const tl=document.getElementById('tankPctLabel');");
