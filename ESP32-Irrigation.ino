@@ -3575,12 +3575,18 @@ void updateLCDForZone(int zone) {
   static int lastRunTank = -1;
   static int lastRunActiveCount = -1;
   static char lastRunSource[12] = "";
+  static char lastRunRemBuf[12] = "";
+  static char lastRunElapsedBuf[12] = "";
+  static char lastRunTotalBuf[12] = "";
+  static int lastRunPct = -1;
+  static int lastRunBarFill = -1;
   const int dispW = displayUseTft ? tft.width() : SCREEN_WIDTH;
   const int dispH = displayUseTft ? tft.height() : SCREEN_HEIGHT;
   const bool layoutChanged = g_forceRunReset || !runInit || lastModeTft != displayUseTft ||
                              lastRunZone != zone || lastRunW != dispW || lastRunH != dispH ||
-                             lastRunTotal != total || lastRunTank != tankPct ||
-                             lastRunActiveCount != activeCount || strcmp(lastRunSource, src) != 0;
+                             lastRunTotal != total;
+  const bool metaChanged = layoutChanged || lastRunTank != tankPct ||
+                           lastRunActiveCount != activeCount || strcmp(lastRunSource, src) != 0;
 
   if (!displayUseTft) {
     if (layoutChanged) {
@@ -3675,6 +3681,11 @@ void updateLCDForZone(int zone) {
 
   if (layoutChanged) {
     tft.fillScreen(C_BG);
+    lastRunRemBuf[0] = '\0';
+    lastRunElapsedBuf[0] = '\0';
+    lastRunTotalBuf[0] = '\0';
+    lastRunPct = -1;
+    lastRunBarFill = -1;
 
     tft.fillRect(0, 0, W, headerH, C_PANEL);
     tft.drawFastHLine(0, headerH, W, C_EDGE);
@@ -3719,35 +3730,48 @@ void updateLCDForZone(int zone) {
     tft.drawRoundRect(barX, barY, barW, barH, 5, C_EDGE);
   }
 
-  tft.fillRect(cardX + 8, timerY - 2, cardW - 16, (int)remH + 6, C_PANEL);
-  tft.setTextSize((W >= 300 && H >= 220) ? 5 : 4);
-  tft.setTextColor(C_ACCENT);
-  tft.getTextBounds(remBuf, 0, 0, &remX1, &remY1, &remW, &remH);
-  timerX = cardX + (cardW - (int)remW) / 2;
-  tft.setCursor(timerX, timerY);
-  tft.print(remBuf);
-
-  tft.fillRect(barX + 2, barY + 2, barW - 4, barH - 4, C_PANEL);
   int fillW = ((barW - 4) * pct) / 100;
-  if (fillW > 0) tft.fillRoundRect(barX + 2, barY + 2, fillW, barH - 4, 4, C_GOOD);
 
   char pctBuf[8];
   snprintf(pctBuf, sizeof(pctBuf), "%d%%", pct);
-  tft.fillRect(barX, barY + barH + 4, barW, 12, C_PANEL);
-  tft.setTextSize(1);
-  tft.setTextColor(C_MUTED);
-  tft.setCursor(barX, barY + barH + 6);
-  tft.print(elapsedBuf);
-  tft.print(" / ");
-  tft.print(totalBuf);
-  tft.getTextBounds(pctBuf, 0, 0, &bx, &by, &bw, &bh);
-  tft.setCursor(barX + barW - (int)bw, barY + barH + 6);
-  tft.setTextColor(C_TEXT);
-  tft.print(pctBuf);
+
+  if (layoutChanged || strcmp(remBuf, lastRunRemBuf) != 0) {
+    tft.fillRect(cardX + 8, timerY - 2, cardW - 16, (int)remH + 6, C_PANEL);
+    tft.setTextSize((W >= 300 && H >= 220) ? 5 : 4);
+    tft.setTextColor(C_ACCENT);
+    tft.getTextBounds(remBuf, 0, 0, &remX1, &remY1, &remW, &remH);
+    timerX = cardX + (cardW - (int)remW) / 2;
+    tft.setCursor(timerX, timerY);
+    tft.print(remBuf);
+  }
+
+  if (layoutChanged || lastRunBarFill < 0) {
+    tft.fillRect(barX + 2, barY + 2, barW - 4, barH - 4, C_PANEL);
+    if (fillW > 0) tft.fillRoundRect(barX + 2, barY + 2, fillW, barH - 4, 4, C_GOOD);
+  } else if (fillW > lastRunBarFill) {
+    tft.fillRect(barX + 2 + lastRunBarFill, barY + 2, fillW - lastRunBarFill, barH - 4, C_GOOD);
+  } else if (fillW < lastRunBarFill) {
+    tft.fillRect(barX + 2 + fillW, barY + 2, lastRunBarFill - fillW, barH - 4, C_PANEL);
+  }
+
+  if (layoutChanged || strcmp(elapsedBuf, lastRunElapsedBuf) != 0 ||
+      strcmp(totalBuf, lastRunTotalBuf) != 0 || pct != lastRunPct) {
+    tft.fillRect(barX, barY + barH + 4, barW, 12, C_PANEL);
+    tft.setTextSize(1);
+    tft.setTextColor(C_MUTED);
+    tft.setCursor(barX, barY + barH + 6);
+    tft.print(elapsedBuf);
+    tft.print(" / ");
+    tft.print(totalBuf);
+    tft.getTextBounds(pctBuf, 0, 0, &bx, &by, &bw, &bh);
+    tft.setCursor(barX + barW - (int)bw, barY + barH + 6);
+    tft.setTextColor(C_TEXT);
+    tft.print(pctBuf);
+  }
 
   int metaY = barY + barH + 24;
   int metaH = cardY + cardH - metaY - 10;
-  if (layoutChanged && metaH >= 30) {
+  if (metaChanged && metaH >= 30) {
     int boxGap = 6;
     int boxW = (cardW - 24 - boxGap * 2) / 3;
     int boxH = min(42, metaH);
@@ -3784,6 +3808,14 @@ void updateLCDForZone(int zone) {
   lastRunActiveCount = activeCount;
   strncpy(lastRunSource, src, sizeof(lastRunSource));
   lastRunSource[sizeof(lastRunSource) - 1] = '\0';
+  strncpy(lastRunRemBuf, remBuf, sizeof(lastRunRemBuf));
+  lastRunRemBuf[sizeof(lastRunRemBuf) - 1] = '\0';
+  strncpy(lastRunElapsedBuf, elapsedBuf, sizeof(lastRunElapsedBuf));
+  lastRunElapsedBuf[sizeof(lastRunElapsedBuf) - 1] = '\0';
+  strncpy(lastRunTotalBuf, totalBuf, sizeof(lastRunTotalBuf));
+  lastRunTotalBuf[sizeof(lastRunTotalBuf) - 1] = '\0';
+  lastRunPct = pct;
+  lastRunBarFill = fillW;
   g_forceRunReset = false;
 }
 
