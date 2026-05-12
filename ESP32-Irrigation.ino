@@ -242,6 +242,9 @@ struct ManualButtonState {
   uint32_t lastPressMs = 0;
 };
 
+static void resetManualButtonState(ManualButtonState& state, int pin);
+static bool consumeManualButtonPress(int pin, ManualButtonState& state, uint32_t nowMs);
+
 static ManualButtonState g_manualSelectBtn;
 static ManualButtonState g_manualStartBtn;
 
