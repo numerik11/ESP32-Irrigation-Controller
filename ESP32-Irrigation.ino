@@ -1,3 +1,6 @@
+//-- If using Arduino IDE use a partition scheme that includes a SPIFFS/LittleFS partition, for example:
+//-- No OTA (2MB APP / 2MB SPIFFS) or Huge APP (3MB No OTA/1MB SPIFFS) 
+
 #ifndef ENABLE_DEBUG_ROUTES
   #define ENABLE_DEBUG_ROUTES 0   // set to 1 when you need them
 #endif
