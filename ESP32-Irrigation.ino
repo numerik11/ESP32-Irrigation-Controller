@@ -6485,6 +6485,7 @@ void handleSetupPage() {
   html += F(".setup-hero-copy{display:flex;flex-direction:column;justify-content:center;gap:10px}");
   html += F(".setup-hero-copy h2{margin:0;font-size:1.55rem;line-height:1.08;max-width:14ch}");
   html += F(".setup-hero-copy p{margin:0;color:#b4c8c2;max-width:60ch}");
+  html += F(".setup-hero.badges-only{display:block}");
   html += F(".setup-badges{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}");
   html += F(".setup-badge{padding:12px 13px;border-radius:15px;border:1px solid rgba(92,131,125,.24);background:linear-gradient(180deg,rgba(255,255,255,.08),rgba(127,210,189,.04))}");
   html += F(".setup-badge-k{font-size:.73rem;letter-spacing:.14em;text-transform:uppercase;color:#9ab4ad;font-weight:800}");
@@ -6658,13 +6659,14 @@ void handleSetupPage() {
   html += F("input[type=checkbox]:not(#themeToggle):focus-visible,input[type=radio]:focus-visible{box-shadow:0 0 0 3px rgba(37,99,235,.2)}html[data-theme='light'] input[type=checkbox]:not(#themeToggle)::before{border-right-color:#1e40af;border-bottom-color:#1e40af}");
   html += F("html[data-theme='light'] input[type=radio]::before{background:#1e40af}html[data-theme='light'] input[type=checkbox]:not(#themeToggle):checked,html[data-theme='light'] input[type=radio]:checked{border-color:#2563eb;box-shadow:0 0 0 3px rgba(37,99,235,.12)}");
   html += F("html[data-theme='light'] input[type=checkbox]:not(#themeToggle):focus-visible,html[data-theme='light'] input[type=radio]:focus-visible{border-color:#2563eb;box-shadow:0 0 0 3px rgba(37,99,235,.14)}html[data-theme='light'] .setup-nav a:hover{background:#eef5ff;border-color:#bfdbfe;box-shadow:0 10px 24px rgba(37,99,235,.08)}");
-  html += F("@media(max-width:760px){.page-head{padding:10px 12px}.page-head h1{font-size:1.2rem}.setup-hero{grid-template-columns:1fr}.setup-badges{grid-template-columns:1fr 1fr}.setup-nav{top:8px;flex-wrap:nowrap;overflow:auto;padding-bottom:6px}.setup-nav a{white-space:nowrap}.setup-actions-top{top:68px;z-index:9;padding:10px;border-radius:14px;background:rgba(13,23,24,.88);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);border:1px solid rgba(92,131,125,.2)}.row{padding-top:8px;flex-direction:column;align-items:stretch}.row label{min-width:0;width:100%}.row .btn,.row .btn-alt{width:100%}.switchline{align-items:flex-start}}");
+  html += F("details.collapse summary,html[data-theme='dark'] details.collapse summary{color:#ffffff}html[data-theme='light'] details.collapse summary{color:#000000}");
+  html += F("@media(max-width:760px){.page-head{padding:10px 12px}.page-head h1{font-size:1.2rem}.setup-hero{grid-template-columns:1fr}.setup-badges{grid-template-columns:1fr 1fr}.setup-nav{top:8px;flex-wrap:nowrap;overflow:auto;padding-bottom:6px}.setup-nav a{white-space:nowrap}.setup-actions-top{top:8px;z-index:9;padding:10px;border-radius:14px;background:rgba(13,23,24,.88);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);border:1px solid rgba(92,131,125,.2)}.row{padding-top:8px;flex-direction:column;align-items:stretch}.row label{min-width:0;width:100%}.row .btn,.row .btn-alt{width:100%}.switchline{align-items:flex-start}}");
   html += F("</style></head><body>");
 
   html += F("<div class='wrap'><div class='page-head'><div class='page-head-copy'><div class='page-kicker'>Controller setup</div><h1>Setup</h1><div class='page-sub'>Adjust weather, display, relay and automation settings from one screen.</div></div>");
   html += F("<div class='theme-switch'><span>Light</span><label class='switch'><input type='checkbox' id='themeToggle'><span class='slider'></span></label><span>Dark</span></div>");
   html += F("</div>");
-  html += F("<div class='setup-hero'><div class='setup-hero-copy'><div class='page-kicker'>Quick overview</div><h2>Configure the controller without digging through separate pages.</h2><p>Save writes changes immediately, while pin, display and some hardware changes may require a reboot before they take effect.</p></div><div class='setup-badges'>");
+  html += F("<div class='setup-hero badges-only'><div class='setup-badges'>");
   html += F("<div class='setup-badge'><div class='setup-badge-k'>Zones</div><div class='setup-badge-v'>"); html += String(zonesCount); html += F(" configured</div></div>");
   html += F("<div class='setup-badge'><div class='setup-badge-k'>Display</div><div class='setup-badge-v'>"); html += setupDisplayLabel; html += F("</div></div>");
   html += F("<div class='setup-badge'><div class='setup-badge-k'>Water Source</div><div class='setup-badge-v'>"); html += setupTankLabel; html += F("</div></div>");
@@ -6672,9 +6674,7 @@ void handleSetupPage() {
   html += F("<div class='setup-badge'><div class='setup-badge-k'>Weather</div><div class='setup-badge-v'>"); html += setupWeatherLabel; html += F("</div></div>");
   html += F("<div class='setup-badge'><div class='setup-badge-k'>Forecast Model</div><div class='setup-badge-v'>"); html += meteoModel; html += F("</div></div>");
   html += F("</div></div>");
-  html += F("<div class='setup-nav'>");
-  html += F("<a href='#zones-card'>Zones</a><a href='#tank-card'>Source</a><a href='#delays-card'>Delays</a><a href='#weather-card'>Weather</a><a href='#timezone-card'>Timezone</a><a href='#display-card'>Display</a><a href='#advanced-card'>GPIO</a><a href='#mqtt-card'>Buttons/MQTT</a>");
-  html += F("</div><form action='/configure' method='POST'>");
+  html += F("<form action='/configure' method='POST'>");
   html += F("<div class='setup-actions-top'><button class='btn' type='submit'>Save Changes</button><button class='btn-alt' formaction='/' formmethod='GET'>Home</button><button class='btn-alt' type='button' onclick=\"fetch('/clear_cooldown',{method:'POST'})\">Clear After-Rain Delay</button><button class='btn btn-danger' type='button' onclick=\"if(confirm('Reboot controller now?'))fetch('/reboot',{method:'POST'})\">Reboot</button></div>");
 
   // Zones
