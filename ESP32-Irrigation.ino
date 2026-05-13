@@ -6998,9 +6998,7 @@ void handleSetupPage() {
   html += F("</div></details></div>");
 
   // GPIO fallback pins
-  html += F("<div class='card narrow'><details class='collapse' ");
-  html += (useGpioFallback ? "open" : "");
-  html += F("><summary>GPIO Fallback (if I2C relays not found)</summary><div class='collapse-body'><div class='grid'>");
+  html += F("<div class='card narrow'><details class='collapse'><summary>GPIO Fallback (if I2C relays not found)</summary><div class='collapse-body'><div class='grid'>");
   for (uint8_t i=0;i<MAX_ZONES;i++){
     html += F("<div class='row switchline'><label>Zone "); html += String(i+1);
     html += F(" Pin</label><input class='in-xs' type='number' min='-1' max='39' name='zonePin"); html += String(i);
