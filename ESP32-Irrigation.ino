@@ -6678,7 +6678,7 @@ void handleSetupPage() {
   html += F("<div class='setup-actions-top'><button class='btn' type='submit'>Save Changes</button><button class='btn-alt' formaction='/' formmethod='GET'>Home</button><button class='btn-alt' type='button' onclick=\"fetch('/clear_cooldown',{method:'POST'})\">Clear After-Rain Delay</button><button class='btn btn-danger' type='button' onclick=\"if(confirm('Reboot controller now?'))fetch('/reboot',{method:'POST'})\">Reboot</button></div>");
 
   // Zones
-  html += F("<div class='card narrow' id='zones-card'><h3>Zones</h3><p class='card-intro'>Set how many watering zones are available and whether they run one at a time or together.</p>");
+  html += F("<div class='card narrow' id='zones-card'><details class='collapse'><summary>Zones</summary><div class='collapse-body'><p class='card-intro'>Set how many watering zones are available and whether they run one at a time or together.</p>");
   html += F("<div class='row'><label>Zone Count</label><input class='in-xs' type='number' min='1' max='");
   html += String(MAX_ZONES);
   html += F("' name='zonesMode' value='");
@@ -6691,10 +6691,10 @@ void handleSetupPage() {
   html += F("<div class='row switchline'><label>Run Mode</label>");
   html += F("<label><input type='checkbox' name='runConcurrent' "); html += (runZonesConcurrent ? "checked" : "");
   html += F("> Run Zones Together</label><small>Unchecked = One at a time. If enabled, ensure your power supply can handle multiple valves running at once.</small></div>");
-  html += F("</div>");
+  html += F("</div></details></div>");
 
   // Tank (available for all modes; water source switching works with any zone count)
-  html += F("<div class='card narrow' id='tank-card'><h3>Tank & Water Source</h3><p class='card-intro'>Control how the controller chooses between tank and mains and where the tank sensor is connected.</p>");
+  html += F("<div class='card narrow' id='tank-card'><details class='collapse'><summary>Tank & Water Source</summary><div class='collapse-body'><p class='card-intro'>Control how the controller chooses between tank and mains and where the tank sensor is connected.</p>");
   html += F("<div class='row switchline'><label>Enable Tank</label><input type='checkbox' name='tankEnabled' ");
   html += (tankEnabled ? "checked" : "");
   html += F("><small>Unchecked = ignore tank level and force mains</small></div>");
@@ -6735,10 +6735,10 @@ void handleSetupPage() {
   #endif
   html += F("<div class='row'><label></label><a class='btn-alt' href='/tank'>Calibrate Tank</a></div>");
   html += F("</div>"); // end tankCard
-  html += F("</div>");
+  html += F("</div></details></div>");
 
   // Delays & Pause + thresholds
-  html += F("<div class='card narrow' id='delays-card'><h3>Delays & Pause</h3><p class='card-intro'>Weather locks and pause controls live here, including After-Rain Delay timing and wind thresholds.</p>");
+  html += F("<div class='card narrow' id='delays-card'><details class='collapse'><summary>Delays & Pause</summary><div class='collapse-body'><p class='card-intro'>Weather locks and pause controls live here, including After-Rain Delay timing and wind thresholds.</p>");
   html += F("<div class='cols2 panel-split'>");
 
   // Left column: toggles
@@ -6778,19 +6778,19 @@ void handleSetupPage() {
   html += F("</div>");
 
   html += F("</div>"); // end cols2
-  html += F("</div>"); // end Delays card
+  html += F("</div></details></div>"); // end Delays card
 
   // Physical rain & forecast
-  html += F("<div class='card narrow'><h3>Rain Sources</h3><p class='card-intro'>Choose whether forecast rain, a physical sensor, or both can stop irrigation.</p>");
+  html += F("<div class='card narrow'><details class='collapse'><summary>Rain Sources</summary><div class='collapse-body'><p class='card-intro'>Choose whether forecast rain, a physical sensor, or both can stop irrigation.</p>");
   html += F("<div class='row switchline'><label>Disable Open-Meteo Rain</label><input type='checkbox' name='rainForecastDisabled' ");
   html += (!rainDelayFromForecastEnabled ? "checked" : ""); html += F("><small>Checked = ignore Open-Meteo rain</small></div>");
   html += F("<div class='row switchline'><label>Enable Rain Sensor</label><input type='checkbox' name='rainSensorEnabled' "); html += (rainSensorEnabled?"checked":""); html += F("></div>");
   html += F("<div class='row'><label>Rain Sensor GPIO</label><input class='in-xs' type='number' min='0' max='39' name='rainSensorPin' value='"); html += String(rainSensorPin); html += F("'><small>e.g. 27</small></div>");
   html += F("<div class='row switchline'><label>Invert Sensor</label><input type='checkbox' name='rainSensorInvert' "); html += (rainSensorInvert?"checked":""); html += F("><small>Use if board is NO</small></div>");
-  html += F("</div>");
+  html += F("</div></details></div>");
 
   // Weather
-  html += F("<div class='card narrow' id='weather-card'><h3>Weather (Open-Meteo)</h3><p class='card-intro'>Enter the site coordinates and choose the forecast model used for delay logic and dashboard weather.</p>");
+  html += F("<div class='card narrow' id='weather-card'><details class='collapse'><summary>Weather (Open-Meteo)</summary><div class='collapse-body'><p class='card-intro'>Enter the site coordinates and choose the forecast model used for delay logic and dashboard weather.</p>");
   html += F("<div class='row'><label>Open-Meteo</label><a class='btn-alt' id='setupMeteoLink' href='https://open-meteo.com/en/docs?latitude=");
   html += (isfinite(meteoLat) ? String(meteoLat, 6) : String("-35.107600"));
   html += F("&longitude=");
@@ -6823,10 +6823,10 @@ void handleSetupPage() {
   html += (modelIsKnown ? "" : modelSel);
   html += F("'><small>Use an Open-Meteo model slug (e.g., gfs, icon, ecmwf)</small></div>");
   html += F("<div class='row helptext'><label></label><small>No API key required. Enter your coordinates for Open-Meteo.</small></div>");
-  html += F("</div>");
+  html += F("</div></details></div>");
 
   // Timezone
-  html += F("<div class='card narrow' id='timezone-card'><h3>Timezone</h3><p class='card-intro'>Use a POSIX timezone string or a fixed UTC offset so schedules and weather line up with local time.</p>");
+  html += F("<div class='card narrow' id='timezone-card'><details class='collapse'><summary>Timezone</summary><div class='collapse-body'><p class='card-intro'>Use a POSIX timezone string or a fixed UTC offset so schedules and weather line up with local time.</p>");
 
   // Mode selector - cleaner row, better labels
   html += F("<div class='row switchline'>");
@@ -6876,7 +6876,7 @@ void handleSetupPage() {
   html += F("<div class='row'><label>Fixed Offset (min)</label><input class='in-sm' type='number' name='tzFixed' value='");
   html += String(tzFixedOffsetMin);
   html += F("'><small>Minutes from UTC</small></div>");
-  html += F("</div>"); // end Timezone card
+  html += F("</div></details></div>"); // end Timezone card
 
   // Display / Auto backlight
   html += F("<div class='card narrow' id='display-card'><details class='collapse'><summary>Display</summary><div class='collapse-body'><p class='card-intro'>Choose the screen type, rotation, and light-sensor backlight behavior.</p>");
