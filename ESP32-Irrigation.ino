@@ -6636,7 +6636,7 @@ void handleSetupPage() {
   html += F(".page-head h1{text-transform:uppercase;font-size:1.35rem;letter-spacing:1px}");
   html += F(".theme-switch{font-size:.88rem}");
   html += F(".card{position:relative;overflow:hidden}");
-  html += F(".card::before{content:'';position:absolute;left:0;right:0;top:0;height:3px;background:linear-gradient(90deg,#1f8a70,#52c266)}");
+  html += F(".card::before{content:'';position:absolute;left:0;right:0;top:0;height:3px;background:linear-gradient(90deg,#2563eb,#60a5fa)}");
   html += F("input[type=text],input[type=number],select{font-family:'Sora','Trebuchet MS',sans-serif}");
   html += F("input[type=text]:focus-visible,input[type=number]:focus-visible,select:focus-visible{outline:2px solid #1f8a70;outline-offset:1px;box-shadow:0 0 0 3px rgba(31,138,112,.18)}");
   html += F(".btn,.btn-alt{font-weight:760;letter-spacing:.16px}");
@@ -6664,7 +6664,7 @@ void handleSetupPage() {
   html += F("@media(max-width:760px){.page-head{padding:10px 12px}.page-head h1{font-size:1.2rem}.setup-hero{grid-template-columns:1fr}.setup-badges{grid-template-columns:1fr 1fr}.setup-nav{top:8px;flex-wrap:nowrap;overflow:auto;padding-bottom:6px}.setup-nav a{white-space:nowrap}.setup-actions-top{top:8px;z-index:9;padding:10px;border-radius:14px;background:rgba(13,23,24,.88);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);border:1px solid rgba(92,131,125,.2)}.row{padding-top:8px;flex-direction:column;align-items:stretch}.row label{min-width:0;width:100%}.row .btn,.row .btn-alt{width:100%}.switchline{align-items:flex-start}}");
   html += F("</style></head><body>");
 
-  html += F("<div class='wrap'><div class='page-head'><div class='page-head-copy'><div class='page-kicker'>Controller setup</div><h1>Setup</h1><div class='page-sub'>Adjust weather, display, relay and automation settings from one screen.</div></div>");
+  html += F("<div class='wrap'><div class='page-head'><div class='page-head-copy'><div class='page-kicker'>Controller setup</div><h1>Setup</h1></div>");
   html += F("<div class='theme-switch'><span>Light</span><label class='switch'><input type='checkbox' id='themeToggle'><span class='slider'></span></label><span>Dark</span></div>");
   html += F("</div>");
   html += F("<div class='setup-hero badges-only'><div class='setup-overview-title'>Controller Overview</div><div class='setup-badges'>");
