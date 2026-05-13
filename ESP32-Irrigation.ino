@@ -5621,6 +5621,10 @@ void handleRoot() {
       nextWaterSub += durBuf;
     }
   }
+  if (!systemMasterEnabled) {
+    nextWaterLabel = String("Master off");
+    nextWaterSub = String("Automation blocked");
+  }
   String heroSystemValue = pausedNow ? String("Paused")
                           : (systemMasterEnabled ? String("Master On") : String("Master Off"));
   String heroSystemSub = pausedNow ? String("Schedules are temporarily suspended")
@@ -6374,11 +6378,12 @@ void handleRoot() {
   html += F("const epoch=st.nextWaterEpoch|0; const zone=st.nextWaterZone; const name=st.nextWaterName||(Number.isInteger(zone)?('Z'+(zone+1)):'--'); const dur=st.nextWaterDurSec|0;");
   html += F("function fmtDur(s){ if(s<=0) return '--'; const m=Math.floor(s/60), sec=s%60; return pad(m)+'m '+pad(sec)+'s'; }");
   html += F("function fmtETA(delta){ if(delta<=0) return 'now'; const h=Math.floor(delta/3600), m=Math.floor((delta%3600)/60); if(h>0) return h+'h '+m+'m'; return m+'m'; }");
-  html += F("if(zEl) zEl.textContent=(zone>=0&&zone<255)?name:'--'; if(tEl) tEl.textContent=nextWaterStartLabel(epoch); if(dEl) dEl.textContent=fmtDur(dur);");
+  html += F("const masterOff=(st.masterOn===false);");
+  html += F("if(zEl) zEl.textContent=masterOff?'--':((zone>=0&&zone<255)?name:'--'); if(tEl) tEl.textContent=masterOff?'Master off':nextWaterStartLabel(epoch); if(dEl) dEl.textContent=masterOff?'--':fmtDur(dur);");
   html += F("let nowEpoch=(typeof st.deviceEpoch==='number'&&st.deviceEpoch>0&&_devEpoch!=null)?_devEpoch:Math.floor(Date.now()/1000);");
-  html += F("if(eEl) eEl.textContent=epoch?fmtETA(epoch-nowEpoch):'--';");
-  html += F("if(hv) hv.textContent=nextWaterStartLabel(epoch);");
-  html += F("if(hs) hs.textContent=epoch?(name+(dur>0?(' - '+fmtDur(dur)):'')):(st.rainDelayActive?'Waiting for rain delay to clear':'No queued run');");
+  html += F("if(eEl) eEl.textContent=(masterOff||!epoch)?'--':fmtETA(epoch-nowEpoch);");
+  html += F("if(hv) hv.textContent=masterOff?'Master off':nextWaterStartLabel(epoch);");
+  html += F("if(hs) hs.textContent=masterOff?'Automation blocked':(epoch?(name+(dur>0?(' - '+fmtDur(dur)):'')):(st.rainDelayActive?'Waiting for rain delay to clear':'No queued run'));");
   html += F("})();");
 
   html += F("}catch(e){} } setInterval(refreshStatus,2500); refreshStatus();");
