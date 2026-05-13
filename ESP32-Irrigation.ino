@@ -6486,6 +6486,7 @@ void handleSetupPage() {
   html += F(".setup-hero-copy h2{margin:0;font-size:1.55rem;line-height:1.08;max-width:14ch}");
   html += F(".setup-hero-copy p{margin:0;color:#b4c8c2;max-width:60ch}");
   html += F(".setup-hero.badges-only{display:block}");
+  html += F(".setup-overview-title{margin:0 0 12px 0;font-size:.78rem;letter-spacing:.16em;text-transform:uppercase;font-weight:850;color:#60a5fa}");
   html += F(".setup-badges{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}");
   html += F(".setup-badge{padding:12px 13px;border-radius:15px;border:1px solid rgba(92,131,125,.24);background:linear-gradient(180deg,rgba(255,255,255,.08),rgba(127,210,189,.04))}");
   html += F(".setup-badge-k{font-size:.73rem;letter-spacing:.14em;text-transform:uppercase;color:#9ab4ad;font-weight:800}");
@@ -6666,7 +6667,7 @@ void handleSetupPage() {
   html += F("<div class='wrap'><div class='page-head'><div class='page-head-copy'><div class='page-kicker'>Controller setup</div><h1>Setup</h1><div class='page-sub'>Adjust weather, display, relay and automation settings from one screen.</div></div>");
   html += F("<div class='theme-switch'><span>Light</span><label class='switch'><input type='checkbox' id='themeToggle'><span class='slider'></span></label><span>Dark</span></div>");
   html += F("</div>");
-  html += F("<div class='setup-hero badges-only'><div class='setup-badges'>");
+  html += F("<div class='setup-hero badges-only'><div class='setup-overview-title'>Controller Overview</div><div class='setup-badges'>");
   html += F("<div class='setup-badge'><div class='setup-badge-k'>Zones</div><div class='setup-badge-v'>"); html += String(zonesCount); html += F(" configured</div></div>");
   html += F("<div class='setup-badge'><div class='setup-badge-k'>Display</div><div class='setup-badge-v'>"); html += setupDisplayLabel; html += F("</div></div>");
   html += F("<div class='setup-badge'><div class='setup-badge-k'>Water Source</div><div class='setup-badge-v'>"); html += setupTankLabel; html += F("</div></div>");
