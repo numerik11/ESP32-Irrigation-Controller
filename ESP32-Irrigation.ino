@@ -6871,8 +6871,8 @@ void handleSetupPage() {
   html += F("</div>"); // end Timezone card
 
   // Display / Auto backlight
-  html += F("<div class='card narrow' id='display-card'><h3>Display</h3><p class='card-intro'>Choose the screen type, rotation, and light-sensor backlight behavior.</p>");
-  html += F("<div class='row'><label>Display Type</label><select class='in-med' name='displayType'>");
+  html += F("<div class='card narrow' id='display-card'><details class='collapse'><summary>Display</summary><div class='collapse-body'><p class='card-intro'>Choose the screen type, rotation, and light-sensor backlight behavior.</p>");
+  html += F("<div class='row'><label>Display</label><select class='in-med' name='displayType' id='displayTypeSelect'>");
   html += F("<option value='tft'");
   html += (displayUseTft ? " selected" : "");
   html += F(">TFT (ST7789)</option>");
@@ -6886,47 +6886,47 @@ void handleSetupPage() {
   html += F("<option value='12'");
   html += (!clockUse24Hour ? " selected" : "");
   html += F(">12 hour</option></select><small>Controls the clock shown on the screen</small></div>");
-  html += F("<div class='row'><label>TFT Rotation</label><select class='in-sm' name='tftRotation'>");
+  html += F("<div class='row' data-tft-only><label>TFT Rotation</label><select class='in-sm' name='tftRotation'>");
   html += F("<option value='0'"); html += (tftRotation == 0 ? " selected" : ""); html += F(">0</option>");
   html += F("<option value='1'"); html += (tftRotation == 1 ? " selected" : ""); html += F(">1</option>");
   html += F("<option value='2'"); html += (tftRotation == 2 ? " selected" : ""); html += F(">2</option>");
   html += F("<option value='3'"); html += (tftRotation == 3 ? " selected" : ""); html += F(">3</option>");
   html += F("</select><small>ST7789 screen orientation (0-3)</small></div>");
-  html += F("<div class='row'><label>TFT Size</label><div class='field'><input class='in-xs' type='number' min='120' max='400' name='tftWidth' value='");
+  html += F("<div class='row' data-tft-only><label>TFT Size</label><div class='field'><input class='in-xs' type='number' min='120' max='400' name='tftWidth' value='");
   html += String(tftPanelWidth);
   html += F("'><span>x</span><input class='in-xs' type='number' min='120' max='400' name='tftHeight' value='");
   html += String(tftPanelHeight);
   html += F("'></div><small>Saved panel size. Common ST7789 sizes: 170x320, 240x320, 240x240. Applied after reboot.</small></div>");
-  html += F("<div class='row switchline'><label>Auto Backlight (LDR)</label><input type='checkbox' name='photoAuto' ");
+  html += F("<div class='row switchline' data-tft-only><label>Auto Backlight (LDR)</label><input type='checkbox' name='photoAuto' ");
   html += (photoAutoEnabled ? "checked" : "");
   html += F("><small>Turn off TFT when it is dark</small></div>");
   if (tftBlPin < 0) {
-    html += F("<div class='row helptext'><label></label><small>No BL pin set; will use display sleep (backlight stays on).</small></div>");
+    html += F("<div class='row helptext' data-tft-only><label></label><small>No BL pin set; will use display sleep (backlight stays on).</small></div>");
   }
   int photoRaw = isValidPhotoPin(photoPin) ? analogRead(photoPin) : -1;
-  html += F("<div class='row'><label>Photo Raw</label><div class='chip'>");
+  html += F("<div class='row' data-tft-only><label>Photo Raw</label><div class='chip'>");
   if (photoRaw < 0) html += F("--");
   else html += String(photoRaw);
   html += F("</div><small>0-4095 ADC</small></div>");
   #if defined(CONFIG_IDF_TARGET_ESP32)
-    html += F("<div class='row'><label>Photo GPIO</label><input class='in-xs' type='number' min='32' max='39' name='photoPin' value='");
+    html += F("<div class='row' data-tft-only><label>Photo GPIO</label><input class='in-xs' type='number' min='32' max='39' name='photoPin' value='");
     html += String(photoPin);
     html += F("'><small>ADC1 pin (ESP32: GPIO32-39)</small></div>");
   #else
-    html += F("<div class='row'><label>Photo-Resistor GPIO</label><input class='in-xs' type='number' min='1' max='40' name='photoPin' value='");
+    html += F("<div class='row' data-tft-only><label>Photo-Resistor GPIO</label><input class='in-xs' type='number' min='1' max='40' name='photoPin' value='");
     html += String(photoPin);
     html += F("'><small>ESP32-S3 photo input range: GPIO1-40</small></div>");
   #endif
-  html += F("<div class='row'><label>Dark Threshold</label><input class='in-sm' type='number' min='0' max='4095' name='photoThreshold' value='");
+  html += F("<div class='row' data-tft-only><label>Dark Threshold</label><input class='in-sm' type='number' min='0' max='4095' name='photoThreshold' value='");
   html += String(photoThreshold);
   html += F("'><small>ADC raw value where screen turns off</small></div>");
-  html += F("<div class='row switchline'><label>Invert Sensor</label><input type='checkbox' name='photoInvert' ");
+  html += F("<div class='row switchline' data-tft-only><label>Invert Sensor</label><input type='checkbox' name='photoInvert' ");
   html += (photoInvert ? "checked" : "");
   html += F("><small>Enable if your LDR reads higher when dark</small></div>");
-  html += F("</div>");
+  html += F("</div></details></div>");
 
   // SPI (TFT) config
-  html += F("<div class='card narrow' id='advanced-card'><details class='collapse'><summary>SPI (TFT)</summary><div class='collapse-body'><p class='card-intro'>Advanced screen pin mapping and backlight tools. Change these only if your display wiring differs from the defaults.</p>");
+  html += F("<div class='card narrow' id='advanced-card' data-tft-only><details class='collapse'><summary>SPI (TFT)</summary><div class='collapse-body'><p class='card-intro'>Advanced screen pin mapping and backlight tools. Change these only if your display wiring differs from the defaults.</p>");
   html += F("<div class='row'><label>TFT Size</label><div class='chip'>");
   html += String(tftPanelWidth); html += "x"; html += String(tftPanelHeight);
   html += F("</div><small>Saved display geometry</small></div>");
@@ -7068,6 +7068,9 @@ void handleSetupPage() {
   html += F("  try{const r=await fetch('/tft_selftest'); const t=await r.text(); alert(t||'TFT self-test done');}catch(e){alert('TFT self-test failed');}");
   html += F("  loadTftStatus();");
   html += F("});");
+  html += F("const displayTypeSel=g('displayTypeSelect');");
+  html += F("function syncDisplaySetup(){const isTft=!displayTypeSel||displayTypeSel.value==='tft';document.querySelectorAll('[data-tft-only]').forEach(el=>{el.style.display=isTft?'':'none';});}");
+  html += F("displayTypeSel?.addEventListener('change',syncDisplaySetup);syncDisplaySetup();");
 
   html += F("async function loadTftStatus(){");
   html += F("  const el=g('tftStatusLine'); if(!el) return;");
