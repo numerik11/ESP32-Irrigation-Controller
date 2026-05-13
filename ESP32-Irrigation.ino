@@ -6675,8 +6675,8 @@ void handleSetupPage() {
   html += F("<div class='setup-badge'><div class='setup-badge-k'>Weather</div><div class='setup-badge-v'>"); html += setupWeatherLabel; html += F("</div></div>");
   html += F("<div class='setup-badge'><div class='setup-badge-k'>Forecast Model</div><div class='setup-badge-v'>"); html += meteoModel; html += F("</div></div>");
   html += F("</div></div>");
-  html += F("<form action='/configure' method='POST'>");
-  html += F("<div class='setup-actions-top'><button class='btn' type='submit'>Save Changes</button><button class='btn-alt' formaction='/' formmethod='GET'>Home</button><button class='btn-alt' type='button' id='btn-clear-cooldown'>Clear After-Rain Delay</button><button class='btn btn-danger' type='button' onclick=\"if(confirm('Reboot controller now?'))fetch('/reboot',{method:'POST'})\">Reboot</button></div>");
+  html += F("<form id='setupForm' action='/configure' method='POST'>");
+  html += F("<div class='setup-actions-top'><button class='btn' type='submit' id='btn-save-setup'>Save Changes</button><a class='btn-alt' href='/'>Home</a><button class='btn-alt' type='button' id='btn-clear-cooldown'>Clear After-Rain Delay</button><button class='btn btn-danger' type='button' onclick=\"if(confirm('Reboot controller now?'))fetch('/reboot',{method:'POST'})\">Reboot</button></div>");
 
   // Zones
   html += F("<div class='card narrow' id='zones-card'><details class='collapse'><summary>Zones</summary><div class='collapse-body'><p class='card-intro'>Set how many watering zones are available and whether they run one at a time or together.</p>");
@@ -7065,6 +7065,7 @@ void handleSetupPage() {
   html += F("r.style.left=x+'px'; r.style.top=y+'px'; const old=t.querySelector('.ripple'); if(old) old.remove(); t.appendChild(r);");
   html += F("setTimeout(()=>{r.remove();},520);}");
   html += F("document.querySelectorAll('.btn,.btn-alt').forEach(el=>{el.addEventListener('pointerdown',addRipple);});");
+  html += F("g('setupForm')?.addEventListener('submit',async(e)=>{e.preventDefault();const f=e.currentTarget;const b=g('btn-save-setup');const old=b?b.textContent:'';if(b){b.disabled=true;b.textContent='Saving...';}try{const body=new URLSearchParams(new FormData(f));const r=await fetch('/configure',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body});if(!r.ok)throw new Error('HTTP '+r.status);if(b)b.textContent='Saved';setTimeout(()=>{location.href='/setup';},250);}catch(err){console.error(err);if(b){b.disabled=false;b.textContent='Save Failed';setTimeout(()=>{b.textContent=old;},1600);}else{alert('Save failed');}}});");
   html += F("g('btn-toggle-backlight')?.addEventListener('click',()=>post('/toggleBacklight','x=1'));");
   html += F("g('btn-clear-cooldown')?.addEventListener('click',async()=>{const b=g('btn-clear-cooldown');const old=b?b.textContent:'';if(b){b.disabled=true;b.textContent='Clearing...';}try{await post('/clear_cooldown','x=1');if(b)b.textContent='After-Rain Delay Cleared';setTimeout(()=>location.reload(),350);}catch(e){console.error(e);if(b){b.disabled=false;b.textContent='Clear Failed';setTimeout(()=>{b.textContent=old;},1500);}}});");
   html += F("g('btn-pause-24')?.addEventListener('click',()=>post('/pause','sec=86400'));");
