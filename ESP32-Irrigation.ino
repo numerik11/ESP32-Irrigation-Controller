@@ -47,8 +47,26 @@ extern "C" {
 static const char kFirmwareSignature[] __attribute__((used)) =
   "Original author: Beau Kaczmarek - https://github.com/numerik11/ESP32-Irrigation-Controller";
 static const uint8_t MAX_ZONES = 16;
-static const int I2C_SDA_DEFAULT = -1;
-static const int I2C_SCL_DEFAULT = -1;
+#ifndef I2C_SDA_DEFAULT_PIN
+  #if defined(CONFIG_IDF_TARGET_ESP32S3)
+    #define I2C_SDA_DEFAULT_PIN 8
+  #elif defined(CONFIG_IDF_TARGET_ESP32)
+    #define I2C_SDA_DEFAULT_PIN 21
+  #else
+    #define I2C_SDA_DEFAULT_PIN -1
+  #endif
+#endif
+#ifndef I2C_SCL_DEFAULT_PIN
+  #if defined(CONFIG_IDF_TARGET_ESP32S3)
+    #define I2C_SCL_DEFAULT_PIN 9
+  #elif defined(CONFIG_IDF_TARGET_ESP32)
+    #define I2C_SCL_DEFAULT_PIN 22
+  #else
+    #define I2C_SCL_DEFAULT_PIN -1
+  #endif
+#endif
+static const int I2C_SDA_DEFAULT = I2C_SDA_DEFAULT_PIN;
+static const int I2C_SCL_DEFAULT = I2C_SCL_DEFAULT_PIN;
 static int i2cSdaPin = I2C_SDA_DEFAULT;
 static int i2cSclPin = I2C_SCL_DEFAULT;
 #ifndef STATUS_PIXEL_PIN
@@ -1361,6 +1379,12 @@ static void sanitizePinConfig() {
   if (!isValidTftDimension(tftPanelHeight)) tftPanelHeight = TFT_H_DEFAULT;
 
   // I2C pins
+  if (i2cSdaPin == -1 && i2cSclPin == -1 &&
+      I2C_SDA_DEFAULT >= 0 && I2C_SCL_DEFAULT >= 0) {
+    i2cSdaPin = I2C_SDA_DEFAULT;
+    i2cSclPin = I2C_SCL_DEFAULT;
+    Serial.printf("[I2C] Using board defaults SDA=%d SCL=%d\n", i2cSdaPin, i2cSclPin);
+  }
   if (i2cSdaPin != -1 && !isValidGpioPin(i2cSdaPin)) i2cSdaPin = -1;
   if (i2cSclPin != -1 && !isValidGpioPin(i2cSclPin)) i2cSclPin = -1;
 }
