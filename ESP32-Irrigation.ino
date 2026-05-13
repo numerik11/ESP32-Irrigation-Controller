@@ -41,32 +41,25 @@ extern "C" {
 #include <time.h>
 #include <ESPmDNS.h> 
 #include <PubSubClient.h>   // MQTT
+#include <new>
 
 // ---------- Hardware ----------
 static const char kFirmwareSignature[] __attribute__((used)) =
   "Original author: Beau Kaczmarek - https://github.com/numerik11/ESP32-Irrigation-Controller";
 static const uint8_t MAX_ZONES = 16;
-#if defined(CONFIG_IDF_TARGET_ESP32)
-static const int I2C_SDA_DEFAULT = 21;
-static const int I2C_SCL_DEFAULT = 22;
-#else
-static const int I2C_SDA_DEFAULT = 8;
-static const int I2C_SCL_DEFAULT = 9;
-#endif
+static const int I2C_SDA_DEFAULT = -1;
+static const int I2C_SCL_DEFAULT = -1;
 static int i2cSdaPin = I2C_SDA_DEFAULT;
 static int i2cSclPin = I2C_SCL_DEFAULT;
 #ifndef STATUS_PIXEL_PIN
-  #if defined(CONFIG_IDF_TARGET_ESP32S3)
-    #define STATUS_PIXEL_PIN 48   // ESP32-S3 DevKitC-1 onboard WS2812
-  #else
-    #define STATUS_PIXEL_PIN -1   // disable by default on non-S3 targets
-  #endif
+  #define STATUS_PIXEL_PIN -1
 #endif
 static const uint8_t STATUS_PIXEL_COUNT = 1;
 
 TwoWire I2Cbus = TwoWire(0);
 PCF8574 pcfIn (&I2Cbus, 0x22, I2C_SDA_DEFAULT, I2C_SCL_DEFAULT);
 PCF8574 pcfOut(&I2Cbus, 0x24, I2C_SDA_DEFAULT, I2C_SCL_DEFAULT);
+static bool i2cBusReady = false;
 Adafruit_NeoPixel statusPixel(STATUS_PIXEL_COUNT, STATUS_PIXEL_PIN, NEO_GRB + NEO_KHZ800);
 bool statusPixelReady = false;
 uint32_t statusPixelLastColor = 0;
@@ -80,19 +73,11 @@ static constexpr int16_t TFT_H_DEFAULT = 320;
 
 // Choose pins that do NOT clash with your I2C (4/15) or other IO.
 // Defaults (editable from Setup -> SPI (TFT)):
-#if defined(CONFIG_IDF_TARGET_ESP32)
-static const int TFT_SCLK_DEFAULT = 18;
-static const int TFT_MOSI_DEFAULT = 23;
-static const int TFT_CS_DEFAULT   = 5;
-static const int TFT_DC_DEFAULT   = 2;
-static const int TFT_RST_DEFAULT  = 4;
-#else
-static const int TFT_SCLK_DEFAULT = 41;  // SCL
-static const int TFT_MOSI_DEFAULT = 42;  // SDA
-static const int TFT_CS_DEFAULT   = 1;   // CS (avoid GPIO1 tank ADC)
-static const int TFT_DC_DEFAULT   = 2;   // DC (avoid GPIO2 LED)
-static const int TFT_RST_DEFAULT  = 21;  // RST (-1 allowed)
-#endif
+static const int TFT_SCLK_DEFAULT = -1;
+static const int TFT_MOSI_DEFAULT = -1;
+static const int TFT_CS_DEFAULT   = -1;
+static const int TFT_DC_DEFAULT   = -1;
+static const int TFT_RST_DEFAULT  = -1;
 static const int TFT_BL_DEFAULT   = -1;  // or -1 if tied to 3V3
 
 static int tftSclkPin = TFT_SCLK_DEFAULT;
@@ -114,6 +99,7 @@ Adafruit_ST7789 tft(&SPI, -1, -1, -1);
 #define OLED_RESET -1
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &I2Cbus, OLED_RESET);
 bool displayUseTft = (ENABLE_TFT != 0); // default mode; can be changed in Setup
+static bool displayHardwareReady = false;
 bool clockUse24Hour = true;
 
 // ===================== UI helpers + palette (MUST be before RainScreen/HomeScreen) =====================
@@ -205,30 +191,20 @@ bool mainsGpioActiveLow = false;
 bool tankGpioActiveLow  = false;
 bool tankEnabled     = true;
 
-#if defined(CONFIG_IDF_TARGET_ESP32)
 int zonePins[MAX_ZONES] = {
-  15, 16, 17, 18, 4, 5,
-  25, 26, -1, -1, -1, -1, -1, -1, -1, -1
+  -1, -1, -1, -1, -1, -1, -1, -1,
+  -1, -1, -1, -1, -1, -1, -1, -1
 };
-int mainsPin = 32;
-int tankPin  = 33;
-int tankLevelPin = 34; // ADC1 input on classic ESP32 (works while Wi-Fi is active)
-#else
-int zonePins[MAX_ZONES] = {
-  15, 16, 17, 18, 6, 7,
-  10, 11, -1, -1, -1, -1, -1, -1, -1, -1
-};
-int mainsPin = 39;
-int tankPin  = 40;
-int tankLevelPin = 19; // ADC input (ESP32-S3: GPIO1..20 are ADC)
-#endif
+int mainsPin = -1;
+int tankPin  = -1;
+int tankLevelPin = -1;
 
 const int LED_PIN  = -1;
 
 // Physical rain sensor
 bool rainSensorEnabled = false;
 bool rainSensorInvert  = false;
-int  rainSensorPin     = 16;
+int  rainSensorPin     = -1;
 
 // Physical manual control buttons (disabled by default)
 int manualSelectPin = -1;   // cycles the target zone (INPUT_PULLUP, -1 = disabled)
@@ -466,6 +442,11 @@ void drawManualSelection();
 bool isValidAdcPin(int pin);
 bool isValidGpioPin(int pin);
 bool isValidPhotoPin(int pin);
+bool isValidTftSignalPin(int pin);
+bool isValidOptionalTftPin(int pin);
+bool isValidTftDimension(int v);
+static bool initConfiguredI2CBus();
+static bool hasConfiguredTftPins();
 void updateStatusPixel();
 static inline unsigned long durationForSlot(int z, int slot);
 time_t parseEventTimestamp(const String& ts);
@@ -817,6 +798,7 @@ static inline void cancelStart(int z, const char* reason, bool dueToRain) {
 }
 
 static bool i2cPing(uint8_t addr) {
+  if (!i2cBusReady) return false;
   I2Cbus.beginTransmission(addr);
   return (I2Cbus.endTransmission() == 0);
 }
@@ -1288,6 +1270,28 @@ inline bool isValidTftDimension(int v) {
   return (v >= 120 && v <= 400);
 }
 
+static bool hasConfiguredTftPins() {
+  return isValidTftSignalPin(tftSclkPin) &&
+         isValidTftSignalPin(tftMosiPin) &&
+         isValidTftSignalPin(tftCsPin) &&
+         isValidTftSignalPin(tftDcPin);
+}
+
+static bool initConfiguredI2CBus() {
+  i2cBusReady = false;
+  if (!isValidGpioPin(i2cSdaPin) || !isValidGpioPin(i2cSclPin)) {
+    Serial.println("[I2C] SDA/SCL not configured; I2C disabled.");
+    return false;
+  }
+
+  I2Cbus.begin(i2cSdaPin, i2cSclPin, 100000);
+  I2Cbus.setTimeOut(20);
+  new (&pcfIn) PCF8574(&I2Cbus, 0x22, i2cSdaPin, i2cSclPin);
+  new (&pcfOut) PCF8574(&I2Cbus, 0x24, i2cSdaPin, i2cSclPin);
+  i2cBusReady = true;
+  return true;
+}
+
 static bool tryParseStrictInt(const String& raw, int &out) {
   String s = raw;
   s.trim();
@@ -1340,11 +1344,7 @@ static void sanitizePinConfig() {
   clampGpio(manualStartPin);
 
   // ADC-only pins
-  #if defined(CONFIG_IDF_TARGET_ESP32)
-  if (!isValidAdcPin(tankLevelPin)) tankLevelPin = 34; // safe default on classic ESP32
-  #else
-  if (!isValidAdcPin(tankLevelPin)) tankLevelPin = 1;  // safe default on ESP32-S3
-  #endif
+  if (tankLevelPin != -1 && !isValidAdcPin(tankLevelPin)) tankLevelPin = -1;
   if (!isValidPhotoPin(photoPin)) photoPin = -1;
 
   // TFT pins: fall back to safe defaults if invalid/unsafe
@@ -1361,8 +1361,8 @@ static void sanitizePinConfig() {
   if (!isValidTftDimension(tftPanelHeight)) tftPanelHeight = TFT_H_DEFAULT;
 
   // I2C pins
-  if (!isValidGpioPin(i2cSdaPin)) i2cSdaPin = I2C_SDA_DEFAULT;
-  if (!isValidGpioPin(i2cSclPin)) i2cSclPin = I2C_SCL_DEFAULT;
+  if (i2cSdaPin != -1 && !isValidGpioPin(i2cSdaPin)) i2cSdaPin = -1;
+  if (i2cSclPin != -1 && !isValidGpioPin(i2cSclPin)) i2cSclPin = -1;
 }
 
 static void validatePinMap() {
@@ -1483,6 +1483,10 @@ static NextWaterInfo computeNextWatering();
 
 // ---------- I2C init ----------
 bool initExpanders() {
+  if (!i2cBusReady) {
+    Serial.println("[I2C] PCF8574 skipped; bus pins not configured.");
+    return false;
+  }
   bool haveIn  = i2cPing(0x22);
   bool haveOut = i2cPing(0x24);
   Serial.printf("[I2C] ping 0x22=%d 0x24=%d\n", haveIn, haveOut);
@@ -1555,7 +1559,7 @@ static void tftInitBacklightPwm() {
 }
 
 static inline void tftDisplay(bool on){
-  if (!displayUseTft) return;
+  if (!displayUseTft || !displayHardwareReady) return;
   if (g_tftDisplayOn == on) return;
   if (on) {
     // Sleep OUT then Display ON (common ST7789/ILI9341 sequence).
@@ -1574,7 +1578,7 @@ static inline void tftDisplay(bool on){
 }
 
 static inline void tftBacklight(bool on){
-  if (!displayUseTft) return;
+  if (!displayUseTft || !displayHardwareReady) return;
   if (tftBlPin >= 0) {
     if (!isValidGpioPin(tftBlPin)) {
       static bool warned = false;
@@ -1599,7 +1603,7 @@ static inline void tftBacklight(bool on){
 }
 
 static void tftSetBrightness(uint8_t pct){ // pct: 0-100
-  if (!displayUseTft) return;
+  if (!displayUseTft || !displayHardwareReady) return;
   if (pct > 100) pct = 100;
   uint8_t duty = map(pct, 0, 100, 0, 255);
   g_tftBrightness = duty;
@@ -1614,7 +1618,7 @@ static void tftSetBrightness(uint8_t pct){ // pct: 0-100
 }
 
 static void tickAutoBacklight(){
-  if (!displayUseTft) return;
+  if (!displayUseTft || !displayHardwareReady) return;
   if (!photoAutoEnabled) return;
   if (!isValidPhotoPin(photoPin)) return;
 
@@ -1741,12 +1745,14 @@ void handleDiagnosticsJson() {
   io["gpioFallback"] = useGpioFallback;
   io["i2cFailCount"] = i2cFailCount;
   JsonArray devices = io["i2cDevices"].to<JsonArray>();
-  for (uint8_t addr = 1; addr < 127; ++addr) {
-    I2Cbus.beginTransmission(addr);
-    if (I2Cbus.endTransmission() == 0) {
-      char buf[6];
-      snprintf(buf, sizeof(buf), "0x%02X", addr);
-      devices.add(buf);
+  if (i2cBusReady) {
+    for (uint8_t addr = 1; addr < 127; ++addr) {
+      I2Cbus.beginTransmission(addr);
+      if (I2Cbus.endTransmission() == 0) {
+        char buf[6];
+        snprintf(buf, sizeof(buf), "0x%02X", addr);
+        devices.add(buf);
+      }
     }
   }
 
@@ -1806,12 +1812,14 @@ void handleDiagnosticsPage() {
   }();
 
   String i2cList;
-  for (uint8_t addr = 1; addr < 127; ++addr) {
-    I2Cbus.beginTransmission(addr);
-    if (I2Cbus.endTransmission() == 0) {
-      char buf[8];
-      snprintf(buf, sizeof(buf), "%s0x%02X", i2cList.length() ? " " : "", addr);
-      i2cList += buf;
+  if (i2cBusReady) {
+    for (uint8_t addr = 1; addr < 127; ++addr) {
+      I2Cbus.beginTransmission(addr);
+      if (I2Cbus.endTransmission() == 0) {
+        char buf[8];
+        snprintf(buf, sizeof(buf), "%s0x%02X", i2cList.length() ? " " : "", addr);
+        i2cList += buf;
+      }
     }
   }
   if (!i2cList.length()) i2cList = "none";
@@ -1898,10 +1906,6 @@ void setup() {
   // Route larger heap allocations to PSRAM before long-lived page/cache buffers reserve.
   configurePsramForLargeBuffers();
 
-  // I2C bus
-  I2Cbus.begin(i2cSdaPin, i2cSclPin, 100000);
-  I2Cbus.setTimeOut(20);
-
   bootMillis = millis();
 
   // Pre-size hot Strings to reduce heap churn over long runtimes.
@@ -1925,6 +1929,7 @@ void setup() {
   loadConfig();
   sanitizePinConfig();
   validatePinMap();
+  initConfiguredI2CBus();
   if (!LittleFS.exists("/schedule.txt")) saveSchedule();
   loadSchedule();
   initManualButtons();
@@ -1966,44 +1971,54 @@ void setup() {
 
   // ---------- Display init ----------
   if (displayUseTft) {
-    new (&tft) Adafruit_ST7789(&SPI, tftCsPin, tftDcPin, tftRstPin);
-    SPI.begin(tftSclkPin, -1, tftMosiPin, tftCsPin);
+    if (hasConfiguredTftPins()) {
+      new (&tft) Adafruit_ST7789(&SPI, tftCsPin, tftDcPin, tftRstPin);
+      SPI.begin(tftSclkPin, -1, tftMosiPin, tftCsPin);
 
-    tftInitBacklightPwm();
+      tftInitBacklightPwm();
 
-    tft.init(tftPanelWidth, tftPanelHeight);
-    tft.setRotation(tftRotation);
-    tft.fillScreen(ST77XX_BLACK);
-    tft.setTextWrap(true);
-    tft.setTextColor(ST77XX_WHITE);
-    tftBacklight(true);
+      tft.init(tftPanelWidth, tftPanelHeight);
+      tft.setRotation(tftRotation);
+      tft.fillScreen(ST77XX_BLACK);
+      tft.setTextWrap(true);
+      tft.setTextColor(ST77XX_WHITE);
+      displayHardwareReady = true;
+      tftBacklight(true);
 
-    // Boot splash
-    tft.setCursor(10, 20);
-    tft.setTextSize(3);
-    tft.print("Irrigation");
+      // Boot splash
+      tft.setCursor(10, 20);
+      tft.setTextSize(3);
+      tft.print("Irrigation");
 
-    tft.setTextSize(2);
-    tft.setCursor(10, 70);
-    tft.print("AP:");
-    tft.setCursor(10, 95);
-    tft.setTextSize(2);
-    tft.print("ESPIrrigationAP");
+      tft.setTextSize(2);
+      tft.setCursor(10, 70);
+      tft.print("AP:");
+      tft.setCursor(10, 95);
+      tft.setTextSize(2);
+      tft.print("ESPIrrigationAP");
 
-    tft.setTextSize(2);
-    tft.setCursor(10, 140);
-    tft.print("http://192.168.4.1");
-  } else {
-    if (!display.begin(SSD1306_SWITCHCAPVCC, SCREEN_ADDRESS)) {
+      tft.setTextSize(2);
+      tft.setCursor(10, 140);
+      tft.print("http://192.168.4.1");
+    } else {
+      Serial.println("[TFT] Required SPI pins not configured; display disabled.");
+      displayHardwareReady = false;
+    }
+  } else if (i2cBusReady) {
+    if (!display.begin(SSD1306_SWITCHCAPVCC, SCREEN_ADDRESS, true, false)) {
       Serial.println("SSD1306 init failed");
       while (true) delay(100);
     }
+    displayHardwareReady = true;
     display.clearDisplay();
     display.setTextColor(SSD1306_WHITE);
     display.setTextSize(2); display.setCursor(0, 8);  display.print("Irrigation");
     display.setTextSize(1); display.setCursor(0, 36); display.print("AP: ESPIrrigationAP");
     display.setCursor(0, 50); display.print("http://192.168.4.1");
     display.display();
+  } else {
+    Serial.println("[OLED] I2C pins not configured; display disabled.");
+    displayHardwareReady = false;
   }
 
   // Hostname + WiFi events
@@ -2037,7 +2052,7 @@ void setup() {
     }
   }
 
-  if (displayUseTft) {
+  if (displayHardwareReady && displayUseTft) {
     tft.fillScreen(ST77XX_BLACK);
 
     // Connected screen (cleaner layout)
@@ -2068,7 +2083,7 @@ void setup() {
     tft.print(" dBm");
 
     delay(4000);
-  } else {
+  } else if (displayHardwareReady) {
     display.clearDisplay();
     display.setTextSize(2); display.setCursor(0, 0);  display.print("Connected!");
     display.setTextSize(1); display.setCursor(0, 20); display.print(WiFi.localIP().toString());
@@ -2376,6 +2391,10 @@ void setup() {
       server.send(400, "text/plain", "Display mode is OLED");
       return;
     }
+    if (!displayHardwareReady) {
+      server.send(400, "text/plain", "TFT pins are not configured");
+      return;
+    }
     String msg;
     bool pinsOk = true;
     auto chk = [&](const char* name, int pin, bool allowNeg){
@@ -2584,9 +2603,9 @@ void loop() {
   } else if (lastWasDelayScreen) {
     // Only clear once delay has actually ended
     lastWasDelayScreen = false;
-    if (displayUseTft) {
+    if (displayHardwareReady && displayUseTft) {
       tft.fillScreen(C_BG);
-    } else {
+    } else if (displayHardwareReady) {
       display.clearDisplay();
       display.display();
     }
@@ -2710,6 +2729,7 @@ void wifiCheck() {
 }
 
 void checkI2CHealth() {
+  if (!i2cBusReady) return;
   delay(20);
   bool anyErr=false;
   for (uint8_t addr : expanderAddrs) {
@@ -2794,6 +2814,7 @@ void showManualSelection() {
 }
 
 void drawManualSelection() {
+  if (!displayHardwareReady) return;
   const int selectedZone = manualSelectedZone % zonesCount;
   const bool selectedActive = zoneActive[selectedZone];
   const char* selectedZoneName = zoneNames[selectedZone].c_str();
@@ -3539,6 +3560,7 @@ void toggleBacklight(){
 }
 
 void updateLCDForZone(int zone) {
+  if (!displayHardwareReady) return;
   static unsigned long lastUpdate = 0; unsigned long now = millis();
   const unsigned long minUiInterval = displayUseTft ? 180UL : 1000UL;
   if (!g_forceRunReset && (now - lastUpdate < minUiInterval)) return;
@@ -3826,6 +3848,7 @@ void updateLCDForZone(int zone) {
 }
 
 void RainScreen(){
+  if (!displayHardwareReady) return;
   if (!displayUseTft) {
     display.clearDisplay();
     display.setTextSize(2); display.setCursor(0,0); display.print(isPausedNow()? "System Pause" : "Rain/Wind");
@@ -4082,6 +4105,7 @@ void RainScreen(){
 }
 
 void HomeScreen() {
+  if (!displayHardwareReady) return;
   if (!displayUseTft) {
     const int OW = display.width();
     const int pctOled = constrain(tankPercent(), 0, 100);
@@ -6728,11 +6752,11 @@ void handleSetupPage() {
   html += F("'><small>Switch to city water if tank drops below this level</small></div>");
 
   #if defined(CONFIG_IDF_TARGET_ESP32)
-    html += F("<div class='row'><label>Tank Level Sensor GPIO</label><input class='in-xs' type='number' min='32' max='39' name='tankLevelPin' value='");
-    html += String(tankLevelPin); html += F("'><small>ADC1 pin (ESP32: GPIO32-39)</small></div>");
+    html += F("<div class='row'><label>Tank Level Sensor GPIO</label><input class='in-xs' type='number' min='-1' max='39' name='tankLevelPin' value='");
+    html += String(tankLevelPin); html += F("'><small>-1 = disabled, ADC1 pin (ESP32: GPIO32-39)</small></div>");
   #else
-    html += F("<div class='row'><label>Tank Level Sensor GPIO</label><input class='in-xs' type='number' min='1' max='20' name='tankLevelPin' value='");
-    html += String(tankLevelPin); html += F("'><small>ADC pin (ESP32-S3: GPIO1-20)</small></div>");
+    html += F("<div class='row'><label>Tank Level Sensor GPIO</label><input class='in-xs' type='number' min='-1' max='20' name='tankLevelPin' value='");
+    html += String(tankLevelPin); html += F("'><small>-1 = disabled, ADC pin (ESP32-S3: GPIO1-20)</small></div>");
   #endif
   html += F("<div class='row'><label></label><a class='btn-alt' href='/tank'>Calibrate Tank</a></div>");
   html += F("</div>"); // end tankCard
@@ -6786,7 +6810,7 @@ void handleSetupPage() {
   html += F("<div class='row switchline'><label>Disable Open-Meteo Rain</label><input type='checkbox' name='rainForecastDisabled' ");
   html += (!rainDelayFromForecastEnabled ? "checked" : ""); html += F("><small>Checked = ignore Open-Meteo rain</small></div>");
   html += F("<div class='row switchline'><label>Enable Rain Sensor</label><input type='checkbox' name='rainSensorEnabled' "); html += (rainSensorEnabled?"checked":""); html += F("></div>");
-  html += F("<div class='row'><label>Rain Sensor GPIO</label><input class='in-xs' type='number' min='0' max='39' name='rainSensorPin' value='"); html += String(rainSensorPin); html += F("'><small>e.g. 27</small></div>");
+  html += F("<div class='row'><label>Rain Sensor GPIO</label><input class='in-xs' type='number' min='-1' max='39' name='rainSensorPin' value='"); html += String(rainSensorPin); html += F("'><small>-1 = disabled</small></div>");
   html += F("<div class='row switchline'><label>Invert Sensor</label><input type='checkbox' name='rainSensorInvert' "); html += (rainSensorInvert?"checked":""); html += F("><small>Use if board is NO</small></div>");
   html += F("</div></details></div>");
 
@@ -6951,19 +6975,19 @@ void handleSetupPage() {
   html += F("</datalist>");
   html += F("<div class='row'><label>SCK</label><input class='in-xs' type='number' min='1' max='");
   html += String(uiMaxGpio);
-  html += F("' list='tftPins' name='tftSclk' value='");
+  html += F("' list='tftPinsOrNone' name='tftSclk' value='");
   html += String(tftSclkPin); html += F("'></div>");
   html += F("<div class='row'><label>MOSI</label><input class='in-xs' type='number' min='1' max='");
   html += String(uiMaxGpio);
-  html += F("' list='tftPins' name='tftMosi' value='");
+  html += F("' list='tftPinsOrNone' name='tftMosi' value='");
   html += String(tftMosiPin); html += F("'></div>");
   html += F("<div class='row'><label>CS</label><input class='in-xs' type='number' min='1' max='");
   html += String(uiMaxGpio);
-  html += F("' list='tftPins' name='tftCs' value='");
+  html += F("' list='tftPinsOrNone' name='tftCs' value='");
   html += String(tftCsPin); html += F("'></div>");
   html += F("<div class='row'><label>DC</label><input class='in-xs' type='number' min='1' max='");
   html += String(uiMaxGpio);
-  html += F("' list='tftPins' name='tftDc' value='");
+  html += F("' list='tftPinsOrNone' name='tftDc' value='");
   html += String(tftDcPin); html += F("'></div>");
   html += F("<div class='row'><label>RST</label><input class='in-xs' type='number' min='-1' max='");
   html += String(uiMaxGpio);
@@ -6991,9 +7015,9 @@ void handleSetupPage() {
 
   // I2C config
   html += F("<div class='card narrow'><details class='collapse'><summary>I2C (PCF8574)</summary><div class='collapse-body'><p class='card-intro'>Expander bus pins for the relay hardware. These normally only need changing during custom wiring.</p>");
-  html += F("<div class='row'><label>SDA</label><input class='in-xs' type='number' min='0' max='48' name='i2cSda' value='");
+  html += F("<div class='row'><label>SDA</label><input class='in-xs' type='number' min='-1' max='48' name='i2cSda' value='");
   html += String(i2cSdaPin); html += F("'></div>");
-  html += F("<div class='row'><label>SCL</label><input class='in-xs' type='number' min='0' max='48' name='i2cScl' value='");
+  html += F("<div class='row'><label>SCL</label><input class='in-xs' type='number' min='-1' max='48' name='i2cScl' value='");
   html += String(i2cSclPin); html += F("'></div>");
   html += F("<div class='row helptext'><label></label><small>Changing I2C pins requires reboot. Avoid strapping pins and SPI flash/PSRAM pins. 4/15 for KC868 </small></div>");
   html += F("</div></details></div>");
@@ -7009,11 +7033,11 @@ void handleSetupPage() {
     html += F("><span>LOW = ON</span></label></div>");
   }
   html += F("<div class='row'><label></label><small>Use -1 to leave a zone unassigned. Zones above the PCF channels use GPIO pins when set.</small></div>");
-  html += F("<div class='row switchline'><label>City Water Relay Pin</label><input class='in-xs' type='number' min='0' max='39' name='mainsPin' value='");
+  html += F("<div class='row switchline'><label>City Water Relay Pin</label><input class='in-xs' type='number' min='-1' max='39' name='mainsPin' value='");
   html += String(mainsPin); html += F("'><label class='chip'><input type='checkbox' name='mainsPinLow' ");
   html += (mainsGpioActiveLow ? "checked" : "");
   html += F("><span>LOW = ON</span></label><small>Relay for city water in (use check/backflow prevention device)</small></div>");
-  html += F("<div class='row switchline'><label>Tank Relay Pin</label><input class='in-xs' type='number' min='0' max='39' name='tankPin' value='");
+  html += F("<div class='row switchline'><label>Tank Relay Pin</label><input class='in-xs' type='number' min='-1' max='39' name='tankPin' value='");
   html += String(tankPin); html += F("'><label class='chip'><input type='checkbox' name='tankPinLow' ");
   html += (tankGpioActiveLow ? "checked" : "");
   html += F("><span>LOW = ON</span></label><small>Pump on low pressure (Relay on) and off at a higher pressure (Relay off).</small></div>");
@@ -7589,7 +7613,7 @@ void loadConfig() {
   if ((s = _safeReadLine(f)).length()) rainSensorEnabled = (s.toInt() == 1);
   if ((s = _safeReadLine(f)).length()) {
     int p = s.toInt();
-    if (p >= 0 && p <= 39) rainSensorPin = p;
+    if (p >= -1 && p <= 39) rainSensorPin = p;
   }
   if ((s = _safeReadLine(f)).length()) rainSensorInvert  = (s.toInt() == 1);
   if ((s = _safeReadLine(f)).length()) {
@@ -7607,11 +7631,11 @@ void loadConfig() {
   }
   if ((s = _safeReadLine(f)).length()) {
     int p = s.toInt();
-    if (isValidOutputPin(p)) mainsPin = p;
+    if (p == -1 || isValidOutputPin(p)) mainsPin = p;
   }
   if ((s = _safeReadLine(f)).length()) {
     int p = s.toInt();
-    if (isValidOutputPin(p)) tankPin  = p;
+    if (p == -1 || isValidOutputPin(p)) tankPin  = p;
   }
   if (f.available()) {
     if ((s = _safeReadLine(f)).length()) {
@@ -7700,7 +7724,7 @@ void loadConfig() {
   // NEW: tank level sensor pin (ADC)
   if (nextTail(s) && s.length()) {
     int p = s.toInt();
-    if (isValidAdcPin(p)) tankLevelPin = p;
+    if (p == -1 || isValidAdcPin(p)) tankLevelPin = p;
   }
 
   // NEW: photoresistor auto-backlight (optional trailing lines)
@@ -7713,10 +7737,10 @@ void loadConfig() {
   if (nextTail(s) && s.length()) photoInvert = (s.toInt() == 1);
 
   // NEW: TFT SPI pins (optional trailing lines)
-  if (nextTail(s) && s.length()) { int p=s.toInt(); if (isValidTftSignalPin(p))   tftSclkPin = p; }
-  if (nextTail(s) && s.length()) { int p=s.toInt(); if (isValidTftSignalPin(p))   tftMosiPin = p; }
-  if (nextTail(s) && s.length()) { int p=s.toInt(); if (isValidTftSignalPin(p))   tftCsPin   = p; }
-  if (nextTail(s) && s.length()) { int p=s.toInt(); if (isValidTftSignalPin(p))   tftDcPin   = p; }
+  if (nextTail(s) && s.length()) { int p=s.toInt(); if (p == -1 || isValidTftSignalPin(p)) tftSclkPin = p; }
+  if (nextTail(s) && s.length()) { int p=s.toInt(); if (p == -1 || isValidTftSignalPin(p)) tftMosiPin = p; }
+  if (nextTail(s) && s.length()) { int p=s.toInt(); if (p == -1 || isValidTftSignalPin(p)) tftCsPin   = p; }
+  if (nextTail(s) && s.length()) { int p=s.toInt(); if (p == -1 || isValidTftSignalPin(p)) tftDcPin   = p; }
   if (nextTail(s) && s.length()) { int p=s.toInt(); if (isValidOptionalTftPin(p)) tftRstPin  = p; }
   if (nextTail(s) && s.length()) { int p=s.toInt(); if (isValidOptionalTftPin(p)) tftBlPin   = p; }
 
@@ -7725,8 +7749,8 @@ void loadConfig() {
   // NEW: Open-Meteo model (optional trailing line)
   if (nextTail(s) && s.length()) meteoModel = cleanMeteoModel(s);
   // NEW: I2C pins (optional trailing lines)
-  if (nextTail(s) && s.length()) { int p=s.toInt(); if (isValidGpioPin(p)) i2cSdaPin = p; }
-  if (nextTail(s) && s.length()) { int p=s.toInt(); if (isValidGpioPin(p)) i2cSclPin = p; }
+  if (nextTail(s) && s.length()) { int p=s.toInt(); if (p == -1 || isValidGpioPin(p)) i2cSdaPin = p; }
+  if (nextTail(s) && s.length()) { int p=s.toInt(); if (p == -1 || isValidGpioPin(p)) i2cSclPin = p; }
   // NEW: display mode (optional trailing line)
   if (nextTail(s) && s.length()) displayUseTft = (s.toInt() == 1);
   // NEW: TFT rotation (optional trailing line)
@@ -8008,7 +8032,7 @@ void handleConfigure() {
   rainSensorEnabled = server.hasArg("rainSensorEnabled");
   if (server.hasArg("rainSensorPin")) {
     int pin = server.arg("rainSensorPin").toInt();
-    if (pin >= 0 && pin <= 39) rainSensorPin = pin;
+    if (pin >= -1 && pin <= 39) rainSensorPin = pin;
   }
   rainSensorInvert = server.hasArg("rainSensorInvert");
 
@@ -8094,17 +8118,17 @@ void handleConfigure() {
   }
   if (server.hasArg("mainsPin")) {
     int p = server.arg("mainsPin").toInt();
-    if (isValidOutputPin(p)) mainsPin = p;
+    if (p == -1 || isValidOutputPin(p)) mainsPin = p;
   }
   mainsGpioActiveLow = server.hasArg("mainsPinLow");
   if (server.hasArg("tankPin")) {
     int p = server.arg("tankPin").toInt();
-    if (isValidOutputPin(p)) tankPin = p;
+    if (p == -1 || isValidOutputPin(p)) tankPin = p;
   }
   tankGpioActiveLow = server.hasArg("tankPinLow");
   if (server.hasArg("tankLevelPin")) {
     int p = server.arg("tankLevelPin").toInt();
-    if (isValidAdcPin(p)) tankLevelPin = p;
+    if (p == -1 || isValidAdcPin(p)) tankLevelPin = p;
   }
   // Photoresistor auto-backlight
   photoAutoEnabled = server.hasArg("photoAuto");
@@ -8152,28 +8176,28 @@ void handleConfigure() {
   if (server.hasArg("tftSclk")) {
     int p = 0;
     if (parseRequiredIntArg(server.arg("tftSclk"), p, displayCfgErr, F("TFT SCK"))) {
-      if (isValidTftSignalPin(p)) tftSclkPin = p;
+      if (p == -1 || isValidTftSignalPin(p)) tftSclkPin = p;
       else displayCfgErr += "TFT SCK invalid/unsafe: GPIO" + String(p) + "\n";
     }
   }
   if (server.hasArg("tftMosi")) {
     int p = 0;
     if (parseRequiredIntArg(server.arg("tftMosi"), p, displayCfgErr, F("TFT MOSI"))) {
-      if (isValidTftSignalPin(p)) tftMosiPin = p;
+      if (p == -1 || isValidTftSignalPin(p)) tftMosiPin = p;
       else displayCfgErr += "TFT MOSI invalid/unsafe: GPIO" + String(p) + "\n";
     }
   }
   if (server.hasArg("tftCs")) {
     int p = 0;
     if (parseRequiredIntArg(server.arg("tftCs"), p, displayCfgErr, F("TFT CS"))) {
-      if (isValidTftSignalPin(p)) tftCsPin = p;
+      if (p == -1 || isValidTftSignalPin(p)) tftCsPin = p;
       else displayCfgErr += "TFT CS invalid/unsafe: GPIO" + String(p) + "\n";
     }
   }
   if (server.hasArg("tftDc")) {
     int p = 0;
     if (parseRequiredIntArg(server.arg("tftDc"), p, displayCfgErr, F("TFT DC"))) {
-      if (isValidTftSignalPin(p)) tftDcPin = p;
+      if (p == -1 || isValidTftSignalPin(p)) tftDcPin = p;
       else displayCfgErr += "TFT DC invalid/unsafe: GPIO" + String(p) + "\n";
     }
   }
@@ -8251,11 +8275,11 @@ void handleConfigure() {
 
   if (server.hasArg("i2cSda")) {
     int p = server.arg("i2cSda").toInt();
-    if (isValidGpioPin(p)) i2cSdaPin = p;
+    if (p == -1 || isValidGpioPin(p)) i2cSdaPin = p;
   }
   if (server.hasArg("i2cScl")) {
     int p = server.arg("i2cScl").toInt();
-    if (isValidGpioPin(p)) i2cSclPin = p;
+    if (p == -1 || isValidGpioPin(p)) i2cSclPin = p;
   }
 
   bool i2cPinsChanged = (oldI2cSda != i2cSdaPin || oldI2cScl != i2cSclPin);
