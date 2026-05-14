@@ -6516,6 +6516,7 @@ void handleSetupPage() {
   html += F("label{display:inline-block;min-width:200px;font-size:.95rem;font-weight:600;color:#d5e4de;text-align:left}");
   // Inputs + select share the same theme
   html += F("input[type=text],input[type=number],select{background:#0c1618;color:#e7f1ec;border:1px solid #29454a;border-radius:12px;padding:9px 12px;font-size:.95rem;text-align:left}");
+  html += F("option{background:#ffffff;color:#14232b}html[data-theme='dark'] option{background:#0c1618;color:#e7f1ec}");
   html += F("input[type=text],select{width:100%;max-width:520px}");
   html += F("input[type=number]{width:100%;max-width:200px}");
   html += F("input[type=text].in-wide,select.in-wide{max-width:600px}");
@@ -7103,11 +7104,50 @@ void handleSetupPage() {
   html += F("const tzPosixInput=document.getElementsByName('tzPosix')[0]||null;");
   html += F("const tzSel=g('tzIANASelect');");
 
-  // Hard-coded fallback zones used if fetch fails
-  html += F("const FALLBACK_ZONES={");
-  html += F("'Australia/Adelaide':'ACST-9:30ACDT-10:30,M10.1.0/2,M4.1.0/3',");
-  html += F("'Australia/Sydney':'AEST-10AEDT-11,M10.1.0/2,M4.1.0/3',");
-  html += F("'UTC':'UTC0'");
+  // Built-in zones are shown immediately; the remote database can add more.
+  html += F("const BUILTIN_ZONES={");
+  html += F("'UTC':'UTC0','Etc/UTC':'UTC0',");
+  html += F("'Australia/Adelaide':'ACST-9:30ACDT,M10.1.0,M4.1.0/3',");
+  html += F("'Australia/Brisbane':'AEST-10',");
+  html += F("'Australia/Broken_Hill':'ACST-9:30ACDT,M10.1.0,M4.1.0/3',");
+  html += F("'Australia/Darwin':'ACST-9:30',");
+  html += F("'Australia/Hobart':'AEST-10AEDT,M10.1.0,M4.1.0/3',");
+  html += F("'Australia/Lord_Howe':'<+1030>-10:30<+11>-11,M10.1.0,M4.1.0',");
+  html += F("'Australia/Melbourne':'AEST-10AEDT,M10.1.0,M4.1.0/3',");
+  html += F("'Australia/Perth':'AWST-8',");
+  html += F("'Australia/Sydney':'AEST-10AEDT,M10.1.0,M4.1.0/3',");
+  html += F("'Pacific/Auckland':'NZST-12NZDT,M9.5.0,M4.1.0/3',");
+  html += F("'Pacific/Chatham':'<+1245>-12:45<+1345>,M9.5.0/2:45,M4.1.0/3:45',");
+  html += F("'Pacific/Fiji':'<+12>-12',");
+  html += F("'Pacific/Guam':'ChST-10',");
+  html += F("'Pacific/Honolulu':'HST10',");
+  html += F("'Pacific/Noumea':'<+11>-11',");
+  html += F("'Pacific/Port_Moresby':'<+10>-10',");
+  html += F("'Asia/Bangkok':'<+07>-7',");
+  html += F("'Asia/Dubai':'<+04>-4',");
+  html += F("'Asia/Hong_Kong':'HKT-8',");
+  html += F("'Asia/Jakarta':'WIB-7',");
+  html += F("'Asia/Kolkata':'IST-5:30',");
+  html += F("'Asia/Manila':'PST-8',");
+  html += F("'Asia/Seoul':'KST-9',");
+  html += F("'Asia/Shanghai':'CST-8',");
+  html += F("'Asia/Singapore':'<+08>-8',");
+  html += F("'Asia/Tokyo':'JST-9',");
+  html += F("'Europe/Amsterdam':'CET-1CEST,M3.5.0,M10.5.0/3',");
+  html += F("'Europe/Berlin':'CET-1CEST,M3.5.0,M10.5.0/3',");
+  html += F("'Europe/London':'GMT0BST,M3.5.0/1,M10.5.0',");
+  html += F("'Europe/Madrid':'CET-1CEST,M3.5.0,M10.5.0/3',");
+  html += F("'Europe/Paris':'CET-1CEST,M3.5.0,M10.5.0/3',");
+  html += F("'Europe/Rome':'CET-1CEST,M3.5.0,M10.5.0/3',");
+  html += F("'America/Anchorage':'AKST9AKDT,M3.2.0,M11.1.0',");
+  html += F("'America/Chicago':'CST6CDT,M3.2.0,M11.1.0',");
+  html += F("'America/Denver':'MST7MDT,M3.2.0,M11.1.0',");
+  html += F("'America/Los_Angeles':'PST8PDT,M3.2.0,M11.1.0',");
+  html += F("'America/New_York':'EST5EDT,M3.2.0,M11.1.0',");
+  html += F("'America/Phoenix':'MST7',");
+  html += F("'America/Toronto':'EST5EDT,M3.2.0,M11.1.0',");
+  html += F("'America/Vancouver':'PST8PDT,M3.2.0,M11.1.0',");
+  html += F("'Africa/Johannesburg':'SAST-2'");
   html += F("};");
 
   // Helper to populate the select + sync inputs from a map of { IANA: POSIX }
@@ -7155,16 +7195,15 @@ void handleSetupPage() {
   html += F("async function loadTimezones(){");
   html += F(" if(!tzSel||!tzInput) return;");
 
-  html += F(" tzSel.innerHTML='<option value=\"\">Loading...</option>';");
+  html += F(" buildTzOptions(BUILTIN_ZONES);");
 
   html += F(" try{");
   html += F("   const res=await fetch(TZ_DB_URL);");
   html += F("   if(!res.ok) throw new Error('HTTP '+res.status);");
   html += F("   const zones=await res.json();");
-  html += F("   buildTzOptions(zones);");
+  html += F("   buildTzOptions(Object.assign({},BUILTIN_ZONES,zones));");
   html += F(" }catch(e){");
-  html += F("   console.error('tz load failed, using fallback',e);");
-  html += F("   buildTzOptions(FALLBACK_ZONES);");
+  html += F("   console.error('tz load failed, using built-in zones',e);");
   html += F(" }");
   html += F("}");
 
