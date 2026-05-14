@@ -6466,6 +6466,17 @@ void handleSetupPage() {
   String setupDisplayLabel = displayUseTft ? String("TFT display") : String("OLED display");
   String setupTankLabel = tankEnabled ? String("Tank Enabled") : String("City Water");
   String setupTzLabel = (tzMode == TZ_FIXED) ? String("Fixed offset") : String("POSIX timezone");
+  auto addTzOption = [&](const char* name, const char* posix) {
+    html += F("<option value='");
+    html += name;
+    html += F("' data-posix='");
+    html += posix;
+    html += F("'");
+    if (tzIANA == name) html += F(" selected");
+    html += F(">");
+    html += name;
+    html += F("</option>");
+  };
 
   html += F("<!DOCTYPE html><html><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'>");
   html += F("<meta name='theme-color' content='#1e40af'><meta name='color-scheme' content='light dark'>");
@@ -6870,10 +6881,51 @@ void handleSetupPage() {
   // IANA input + themed select
   html += F("<div class='row'><label>Select Timezone</label>");
   html += F("<div style='flex:1;display:grid;gap:6px'>");
-  html += F("<input type='hidden' name='tzIANA' value='");
-  html += tzIANA;
-  html += F("'>");
-  html += F("<select class='in-med' id='tzIANASelect'><option value=''>Select from list</option></select>");
+  html += F("<select class='in-med' id='tzIANASelect' name='tzIANA'><option value=''>Select from list</option>");
+  addTzOption("UTC", "UTC0");
+  addTzOption("Etc/UTC", "UTC0");
+  addTzOption("Australia/Adelaide", "ACST-9:30ACDT,M10.1.0,M4.1.0/3");
+  addTzOption("Australia/Brisbane", "AEST-10");
+  addTzOption("Australia/Broken_Hill", "ACST-9:30ACDT,M10.1.0,M4.1.0/3");
+  addTzOption("Australia/Darwin", "ACST-9:30");
+  addTzOption("Australia/Hobart", "AEST-10AEDT,M10.1.0,M4.1.0/3");
+  addTzOption("Australia/Lord_Howe", "<+1030>-10:30<+11>-11,M10.1.0,M4.1.0");
+  addTzOption("Australia/Melbourne", "AEST-10AEDT,M10.1.0,M4.1.0/3");
+  addTzOption("Australia/Perth", "AWST-8");
+  addTzOption("Australia/Sydney", "AEST-10AEDT,M10.1.0,M4.1.0/3");
+  addTzOption("Pacific/Auckland", "NZST-12NZDT,M9.5.0,M4.1.0/3");
+  addTzOption("Pacific/Chatham", "<+1245>-12:45<+1345>,M9.5.0/2:45,M4.1.0/3:45");
+  addTzOption("Pacific/Fiji", "<+12>-12");
+  addTzOption("Pacific/Guam", "ChST-10");
+  addTzOption("Pacific/Honolulu", "HST10");
+  addTzOption("Pacific/Noumea", "<+11>-11");
+  addTzOption("Pacific/Port_Moresby", "<+10>-10");
+  addTzOption("Asia/Bangkok", "<+07>-7");
+  addTzOption("Asia/Dubai", "<+04>-4");
+  addTzOption("Asia/Hong_Kong", "HKT-8");
+  addTzOption("Asia/Jakarta", "WIB-7");
+  addTzOption("Asia/Kolkata", "IST-5:30");
+  addTzOption("Asia/Manila", "PST-8");
+  addTzOption("Asia/Seoul", "KST-9");
+  addTzOption("Asia/Shanghai", "CST-8");
+  addTzOption("Asia/Singapore", "<+08>-8");
+  addTzOption("Asia/Tokyo", "JST-9");
+  addTzOption("Europe/Amsterdam", "CET-1CEST,M3.5.0,M10.5.0/3");
+  addTzOption("Europe/Berlin", "CET-1CEST,M3.5.0,M10.5.0/3");
+  addTzOption("Europe/London", "GMT0BST,M3.5.0/1,M10.5.0");
+  addTzOption("Europe/Madrid", "CET-1CEST,M3.5.0,M10.5.0/3");
+  addTzOption("Europe/Paris", "CET-1CEST,M3.5.0,M10.5.0/3");
+  addTzOption("Europe/Rome", "CET-1CEST,M3.5.0,M10.5.0/3");
+  addTzOption("America/Anchorage", "AKST9AKDT,M3.2.0,M11.1.0");
+  addTzOption("America/Chicago", "CST6CDT,M3.2.0,M11.1.0");
+  addTzOption("America/Denver", "MST7MDT,M3.2.0,M11.1.0");
+  addTzOption("America/Los_Angeles", "PST8PDT,M3.2.0,M11.1.0");
+  addTzOption("America/New_York", "EST5EDT,M3.2.0,M11.1.0");
+  addTzOption("America/Phoenix", "MST7");
+  addTzOption("America/Toronto", "EST5EDT,M3.2.0,M11.1.0");
+  addTzOption("America/Vancouver", "PST8PDT,M3.2.0,M11.1.0");
+  addTzOption("Africa/Johannesburg", "SAST-2");
+  html += F("</select>");
   html += F("</div>");
   html += F("</div>");
 
@@ -7153,6 +7205,7 @@ void handleSetupPage() {
   // Helper to populate the select + sync inputs from a map of { IANA: POSIX }
   html += F("function buildTzOptions(zones){");
   html += F(" if(!tzSel||!tzInput) return;");
+  html += F(" const current=tzInput.value||'';");
   html += F(" tzSel.innerHTML='<option value=\"\">Select from list</option>';");
 
   html += F(" const names=Object.keys(zones).sort();");
@@ -7160,17 +7213,19 @@ void handleSetupPage() {
   html += F("   const opt=document.createElement('option');");
   html += F("   opt.value=name;");
   html += F("   opt.textContent=name;");
-  html += F("   if(tzInput.value===name) opt.selected=true;");
+  html += F("   opt.dataset.posix=zones[name];");
+  html += F("   if(current===name) opt.selected=true;");
   html += F("   tzSel.appendChild(opt);");
   html += F(" });");
 
   // If tzInput already has a valid value, sync POSIX
-  html += F(" if(tzInput.value && zones[tzInput.value] && tzPosixInput){");
-  html += F("   tzPosixInput.value=zones[tzInput.value];");
+  html += F(" if(current && zones[current] && tzPosixInput){");
+  html += F("   tzInput.value=current;");
+  html += F("   tzPosixInput.value=zones[current];");
   html += F(" }");
 
   // Try to guess browser zone if empty and available
-  html += F(" if(!tzInput.value && window.Intl && Intl.DateTimeFormat){");
+  html += F(" if(!current && window.Intl && Intl.DateTimeFormat){");
   html += F("   const guess=Intl.DateTimeFormat().resolvedOptions().timeZone;");
   html += F("   if(guess && zones[guess]){");
   html += F("     tzInput.value=guess;");
