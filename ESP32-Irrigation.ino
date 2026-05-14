@@ -6499,6 +6499,8 @@ void handleSetupPage() {
   html += F(".setup-actions-top{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin:0 0 16px;padding:10px 12px;border-radius:16px;position:sticky;top:74px;z-index:7;background:rgba(13,23,24,.82);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);border:1px solid rgba(92,131,125,.2);box-shadow:0 12px 28px rgba(0,0,0,.18)}");
   html += F(".setup-actions-top .btn,.setup-actions-top .btn-alt{margin:0}");
   html += F(".setup-actions-top .btn[type=submit]{min-width:160px}");
+  html += F(".save-confirm{display:none;margin-left:auto;padding:8px 12px;border-radius:8px;background:#d1fae5;color:#065f46;border:1px solid #6ee7b7;font-weight:800;font-size:.9rem}");
+  html += F(".save-confirm.show{display:inline-flex;align-items:center}");
   html += F(".card-intro{margin:0 0 8px;color:#9ab4ad;font-size:.9rem;max-width:62ch}");
   html += F(".theme-switch{display:flex;align-items:center;gap:6px;font-weight:700;color:#d5e4de}");
   html += F(".switch{position:relative;display:inline-block;width:42px;height:24px;min-width:unset}");
@@ -6676,7 +6678,7 @@ void handleSetupPage() {
   html += F("<div class='setup-badge'><div class='setup-badge-k'>Forecast Model</div><div class='setup-badge-v'>"); html += meteoModel; html += F("</div></div>");
   html += F("</div></div>");
   html += F("<form id='setupForm' action='/configure' method='POST' novalidate>");
-  html += F("<div class='setup-actions-top'><button class='btn' type='submit' id='btn-save-setup'>Save Changes</button><a class='btn-alt' href='/'>Home</a><button class='btn-alt' type='button' id='btn-clear-cooldown'>Clear After-Rain Delay</button><button class='btn btn-danger' type='button' onclick=\"if(confirm('Reboot controller now?'))fetch('/reboot',{method:'POST'})\">Reboot</button></div>");
+  html += F("<div class='setup-actions-top'><button class='btn' type='submit' id='btn-save-setup'>Save Changes</button><a class='btn-alt' href='/'>Home</a><button class='btn-alt' type='button' id='btn-clear-cooldown'>Clear After-Rain Delay</button><button class='btn btn-danger' type='button' onclick=\"if(confirm('Reboot controller now?'))fetch('/reboot',{method:'POST'})\">Reboot</button><span class='save-confirm' id='save-confirm'>Saved</span></div>");
 
   // Zones
   html += F("<div class='card narrow' id='zones-card'><details class='collapse'><summary>Zones</summary><div class='collapse-body'><p class='card-intro'>Set how many watering zones are available and whether they run one at a time or together.</p>");
@@ -7065,7 +7067,8 @@ void handleSetupPage() {
   html += F("r.style.left=x+'px'; r.style.top=y+'px'; const old=t.querySelector('.ripple'); if(old) old.remove(); t.appendChild(r);");
   html += F("setTimeout(()=>{r.remove();},520);}");
   html += F("document.querySelectorAll('.btn,.btn-alt').forEach(el=>{el.addEventListener('pointerdown',addRipple);});");
-  html += F("g('setupForm')?.addEventListener('submit',async(e)=>{e.preventDefault();const f=e.currentTarget;const b=g('btn-save-setup');const old=b?b.textContent:'';if(b){b.disabled=true;b.textContent='Saving...';}try{const body=new URLSearchParams(new FormData(f));const r=await fetch('/configure',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body});if(!r.ok)throw new Error('HTTP '+r.status);if(b)b.textContent='Saved';setTimeout(()=>{location.href='/setup';},250);}catch(err){console.error(err);if(b){b.disabled=false;b.textContent='Save Failed';setTimeout(()=>{b.textContent=old;},1600);}else{alert('Save failed');}}});");
+  html += F("const savedFlag=sessionStorage.getItem('setupSaved');if(savedFlag){sessionStorage.removeItem('setupSaved');const c=g('save-confirm');if(c){c.classList.add('show');setTimeout(()=>c.classList.remove('show'),3500);}}");
+  html += F("g('setupForm')?.addEventListener('submit',()=>{sessionStorage.setItem('setupSaved','1');const b=g('btn-save-setup');if(b){b.textContent='Saving...';setTimeout(()=>{b.disabled=true;},0);}});");
   html += F("g('btn-toggle-backlight')?.addEventListener('click',()=>post('/toggleBacklight','x=1'));");
   html += F("g('btn-clear-cooldown')?.addEventListener('click',async()=>{const b=g('btn-clear-cooldown');const old=b?b.textContent:'';if(b){b.disabled=true;b.textContent='Clearing...';}try{await post('/clear_cooldown','x=1');if(b)b.textContent='After-Rain Delay Cleared';setTimeout(()=>location.reload(),350);}catch(e){console.error(e);if(b){b.disabled=false;b.textContent='Clear Failed';setTimeout(()=>{b.textContent=old;},1500);}}});");
   html += F("g('btn-pause-24')?.addEventListener('click',()=>post('/pause','sec=86400'));");
@@ -8334,7 +8337,6 @@ void handleConfigure() {
     ESP.restart();
   }
 }
-
 void handleClearEvents() {
   HttpScope _scope;
   totalScheduledRuntimeSec = 0;
