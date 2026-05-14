@@ -6667,22 +6667,22 @@ void handleSetupPage() {
   html += F("@media(max-width:760px){.page-head{padding:10px 12px}.page-head h1{font-size:1.2rem}.setup-hero{grid-template-columns:1fr}.setup-badges{grid-template-columns:1fr 1fr}.setup-nav{top:8px;flex-wrap:nowrap;overflow:auto;padding-bottom:6px}.setup-nav a{white-space:nowrap}.setup-actions-top{top:8px;z-index:9;padding:10px;border-radius:14px;background:rgba(13,23,24,.88);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);border:1px solid rgba(92,131,125,.2)}.row{padding-top:8px;flex-direction:column;align-items:stretch}.row label{min-width:0;width:100%}.row .btn,.row .btn-alt{width:100%}.switchline{align-items:flex-start}}");
   html += F("</style></head><body>");
 
-  html += F("<div class='wrap'><div class='page-head'><div class='page-head-copy'><div class='page-kicker'>Controller setup</div><h1>Setup</h1></div>");
+  html += F("<div class='wrap'><div class='page-head'><div class='page-head-copy'><div class='page-kicker'>Controller configuration</div><h1>System Setup</h1></div>");
   html += F("<div class='theme-switch'><span>Light</span><label class='switch'><input type='checkbox' id='themeToggle'><span class='slider'></span></label><span>Dark</span></div>");
   html += F("</div>");
-  html += F("<div class='setup-hero badges-only'><div class='setup-overview-title'>Controller Overview</div><div class='setup-badges'>");
-  html += F("<div class='setup-badge'><div class='setup-badge-k'>Zones</div><div class='setup-badge-v'>"); html += String(zonesCount); html += F(" configured</div></div>");
+  html += F("<div class='setup-hero badges-only'><div class='setup-overview-title'>Current Configuration</div><div class='setup-badges'>");
+  html += F("<div class='setup-badge'><div class='setup-badge-k'>Zone Count</div><div class='setup-badge-v'>"); html += String(zonesCount); html += F(" configured</div></div>");
   html += F("<div class='setup-badge'><div class='setup-badge-k'>Display</div><div class='setup-badge-v'>"); html += setupDisplayLabel; html += F("</div></div>");
   html += F("<div class='setup-badge'><div class='setup-badge-k'>Water Source</div><div class='setup-badge-v'>"); html += setupTankLabel; html += F("</div></div>");
-  html += F("<div class='setup-badge'><div class='setup-badge-k'>Timezone</div><div class='setup-badge-v'>"); html += setupTzLabel; html += F("</div></div>");
-  html += F("<div class='setup-badge'><div class='setup-badge-k'>Weather</div><div class='setup-badge-v'>"); html += setupWeatherLabel; html += F("</div></div>");
+  html += F("<div class='setup-badge'><div class='setup-badge-k'>Time Mode</div><div class='setup-badge-v'>"); html += setupTzLabel; html += F("</div></div>");
+  html += F("<div class='setup-badge'><div class='setup-badge-k'>Forecast Site</div><div class='setup-badge-v'>"); html += setupWeatherLabel; html += F("</div></div>");
   html += F("<div class='setup-badge'><div class='setup-badge-k'>Forecast Model</div><div class='setup-badge-v'>"); html += meteoModel; html += F("</div></div>");
   html += F("</div></div>");
   html += F("<form id='setupForm' action='/configure' method='POST' novalidate>");
   html += F("<div class='setup-actions-top'><button class='btn' type='submit' id='btn-save-setup'>Save Changes</button><a class='btn-alt' href='/'>Home</a><button class='btn-alt' type='button' id='btn-clear-cooldown'>Clear After-Rain Delay</button><button class='btn btn-danger' type='button' onclick=\"if(confirm('Reboot controller now?'))fetch('/reboot',{method:'POST'})\">Reboot</button><span class='save-confirm' id='save-confirm'>Saved</span></div>");
 
   // Zones
-  html += F("<div class='card narrow' id='zones-card'><details class='collapse'><summary>Zones</summary><div class='collapse-body'><p class='card-intro'>Set how many watering zones are available and whether they run one at a time or together.</p>");
+  html += F("<div class='card narrow' id='zones-card'><details class='collapse'><summary>Zones & Run Mode</summary><div class='collapse-body'><p class='card-intro'>Set how many watering zones are available and whether they run one at a time or together.</p>");
   html += F("<div class='row'><label>Zone Count</label><input class='in-xs' type='number' min='1' max='");
   html += String(MAX_ZONES);
   html += F("' name='zonesMode' value='");
@@ -6698,7 +6698,7 @@ void handleSetupPage() {
   html += F("</div></details></div>");
 
   // Tank (available for all modes; water source switching works with any zone count)
-  html += F("<div class='card narrow' id='tank-card'><details class='collapse'><summary>Tank & Water Source</summary><div class='collapse-body'><p class='card-intro'>Control how the controller chooses between tank and mains and where the tank sensor is connected.</p>");
+  html += F("<div class='card narrow' id='tank-card'><details class='collapse'><summary>Water Source & Tank</summary><div class='collapse-body'><p class='card-intro'>Control how the controller chooses between tank and mains and where the tank sensor is connected.</p>");
   html += F("<div class='row switchline'><label>Enable Tank</label><input type='checkbox' name='tankEnabled' ");
   html += (tankEnabled ? "checked" : "");
   html += F("><small>Unchecked = ignore tank level and force mains</small></div>");
@@ -6742,7 +6742,7 @@ void handleSetupPage() {
   html += F("</div></details></div>");
 
   // Delays & Pause + thresholds
-  html += F("<div class='card narrow' id='delays-card'><details class='collapse'><summary>Delays & Pause</summary><div class='collapse-body'><p class='card-intro'>Weather locks and pause controls live here, including After-Rain Delay timing and wind thresholds.</p>");
+  html += F("<div class='card narrow' id='delays-card'><details class='collapse'><summary>Weather Delays & Pause</summary><div class='collapse-body'><p class='card-intro'>Weather locks and pause controls live here, including After-Rain Delay timing and wind thresholds.</p>");
   html += F("<div class='cols2 panel-split'>");
 
   // Left column: toggles
@@ -6785,7 +6785,7 @@ void handleSetupPage() {
   html += F("</div></details></div>"); // end Delays card
 
   // Physical rain & forecast
-  html += F("<div class='card narrow'><details class='collapse'><summary>Rain Sources</summary><div class='collapse-body'><p class='card-intro'>Choose whether forecast rain, a physical sensor, or both can stop irrigation.</p>");
+  html += F("<div class='card narrow'><details class='collapse'><summary>Rain Inputs</summary><div class='collapse-body'><p class='card-intro'>Choose whether forecast rain, a physical sensor, or both can stop irrigation.</p>");
   html += F("<div class='row switchline'><label>Disable Open-Meteo Rain</label><input type='checkbox' name='rainForecastDisabled' ");
   html += (!rainDelayFromForecastEnabled ? "checked" : ""); html += F("><small>Checked = ignore Open-Meteo rain</small></div>");
   html += F("<div class='row switchline'><label>Enable Rain Sensor</label><input type='checkbox' name='rainSensorEnabled' "); html += (rainSensorEnabled?"checked":""); html += F("></div>");
@@ -6794,7 +6794,7 @@ void handleSetupPage() {
   html += F("</div></details></div>");
 
   // Weather
-  html += F("<div class='card narrow' id='weather-card'><details class='collapse'><summary>Weather (Open-Meteo)</summary><div class='collapse-body'><p class='card-intro'>Enter the site coordinates and choose the forecast model used for delay logic and dashboard weather.</p>");
+  html += F("<div class='card narrow' id='weather-card'><details class='collapse'><summary>Forecast Location</summary><div class='collapse-body'><p class='card-intro'>Enter the site coordinates and choose the forecast model used for delay logic and dashboard weather.</p>");
   html += F("<div class='row'><label>Open-Meteo</label><a class='btn-alt' id='setupMeteoLink' href='https://open-meteo.com/en/docs?latitude=");
   html += (isfinite(meteoLat) ? String(meteoLat, 6) : String("-35.107600"));
   html += F("&longitude=");
@@ -6830,7 +6830,7 @@ void handleSetupPage() {
   html += F("</div></details></div>");
 
   // Timezone
-  html += F("<div class='card narrow' id='timezone-card'><details class='collapse'><summary>Timezone</summary><div class='collapse-body'><p class='card-intro'>Use a POSIX timezone string or a fixed UTC offset so schedules and weather line up with local time.</p>");
+  html += F("<div class='card narrow' id='timezone-card'><details class='collapse'><summary>Time & Timezone</summary><div class='collapse-body'><p class='card-intro'>Use a POSIX timezone string or a fixed UTC offset so schedules and weather line up with local time.</p>");
 
   // Mode selector - cleaner row, better labels
   html += F("<div class='row switchline'>");
@@ -6883,7 +6883,7 @@ void handleSetupPage() {
   html += F("</div></details></div>"); // end Timezone card
 
   // Display / Auto backlight
-  html += F("<div class='card narrow' id='display-card'><details class='collapse'><summary>Display</summary><div class='collapse-body'><p class='card-intro'>Choose the screen type, rotation, and light-sensor backlight behavior.</p>");
+  html += F("<div class='card narrow' id='display-card'><details class='collapse'><summary>Display & Backlight</summary><div class='collapse-body'><p class='card-intro'>Choose the screen type, rotation, and light-sensor backlight behavior.</p>");
   html += F("<div class='row'><label>Display</label><select class='in-med' name='displayType' id='displayTypeSelect'>");
   html += F("<option value='tft'");
   html += (displayUseTft ? " selected" : "");
@@ -6938,7 +6938,7 @@ void handleSetupPage() {
   html += F("</div></details></div>");
 
   // SPI (TFT) config
-  html += F("<div class='card narrow' id='advanced-card' data-tft-only><details class='collapse'><summary>SPI (TFT)</summary><div class='collapse-body'><p class='card-intro'>Advanced screen pin mapping and backlight tools. Change these only if your display wiring differs from the defaults.</p>");
+  html += F("<div class='card narrow' id='advanced-card' data-tft-only><details class='collapse'><summary>TFT SPI Pins</summary><div class='collapse-body'><p class='card-intro'>Advanced screen pin mapping and backlight tools. Change these only if your display wiring differs from the defaults.</p>");
   html += F("<div class='row'><label>TFT Size</label><div class='chip'>");
   html += String(tftPanelWidth); html += "x"; html += String(tftPanelHeight);
   html += F("</div><small>Saved display geometry</small></div>");
@@ -6993,7 +6993,7 @@ void handleSetupPage() {
   html += F("</div></details></div>");
 
   // I2C config
-  html += F("<div class='card narrow'><details class='collapse'><summary>I2C (PCF8574)</summary><div class='collapse-body'><p class='card-intro'>Expander bus pins for the relay hardware. These normally only need changing during custom wiring.</p>");
+  html += F("<div class='card narrow'><details class='collapse'><summary>I2C Relay Expander</summary><div class='collapse-body'><p class='card-intro'>Expander bus pins for the relay hardware. These normally only need changing during custom wiring.</p>");
   html += F("<div class='row'><label>SDA</label><input class='in-xs' type='number' min='0' max='48' name='i2cSda' value='");
   html += String(i2cSdaPin); html += F("'></div>");
   html += F("<div class='row'><label>SCL</label><input class='in-xs' type='number' min='0' max='48' name='i2cScl' value='");
@@ -7002,7 +7002,7 @@ void handleSetupPage() {
   html += F("</div></details></div>");
 
   // GPIO fallback pins
-  html += F("<div class='card narrow'><details class='collapse'><summary>GPIO Fallback (if I2C relays not found)</summary><div class='collapse-body'><div class='grid'>");
+  html += F("<div class='card narrow'><details class='collapse'><summary>Relay GPIO Fallback</summary><div class='collapse-body'><div class='grid'>");
   for (uint8_t i=0;i<MAX_ZONES;i++){
     html += F("<div class='row switchline'><label>Zone "); html += String(i+1);
     html += F(" Pin</label><input class='in-xs' type='number' min='-1' max='39' name='zonePin"); html += String(i);
@@ -7031,7 +7031,7 @@ void handleSetupPage() {
   html += F("</div></details></div>");
 
   // Manual buttons
-  html += F("<div class='card narrow'><details class='collapse'><summary>Manual Buttons</summary><div class='collapse-body'><p class='card-intro'>Optional physical buttons for cycling a zone and toggling it on or off without using the web UI.</p>");
+  html += F("<div class='card narrow'><details class='collapse'><summary>Physical Buttons</summary><div class='collapse-body'><p class='card-intro'>Optional physical buttons for cycling a zone and toggling it on or off without using the web UI.</p>");
   html += F("<div class='row switchline'><label>Select Button Pin</label><input class='in-xs' type='number' min='-1' max='39' name='manualSelectPin' value='");
   html += String(manualSelectPin);
   html += F("'><small>-1 to disable. Uses INPUT_PULLUP; press = LOW.</small></div>");
@@ -7046,7 +7046,7 @@ void handleSetupPage() {
   
 
   // MQTT
-  html += F("<div class='card narrow' id='mqtt-card'><details class='collapse'><summary>MQTT (Home Assistant)</summary><div class='collapse-body'><p class='card-intro'>Publish controller status and accept simple commands from Home Assistant or another MQTT client.</p>");
+  html += F("<div class='card narrow' id='mqtt-card'><details class='collapse'><summary>MQTT Integration</summary><div class='collapse-body'><p class='card-intro'>Publish controller status and accept simple commands from Home Assistant or another MQTT client.</p>");
   html += F("<div class='row switchline'><label>Enable MQTT</label><input type='checkbox' name='mqttEnabled' "); html += (mqttEnabled ? "checked" : ""); html += F("></div>");
   html += F("<div class='row'><label>Broker Host</label><input class='in-wide' type='text' name='mqttBroker' value='"); html += mqttBroker; html += F("'></div>");
   html += F("<div class='row'><label>Port</label><input class='in-xs' type='number' name='mqttPort' value='"); html += String(mqttPort); html += F("'></div>");
