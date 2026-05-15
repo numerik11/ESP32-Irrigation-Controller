@@ -57,7 +57,7 @@ Built for real-world irrigation setups, from small home gardens to larger multi-
 | 7-day scheduling | ✅ |
 | Minute + second precision | ✅ |
 | Sequential mode | ✅ |
-| Concurrent mode | ✅ |
+| Run Together | ✅ |
 | Editable zone names | ✅ |
 | Tank / mains switching | ✅ Optional |
 | Weather integration | ✅ |
