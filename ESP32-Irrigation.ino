@@ -483,9 +483,55 @@ static inline bool isRainDelayBlockingNow();
 // ===================== Timezone config =====================
 enum TZMode : uint8_t { TZ_POSIX = 0, TZ_IANA = 1, TZ_FIXED = 2 };
 TZMode tzMode = TZ_POSIX;
-String tzPosix = "ACST-9:30ACDT-10:30,M10.1.0/2,M4.1.0/3"; // default
+String tzPosix = "ACST-9:30ACDT,M10.1.0,M4.1.0/3"; // default
 String tzIANA  = "Australia/Adelaide";
 int16_t tzFixedOffsetMin = 570;
+
+static const char* posixForIanaZone(const String& iana) {
+  if (iana == "UTC" || iana == "Etc/UTC") return "UTC0";
+  if (iana == "Australia/Adelaide") return "ACST-9:30ACDT,M10.1.0,M4.1.0/3";
+  if (iana == "Australia/Brisbane") return "AEST-10";
+  if (iana == "Australia/Broken_Hill") return "ACST-9:30ACDT,M10.1.0,M4.1.0/3";
+  if (iana == "Australia/Darwin") return "ACST-9:30";
+  if (iana == "Australia/Hobart") return "AEST-10AEDT,M10.1.0,M4.1.0/3";
+  if (iana == "Australia/Lord_Howe") return "<+1030>-10:30<+11>-11,M10.1.0,M4.1.0";
+  if (iana == "Australia/Melbourne") return "AEST-10AEDT,M10.1.0,M4.1.0/3";
+  if (iana == "Australia/Perth") return "AWST-8";
+  if (iana == "Australia/Sydney") return "AEST-10AEDT,M10.1.0,M4.1.0/3";
+  if (iana == "Pacific/Auckland") return "NZST-12NZDT,M9.5.0,M4.1.0/3";
+  if (iana == "Pacific/Chatham") return "<+1245>-12:45<+1345>,M9.5.0/2:45,M4.1.0/3:45";
+  if (iana == "Pacific/Fiji") return "<+12>-12";
+  if (iana == "Pacific/Guam") return "ChST-10";
+  if (iana == "Pacific/Honolulu") return "HST10";
+  if (iana == "Pacific/Noumea") return "<+11>-11";
+  if (iana == "Pacific/Port_Moresby") return "<+10>-10";
+  if (iana == "Asia/Bangkok") return "<+07>-7";
+  if (iana == "Asia/Dubai") return "<+04>-4";
+  if (iana == "Asia/Hong_Kong") return "HKT-8";
+  if (iana == "Asia/Jakarta") return "WIB-7";
+  if (iana == "Asia/Kolkata") return "IST-5:30";
+  if (iana == "Asia/Manila") return "PST-8";
+  if (iana == "Asia/Seoul") return "KST-9";
+  if (iana == "Asia/Shanghai") return "CST-8";
+  if (iana == "Asia/Singapore") return "<+08>-8";
+  if (iana == "Asia/Tokyo") return "JST-9";
+  if (iana == "Europe/Amsterdam") return "CET-1CEST,M3.5.0,M10.5.0/3";
+  if (iana == "Europe/Berlin") return "CET-1CEST,M3.5.0,M10.5.0/3";
+  if (iana == "Europe/London") return "GMT0BST,M3.5.0/1,M10.5.0";
+  if (iana == "Europe/Madrid") return "CET-1CEST,M3.5.0,M10.5.0/3";
+  if (iana == "Europe/Paris") return "CET-1CEST,M3.5.0,M10.5.0/3";
+  if (iana == "Europe/Rome") return "CET-1CEST,M3.5.0,M10.5.0/3";
+  if (iana == "America/Anchorage") return "AKST9AKDT,M3.2.0,M11.1.0";
+  if (iana == "America/Chicago") return "CST6CDT,M3.2.0,M11.1.0";
+  if (iana == "America/Denver") return "MST7MDT,M3.2.0,M11.1.0";
+  if (iana == "America/Los_Angeles") return "PST8PDT,M3.2.0,M11.1.0";
+  if (iana == "America/New_York") return "EST5EDT,M3.2.0,M11.1.0";
+  if (iana == "America/Phoenix") return "MST7";
+  if (iana == "America/Toronto") return "EST5EDT,M3.2.0,M11.1.0";
+  if (iana == "America/Vancouver") return "PST8PDT,M3.2.0,M11.1.0";
+  if (iana == "Africa/Johannesburg") return "SAST-2";
+  return nullptr;
+}
 
 static void applyTimezoneAndSNTP() {
   const char* ntp1 = "pool.ntp.org";
@@ -493,7 +539,11 @@ static void applyTimezoneAndSNTP() {
   const char* ntp3 = "time.cloudflare.com";
 
   switch (tzMode) {
-    case TZ_IANA: configTzTime(tzIANA.c_str(), ntp1, ntp2, ntp3); break;
+    case TZ_IANA: {
+      const char* mapped = posixForIanaZone(tzIANA);
+      configTzTime(mapped ? mapped : tzPosix.c_str(), ntp1, ntp2, ntp3);
+      break;
+    }
     case TZ_POSIX: configTzTime(tzPosix.c_str(), ntp1, ntp2, ntp3); break;
     case TZ_FIXED: {
       long offSec = (long)tzFixedOffsetMin * 60L;
@@ -6851,7 +6901,7 @@ void handleSetupPage() {
   html += F("<label class='chip'>");
   html += F("<input type='radio' name='tzMode' value='0' ");
   html += (tzMode==TZ_POSIX ? "checked" : "");
-  html += F(">");
+  html += F(" id='tzModePosix'>");
   html += F("<span>POSIX string</span>");
   html += F("</label>");
 
@@ -6869,13 +6919,13 @@ void handleSetupPage() {
   html += F("<label>Timezone</label>");
   html += F("<input class='in-wide' type='text' name='tzPosix' value='");
   html += tzPosix;
-  html += F("' placeholder='ACST-9:30ACDT-10:30,M10.1.0/2,M4.1.0/3'>");
+  html += F("' placeholder='ACST-9:30ACDT,M10.1.0,M4.1.0/3'>");
   html += F("</div>");
 
   // Help text on its own row so it wraps nicely on mobile
   html += F("<div class='row helptext'>");
   html += F("<label></label>");
-  html += F("<small>Example POSIX string with DST: ACST-9:30ACDT-10:30,M10.1.0/2,M4.1.0/3</small>");
+  html += F("<small>Example POSIX string with DST: ACST-9:30ACDT,M10.1.0,M4.1.0/3</small>");
   html += F("</div>");
 
   // IANA input + themed select
@@ -7241,7 +7291,9 @@ void handleSetupPage() {
   html += F("   const val=tzSel.value;");
   html += F("   if(!val) return;");
   html += F("   tzInput.value=val;");
-  html += F("   if(tzPosixInput && zones[val]) tzPosixInput.value=zones[val];");
+  html += F("   const posix=zones[val]||tzSel.options[tzSel.selectedIndex]?.dataset.posix||'';");
+  html += F("   if(tzPosixInput && posix) tzPosixInput.value=posix;");
+  html += F("   const mode=g('tzModePosix'); if(mode) mode.checked=true;");
   html += F(" });");
   html += F("}"); // end buildTzOptions
 
@@ -7251,6 +7303,7 @@ void handleSetupPage() {
   html += F(" if(!tzSel||!tzInput) return;");
 
   html += F(" buildTzOptions(BUILTIN_ZONES);");
+  html += F(" if(Intl.supportedValuesOf){try{const intlZones=Intl.supportedValuesOf('timeZone');intlZones.forEach(n=>{if(!BUILTIN_ZONES[n])BUILTIN_ZONES[n]='';});buildTzOptions(BUILTIN_ZONES);}catch(e){}}");
 
   html += F(" try{");
   html += F("   const res=await fetch(TZ_DB_URL);");
@@ -8325,7 +8378,14 @@ void handleConfigure() {
   if (server.hasArg("tzIANA")) {
     String v = server.arg("tzIANA");
     v.trim();
-    if (v.length()) tzIANA = v;
+    if (v.length()) {
+      tzIANA = v;
+      const char* mapped = posixForIanaZone(tzIANA);
+      if (mapped) {
+        tzPosix = mapped;
+        tzMode = TZ_POSIX;
+      }
+    }
   }
   if (server.hasArg("tzFixed")) {
     tzFixedOffsetMin = (int16_t)server.arg("tzFixed").toInt();
