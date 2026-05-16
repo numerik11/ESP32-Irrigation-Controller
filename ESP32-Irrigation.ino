@@ -2879,7 +2879,7 @@ void drawManualSelection() {
   const int activeZone = firstActiveZoneIndex();
   const bool selectedQueued = pendingStart[selectedZone];
   const bool pinReady = useExpanderForZone(selectedZone) ||
-                        (zonePins[selectedZone] >= 0 && zonePins[selectedZone] <= 39);
+                        isValidOutputPin(zonePins[selectedZone]);
 
   int statusId = 0;
   const char* statusText = "READY";
@@ -5321,7 +5321,7 @@ void turnOnZone(int z) {
   const bool usePcf = useExpanderForZone(z);
   if (!usePcf) {
     int pin = zonePins[z];
-    if (pin < 0 || pin > 39) {
+    if (!isValidOutputPin(pin)) {
       Serial.printf("[VALVE] Z%d has no GPIO pin assigned; skipping\n", z+1);
       cancelStart(z, "NO_PIN", false);
       return;
@@ -5440,7 +5440,7 @@ void turnOnValveManual(int z) {
   const bool usePcf = useExpanderForZone(z);
   if (!usePcf) {
     int pin = zonePins[z];
-    if (pin < 0 || pin > 39) {
+    if (!isValidOutputPin(pin)) {
       Serial.printf("[VALVE] Z%d has no GPIO pin assigned; skipping manual start\n", z+1);
       cancelStart(z, "NO_PIN", false);
       showManualSelection();
@@ -6850,7 +6850,7 @@ void handleSetupPage() {
   html += F("<div class='row switchline'><label>Disable Open-Meteo Rain</label><input type='checkbox' name='rainForecastDisabled' ");
   html += (!rainDelayFromForecastEnabled ? "checked" : ""); html += F("><small>Checked = ignore Open-Meteo rain</small></div>");
   html += F("<div class='row switchline'><label>Enable Rain Sensor</label><input type='checkbox' name='rainSensorEnabled' "); html += (rainSensorEnabled?"checked":""); html += F("></div>");
-  html += F("<div class='row'><label>Rain Sensor GPIO</label><input class='in-xs' type='number' min='0' max='39' name='rainSensorPin' value='"); html += String(rainSensorPin); html += F("'><small>e.g. 27</small></div>");
+  html += F("<div class='row'><label>Rain Sensor GPIO</label><input class='in-xs' type='number' min='0' max='"); html += String(uiMaxGpio); html += F("' name='rainSensorPin' value='"); html += String(rainSensorPin); html += F("'><small>e.g. 27</small></div>");
   html += F("<div class='row switchline'><label>Invert Sensor</label><input type='checkbox' name='rainSensorInvert' "); html += (rainSensorInvert?"checked":""); html += F("><small>Use if board is NO</small></div>");
   html += F("</div></details></div>");
 
@@ -7107,18 +7107,18 @@ void handleSetupPage() {
   html += F("<div class='card narrow'><details class='collapse'><summary>Relay GPIO Fallback</summary><div class='collapse-body'><div class='grid'>");
   for (uint8_t i=0;i<MAX_ZONES;i++){
     html += F("<div class='row switchline'><label>Zone "); html += String(i+1);
-    html += F(" Pin</label><input class='in-xs' type='number' min='-1' max='39' name='zonePin"); html += String(i);
+    html += F(" Pin</label><input class='in-xs' type='number' min='-1' max='"); html += String(uiMaxGpio); html += F("' name='zonePin"); html += String(i);
     html += F("' value='"); html += String(zonePins[i]); html += F("'>");
     html += F("<label class='chip'><input type='checkbox' name='zonePinLow"); html += String(i); html += F("' ");
     html += (zoneGpioActiveLow[i] ? "checked" : "");
     html += F("><span>LOW = ON</span></label></div>");
   }
   html += F("<div class='row'><label></label><small>Use -1 to leave a zone unassigned. Zones above the PCF channels use GPIO pins when set.</small></div>");
-  html += F("<div class='row switchline'><label>City Water Relay Pin</label><input class='in-xs' type='number' min='0' max='39' name='mainsPin' value='");
+  html += F("<div class='row switchline'><label>City Water Relay Pin</label><input class='in-xs' type='number' min='0' max='"); html += String(uiMaxGpio); html += F("' name='mainsPin' value='");
   html += String(mainsPin); html += F("'><label class='chip'><input type='checkbox' name='mainsPinLow' ");
   html += (mainsGpioActiveLow ? "checked" : "");
   html += F("><span>LOW = ON</span></label><small>Relay for city water in (use check/backflow prevention device)</small></div>");
-  html += F("<div class='row switchline'><label>Tank Relay Pin</label><input class='in-xs' type='number' min='0' max='39' name='tankPin' value='");
+  html += F("<div class='row switchline'><label>Tank Relay Pin</label><input class='in-xs' type='number' min='0' max='"); html += String(uiMaxGpio); html += F("' name='tankPin' value='");
   html += String(tankPin); html += F("'><label class='chip'><input type='checkbox' name='tankPinLow' ");
   html += (tankGpioActiveLow ? "checked" : "");
   html += F("><span>LOW = ON</span></label><small>Pump on low pressure (Relay on) and off at a higher pressure (Relay off).</small></div>");
@@ -7134,10 +7134,10 @@ void handleSetupPage() {
 
   // Manual buttons
   html += F("<div class='card narrow'><details class='collapse'><summary>Physical Buttons</summary><div class='collapse-body'><p class='card-intro'>Optional physical buttons for cycling a zone and toggling it on or off without using the web UI.</p>");
-  html += F("<div class='row switchline'><label>Select Button Pin</label><input class='in-xs' type='number' min='-1' max='39' name='manualSelectPin' value='");
+  html += F("<div class='row switchline'><label>Select Button Pin</label><input class='in-xs' type='number' min='-1' max='"); html += String(uiMaxGpio); html += F("' name='manualSelectPin' value='");
   html += String(manualSelectPin);
   html += F("'><small>-1 to disable. Uses INPUT_PULLUP; press = LOW.</small></div>");
-  html += F("<div class='row switchline'><label>Start/Stop Button Pin</label><input class='in-xs' type='number' min='-1' max='39' name='manualStartPin' value='");
+  html += F("<div class='row switchline'><label>Start/Stop Button Pin</label><input class='in-xs' type='number' min='-1' max='"); html += String(uiMaxGpio); html += F("' name='manualStartPin' value='");
   html += String(manualStartPin);
   html += F("'><small>Toggles the selected zone on/off.</small></div>");
   html += F("<div class='row'><label>Selected Zone</label><div class='sub'>");
@@ -7741,7 +7741,7 @@ void loadConfig() {
   if ((s = _safeReadLine(f)).length()) rainSensorEnabled = (s.toInt() == 1);
   if ((s = _safeReadLine(f)).length()) {
     int p = s.toInt();
-    if (p >= 0 && p <= 39) rainSensorPin = p;
+    if (isValidGpioPin(p)) rainSensorPin = p;
   }
   if ((s = _safeReadLine(f)).length()) rainSensorInvert  = (s.toInt() == 1);
   if ((s = _safeReadLine(f)).length()) {
@@ -7754,7 +7754,7 @@ void loadConfig() {
   for (int i = 0; i < MAX_ZONES; i++) {
     if ((s = _safeReadLine(f)).length()) {
       int p = s.toInt();
-      if (p >= -1 && p <= 39) zonePins[i] = p;
+      if (p == -1 || isValidOutputPin(p)) zonePins[i] = p;
     }
   }
   if ((s = _safeReadLine(f)).length()) {
@@ -7768,13 +7768,13 @@ void loadConfig() {
   if (f.available()) {
     if ((s = _safeReadLine(f)).length()) {
       int p = s.toInt();
-      manualSelectPin = (p >= -1 && p <= 39) ? p : -1;
+      manualSelectPin = (p == -1 || isValidGpioPin(p)) ? p : -1;
     }
   }
   if (f.available()) {
     if ((s = _safeReadLine(f)).length()) {
       int p = s.toInt();
-      manualStartPin = (p >= -1 && p <= 39) ? p : -1;
+      manualStartPin = (p == -1 || isValidGpioPin(p)) ? p : -1;
     }
   }
 
@@ -7832,7 +7832,6 @@ void loadConfig() {
     tail[tailCount++] = _safeReadLine(f);
   }
   int tailIdx = 0;
-  const int legacyTailCount = 19;
   const int perOutputPolarityCount = MAX_ZONES + 2;
 
   auto nextTail = [&](String& out) -> bool {
@@ -7841,7 +7840,14 @@ void loadConfig() {
     return true;
   };
 
-  if (tailCount >= legacyTailCount + perOutputPolarityCount) {
+  bool hasPerOutputPolarityBlock = tailCount >= perOutputPolarityCount;
+  for (int i = 0; hasPerOutputPolarityBlock && i < perOutputPolarityCount; ++i) {
+    String v = tail[i];
+    v.trim();
+    hasPerOutputPolarityBlock = (v == "0" || v == "1");
+  }
+
+  if (hasPerOutputPolarityBlock) {
     for (int i = 0; i < MAX_ZONES; ++i) {
       if (nextTail(s) && s.length()) zoneGpioActiveLow[i] = (s.toInt() == 1);
     }
@@ -8160,7 +8166,7 @@ void handleConfigure() {
   rainSensorEnabled = server.hasArg("rainSensorEnabled");
   if (server.hasArg("rainSensorPin")) {
     int pin = server.arg("rainSensorPin").toInt();
-    if (pin >= 0 && pin <= 39) rainSensorPin = pin;
+    if (isValidGpioPin(pin)) rainSensorPin = pin;
   }
   rainSensorInvert = server.hasArg("rainSensorInvert");
 
@@ -8239,7 +8245,7 @@ void handleConfigure() {
     String key = "zonePin" + String(i);
     if (server.hasArg(key)) {
       int p = server.arg(key).toInt();
-      if (p >= -1 && p <= 39) zonePins[i] = p;
+      if (p == -1 || isValidOutputPin(p)) zonePins[i] = p;
     }
     String polarityKey = "zonePinLow" + String(i);
     zoneGpioActiveLow[i] = server.hasArg(polarityKey);
@@ -8349,11 +8355,11 @@ void handleConfigure() {
   }
   if (server.hasArg("manualSelectPin")) {
     int p = server.arg("manualSelectPin").toInt();
-    if ((p >= -1 && p <= 39)) manualSelectPin = p;
+    if (p == -1 || isValidGpioPin(p)) manualSelectPin = p;
   }
   if (server.hasArg("manualStartPin")) {
     int p = server.arg("manualStartPin").toInt();
-    if ((p >= -1 && p <= 39)) manualStartPin = p;
+    if (p == -1 || isValidGpioPin(p)) manualStartPin = p;
   }
 
   // Keep the legacy global polarity aligned for backward-compatible saves.
