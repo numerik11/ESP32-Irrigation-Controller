@@ -2283,6 +2283,8 @@ void setup() {
     doc["wind"]       = isfinite(curWindMs) ? curWindMs : 0.0f;
     doc["gustNow"]    = isfinite(curGustMs) ? curGustMs : 0.0f;
     doc["windDirText"]= formatWindDirection(curWindDirDeg);
+    if (isfinite(curWindDirDeg)) doc["windDirDeg"] = normalizeDegrees360(curWindDirDeg);
+    else                         doc["windDirDeg"] = nullptr;
     doc["condMain"]   = (curWeatherCode >= 0) ? meteoCodeToMain(curWeatherCode) : "";
     doc["condDesc"]   = (curWeatherCode >= 0) ? meteoCodeToDesc(curWeatherCode) : "";
     doc["icon"]       = "";
@@ -5622,6 +5624,7 @@ void handleRoot() {
   float ws = curWindMs;
   float feels = curFeelsC;
   String windDir = formatWindDirection(curWindDirDeg);
+  float windDirDeg = normalizeDegrees360(curWindDirDeg);
   int wcode = curWeatherCode;
   String cond = (wcode >= 0) ? String(meteoCodeToDesc(wcode)) : String("-");
   if (cond == "") cond = "-";
@@ -5804,6 +5807,13 @@ void handleRoot() {
   html += F(".metric-v{font-size:1.08rem;font-weight:800;color:var(--ink)}");
   html += F(".metric-v.big-metric{font-size:1.45rem;line-height:1.05;font-variant-numeric:tabular-nums}");
   html += F(".metric-v .metric-unit{font-size:.88rem;font-weight:700;color:var(--muted);margin-left:4px}");
+  html += F(".condition-tile{gap:10px}.condition-wrap{display:flex;align-items:center;gap:12px;min-width:0}.condition-wrap .metric-v{min-width:0;overflow-wrap:anywhere}.weather-icon{position:relative;flex:0 0 54px;width:54px;height:54px;border-radius:8px;border:1px solid var(--chip-brd);background:linear-gradient(180deg,var(--panel),var(--chip));overflow:hidden}");
+  html += F(".weather-icon .wi-main,.weather-icon .wi-extra{position:absolute;display:block}.wi-clear .wi-main{left:17px;top:17px;width:20px;height:20px;border-radius:50%;background:#f7c948;box-shadow:0 0 0 5px rgba(247,201,72,.22),0 0 18px rgba(247,201,72,.45)}.wi-clear .wi-extra{left:26px;top:5px;width:2px;height:44px;background:#f7c948;transform:rotate(45deg)}.wi-clear .wi-extra::before{content:'';position:absolute;left:0;top:0;width:2px;height:44px;background:#f7c948;transform:rotate(90deg)}");
+  html += F(".wi-cloud .wi-main,.wi-partly .wi-main,.wi-overcast .wi-main,.wi-drizzle .wi-main,.wi-showers .wi-main,.wi-rain .wi-main,.wi-freezing .wi-main,.wi-snow .wi-main,.wi-storm .wi-main{left:12px;top:24px;width:31px;height:15px;border-radius:999px;background:#9aa7b5;box-shadow:-5px 2px 0 #9aa7b5,7px -6px 0 3px #9aa7b5,-8px -4px 0 2px #9aa7b5}.wi-partly .wi-extra{left:8px;top:9px;width:19px;height:19px;border-radius:50%;background:#f7c948;box-shadow:0 0 0 4px rgba(247,201,72,.2);z-index:0}.wi-overcast .wi-extra{left:7px;top:17px;width:28px;height:14px;border-radius:999px;background:#7b8794;box-shadow:13px 2px 0 #7b8794}.wi-drizzle .wi-extra{left:17px;top:41px;width:2px;height:5px;border-radius:999px;background:#60a5fa;box-shadow:7px 0 #60a5fa,14px 0 #60a5fa,21px 0 #60a5fa}.wi-showers .wi-extra{left:15px;top:39px;width:4px;height:12px;border-radius:999px;background:#2563eb;box-shadow:10px 2px #2563eb,20px 0 #2563eb;transform:skewX(-18deg)}");
+  html += F(".wi-rain .wi-extra{left:17px;top:40px;width:3px;height:9px;border-radius:999px;background:#3b82f6;box-shadow:9px 0 #3b82f6,18px 0 #3b82f6;transform:skewX(-18deg)}.wi-freezing .wi-extra{left:19px;top:37px;width:16px;height:16px;border:2px solid #93c5fd;border-radius:3px;transform:rotate(45deg);background:rgba(147,197,253,.12)}.wi-snow .wi-extra{left:17px;top:40px;width:4px;height:4px;border-radius:50%;background:#dbeafe;box-shadow:9px 0 #dbeafe,18px 0 #dbeafe,4px 8px #dbeafe,14px 8px #dbeafe}.wi-storm .wi-extra{left:25px;top:36px;width:9px;height:16px;background:#f59e0b;clip-path:polygon(42% 0,100% 0,62% 45%,100% 45%,25% 100%,43% 55%,0 55%)}.wi-fog .wi-main{left:10px;top:18px;width:34px;height:3px;border-radius:999px;background:#94a3b8;box-shadow:0 8px #94a3b8,0 16px #94a3b8}.wi-fog .wi-extra{left:17px;top:42px;width:21px;height:3px;border-radius:999px;background:#94a3b8}.wi-unknown .wi-main{left:17px;top:10px;font-size:28px;line-height:34px;font-weight:900;color:var(--muted)}.wi-unknown .wi-main::before{content:'?'}");
+  html += F(".wind-dir-tile{gap:10px}.wind-compass-wrap{display:flex;align-items:center;gap:12px;min-width:0}.wind-compass{--dir:0deg;position:relative;flex:0 0 66px;width:66px;height:66px;border-radius:50%;border:1px solid var(--chip-brd);background:radial-gradient(circle,var(--panel) 0 48%,var(--chip) 49% 100%);box-shadow:inset 0 0 0 1px rgba(255,255,255,.18)}");
+  html += F(".wind-compass::before,.wind-compass::after{content:'';position:absolute;background:var(--line);opacity:.8}.wind-compass::before{left:50%;top:8px;bottom:8px;width:1px}.wind-compass::after{top:50%;left:8px;right:8px;height:1px}.wind-compass .cardinal{position:absolute;font-size:.55rem;font-weight:900;color:var(--muted);line-height:1}.wind-compass .n{top:4px;left:50%;transform:translateX(-50%)}.wind-compass .e{right:5px;top:50%;transform:translateY(-50%)}.wind-compass .s{bottom:4px;left:50%;transform:translateX(-50%)}.wind-compass .w{left:5px;top:50%;transform:translateY(-50%)}");
+  html += F(".wind-needle{position:absolute;left:50%;top:50%;z-index:2;width:4px;height:24px;border-radius:999px;background:linear-gradient(180deg,var(--bad),var(--primary));transform-origin:50% 100%;transform:translate(-50%,-100%) rotate(var(--dir));box-shadow:0 2px 8px rgba(0,0,0,.22)}.wind-needle::before{content:'';position:absolute;left:50%;top:-6px;transform:translateX(-50%);border-left:6px solid transparent;border-right:6px solid transparent;border-bottom:9px solid var(--bad)}.wind-center{position:absolute;left:50%;top:50%;z-index:3;width:8px;height:8px;border-radius:50%;background:var(--ink);transform:translate(-50%,-50%)}.wind-compass.is-empty .wind-needle{display:none}.wind-dir-text{min-width:0;overflow-wrap:anywhere}");
   html += F(".summary-note{padding:12px 14px;border-radius:16px;border:1px solid rgba(31,138,112,.2);background:linear-gradient(180deg,rgba(31,138,112,.1),rgba(31,138,112,.03));color:var(--muted);font-size:.9rem}");
   html += F(".toolbar{display:flex;gap:var(--gap);flex-wrap:wrap;margin:14px 0 0}");
   html += F(".section-block,.summary-shell,.sched-shell,.zones-shell,.controls-shell{scroll-margin-top:140px}");
@@ -6057,12 +6067,16 @@ void handleRoot() {
   html += (isnan(ws) ? String("--") : String(ws,1)+" m/s");
   html += F("</div></div>");
   html += F("</div><div class='summary-metric-grid metric-pair'>");
-  html += F("<div class='metric-tile'><span class='metric-k'>Condition</span><div class='metric-v' id='cond'>");
+  html += F("<div class='metric-tile condition-tile'><span class='metric-k'>Condition</span><div class='condition-wrap'><div id='condIcon' class='weather-icon wi-unknown' aria-hidden='true'><span class='wi-main'></span><span class='wi-extra'></span></div><div class='metric-v' id='cond'>");
   html += cond.length() ? cond : String("--");
-  html += F("</div></div>");
-  html += F("<div class='metric-tile'><span class='metric-k'>Wind Direction</span><div class='metric-v' id='windDirChip'>");
-  html += windDir;
   html += F("</div></div></div>");
+  html += F("<div class='metric-tile wind-dir-tile'><span class='metric-k'>Wind Direction</span><div class='wind-compass-wrap'><div id='windCompass' class='wind-compass ");
+  html += isfinite(windDirDeg) ? "" : "is-empty";
+  html += F("' style='--dir:");
+  html += isfinite(windDirDeg) ? String(windDirDeg, 0) : String(0);
+  html += F("deg'><span class='cardinal n'>N</span><span class='cardinal e'>E</span><span class='cardinal s'>S</span><span class='cardinal w'>W</span><span class='wind-needle'></span><span class='wind-center'></span></div><div class='metric-v wind-dir-text' id='windDirChip'>");
+  html += windDir;
+  html += F("</div></div></div></div>");
   html += F("<div class='summary-subhead'>Today</div><div class='summary-metric-grid'>");
   html += F("<div class='metric-tile'><span class='metric-k'>Low / High</span><div class='metric-split'>");
   html += F("<div class='metric-split-item'><div class='metric-v'><span id='tmin'>---</span><span class='metric-unit'>C</span></div></div>");
@@ -6343,6 +6357,9 @@ void handleRoot() {
   html += F("return d.toLocaleDateString(undefined,{weekday:'short', day:'2-digit', month:'short'});}"); 
   html += F("function nextWaterStartLabel(epoch){if(!epoch||epoch===0)return'--'; return nextWaterDayLabel(epoch)+' '+toLocalHHMM(epoch);}");
   html += F("function fmtDurCompact(s){ if(!(s>0)) return '--'; const m=Math.floor(s/60), sec=s%60; return pad(m)+'m '+pad(sec)+'s'; }");
+  html += F("function setWindCompass(deg){const c=document.getElementById('windCompass');if(!c)return;const n=Number(deg);const ok=Number.isFinite(n);c.classList.toggle('is-empty',!ok);if(ok)c.style.setProperty('--dir',(((n%360)+360)%360)+'deg');}");
+  html += F("function weatherIconClass(text){const t=String(text||'').toLowerCase();if(!t||t==='--')return'wi-unknown';if(t.includes('thunder'))return'wi-storm';if(t.includes('freez')||t.includes('ice')||t.includes('rime'))return'wi-freezing';if(t.includes('snow'))return'wi-snow';if(t.includes('shower'))return'wi-showers';if(t.includes('drizzle'))return'wi-drizzle';if(t.includes('rain'))return'wi-rain';if(t.includes('fog')||t.includes('mist')||t.includes('haze'))return'wi-fog';if(t.includes('overcast'))return'wi-overcast';if(t.includes('partly')||t.includes('mainly'))return'wi-partly';if(t.includes('cloud'))return'wi-cloud';if(t.includes('clear')||t.includes('sun'))return'wi-clear';return'wi-unknown';}");
+  html += F("function setWeatherIcon(text){const el=document.getElementById('condIcon');if(!el)return;el.className='weather-icon '+weatherIconClass(text);el.title=text||'Unknown';}");
   html += F("async function refreshStatus(){try{const r=await fetch('/status');const st=await r.json();");
   html += F("if(typeof st.deviceEpoch==='number' && st.deviceEpoch>0 && _devEpoch===null){ startDeviceClock(st.deviceEpoch); }");
   html += F("const rb=document.getElementById('rainBadge');const wb=document.getElementById('windBadge');");
@@ -6409,11 +6426,11 @@ void handleRoot() {
   html += F("const feelsEl=document.getElementById('feelsChip'); if(feelsEl){ const v=st.feels_like; feelsEl.textContent=(typeof v==='number')?v.toFixed(1)+' C':'--'; }");
   html += F("const humEl=document.getElementById('humChip'); if(humEl){ const v=st.humidity; humEl.textContent=(typeof v==='number')?Math.round(v)+' %':'--'; }");
   html += F("const windEl=document.getElementById('windChip'); if(windEl){ const v=st.wind; windEl.textContent=(typeof v==='number')?v.toFixed(1)+' m/s':'--'; }");
-  html += F("const windDirEl=document.getElementById('windDirChip'); if(windDirEl){ const v=(typeof st.windDirText==='string'&&st.windDirText.length)?st.windDirText:'--'; windDirEl.textContent=v; }");
+  html += F("const windDirEl=document.getElementById('windDirChip'); if(windDirEl){ const v=(typeof st.windDirText==='string'&&st.windDirText.length)?st.windDirText:'--'; windDirEl.textContent=v; const m=/\\(([-0-9.]+) deg\\)/.exec(v); setWindCompass((typeof st.windDirDeg==='number')?st.windDirDeg:(m?Number(m[1]):NaN)); }");
   html += F("const condEl=document.getElementById('cond');");
   html += F("const cd=(typeof st.condDesc==='string' && st.condDesc.length)?st.condDesc:'';");
   html += F("const cm=(typeof st.condMain==='string' && st.condMain.length)?st.condMain:'';");
-  html += F("const condText=cd||cm||'--'; if(condEl){ condEl.textContent=condText; }");
+  html += F("const condText=cd||cm||'--'; if(condEl){ condEl.textContent=condText; } setWeatherIcon(condText);");
   html += F("if(heroWeather){ const v=st.temp; heroWeather.textContent=(typeof v==='number')?v.toFixed(1)+' C':'--'; }");
   html += F("if(heroWeatherSub) heroWeatherSub.textContent=(condText!=='--')?condText:'Weather data syncing';");
 
