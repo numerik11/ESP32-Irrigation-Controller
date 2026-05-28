@@ -204,6 +204,8 @@ bool zoneGpioActiveLow[MAX_ZONES] = {false};
 bool mainsGpioActiveLow = false;
 bool tankGpioActiveLow  = false;
 bool tankEnabled     = true;
+int powerSupplyPin = -1;          // optional switched supply enable output (-1 = disabled)
+bool powerSupplyActiveLow = false;
 
 #if defined(CONFIG_IDF_TARGET_ESP32)
 int zonePins[MAX_ZONES] = {
@@ -1209,6 +1211,7 @@ static void mdnsStart() {
 
 // ---------- GPIO fallback helpers ----------
 inline bool isValidOutputPin(int pin);
+static bool anyZoneActive();
 
 inline int gpioLevelForPolarity(bool on, bool activeLow) {
   if (activeLow) {
@@ -1244,7 +1247,14 @@ inline void gpioSourceWrite(bool mainsOn, bool tankOn) {
   if (tankOk)  digitalWrite(tankPin,  gpioLevelForPolarity(tankOn, tankGpioActiveLow));
 }
 
+inline void gpioPowerSupplyWrite(bool on) {
+  if (!isValidOutputPin(powerSupplyPin)) return;
+  digitalWrite(powerSupplyPin, gpioLevelForPolarity(on, powerSupplyActiveLow));
+}
+
 inline void setWaterSourceRelays(bool mainsOn, bool tankOn) {
+  if (mainsOn || tankOn) gpioPowerSupplyWrite(true);
+
   // Prefer PCF outputs for the classic wiring; otherwise drive the configured GPIO pins.
   if (!useGpioFallback) {
     // PCF8574: active-LOW
@@ -1253,6 +1263,8 @@ inline void setWaterSourceRelays(bool mainsOn, bool tankOn) {
   } else {
     gpioSourceWrite(mainsOn, tankOn);
   }
+
+  if (!mainsOn && !tankOn && !anyZoneActive()) gpioPowerSupplyWrite(false);
 }
 
 inline bool useExpanderForZone(int z) {
@@ -1383,6 +1395,7 @@ static void sanitizePinConfig() {
   }
   clampOutputGpio(mainsPin);
   clampOutputGpio(tankPin);
+  clampOutputGpio(powerSupplyPin);
 
   // Optional inputs
   clampGpio(rainSensorPin);
@@ -1429,6 +1442,23 @@ static void validatePinMap() {
   warnPinConflict("TFT_DC",  tftDcPin,  "TankLevel", tankLevelPin);
   warnPinConflict("TFT_SCLK",tftSclkPin,"RainSensor",rainSensorPin);
   warnPinConflict("TFT_MOSI",tftMosiPin,"RainSensor",rainSensorPin);
+  warnPinConflict("PowerSupply", powerSupplyPin, "I2C_SDA", i2cSdaPin);
+  warnPinConflict("PowerSupply", powerSupplyPin, "I2C_SCL", i2cSclPin);
+  warnPinConflict("PowerSupply", powerSupplyPin, "RainSensor", rainSensorPin);
+  warnPinConflict("PowerSupply", powerSupplyPin, "TankLevel", tankLevelPin);
+  warnPinConflict("PowerSupply", powerSupplyPin, "TFT_SCLK", tftSclkPin);
+  warnPinConflict("PowerSupply", powerSupplyPin, "TFT_MOSI", tftMosiPin);
+  warnPinConflict("PowerSupply", powerSupplyPin, "TFT_CS", tftCsPin);
+  warnPinConflict("PowerSupply", powerSupplyPin, "TFT_DC", tftDcPin);
+  warnPinConflict("PowerSupply", powerSupplyPin, "TFT_RST", tftRstPin);
+  warnPinConflict("PowerSupply", powerSupplyPin, "TFT_BL", tftBlPin);
+  warnPinConflict("PowerSupply", powerSupplyPin, "CityRelay", mainsPin);
+  warnPinConflict("PowerSupply", powerSupplyPin, "TankRelay", tankPin);
+  for (uint8_t i = 0; i < zonesCount && i < MAX_ZONES; ++i) {
+    char zoneName[8];
+    snprintf(zoneName, sizeof(zoneName), "Zone%u", (unsigned)(i + 1));
+    warnPinConflict("PowerSupply", powerSupplyPin, zoneName, zonePins[i]);
+  }
 
   // TFT self-collisions
   warnPinConflict("TFT_SCLK",tftSclkPin,"TFT_MOSI", tftMosiPin);
@@ -2786,6 +2816,7 @@ void initGpioFallback() {
 
   gpioInitOutput(mainsPin, mainsGpioActiveLow);
   gpioInitOutput(tankPin, tankGpioActiveLow);
+  gpioInitOutput(powerSupplyPin, powerSupplyActiveLow);
 }
 
 void initGpioPinsForZones() {
@@ -2801,6 +2832,8 @@ void initGpioPinsForZones() {
     gpioInitOutput(mainsPin, mainsGpioActiveLow);
     gpioInitOutput(tankPin, tankGpioActiveLow);
   }
+
+  gpioInitOutput(powerSupplyPin, powerSupplyActiveLow);
 }
 
 // ---------- Manual hardware buttons (select + start/stop) ----------
@@ -5349,6 +5382,7 @@ void turnOnZone(int z) {
   const char* src = "None";
   bool mainsOn=false, tankOn=false;
   chooseWaterSource(src, mainsOn, tankOn);
+  gpioPowerSupplyWrite(true);
 
   if (!usePcf) {
   // Use config for active level
@@ -5471,6 +5505,7 @@ void turnOnValveManual(int z) {
   const char* src = "None";
   bool mainsOn=false, tankOn=false;
   chooseWaterSource(src, mainsOn, tankOn);
+  gpioPowerSupplyWrite(true);
 
   if (!usePcf) {
   gpioZoneWrite(z, true);   // ON
@@ -7139,6 +7174,10 @@ void handleSetupPage() {
   html += String(tankPin); html += F("'><label class='chip'><input type='checkbox' name='tankPinLow' ");
   html += (tankGpioActiveLow ? "checked" : "");
   html += F("><span>LOW = ON</span></label><small>Pump on low pressure (Relay on) and off at a higher pressure (Relay off).</small></div>");
+  html += F("<div class='row switchline'><label>Power Supply Relay Pin</label><input class='in-xs' type='number' min='-1' max='"); html += String(uiMaxGpio); html += F("' name='powerSupplyPin' value='");
+  html += String(powerSupplyPin); html += F("'><label class='chip'><input type='checkbox' name='powerSupplyPinLow' ");
+  html += (powerSupplyActiveLow ? "checked" : "");
+  html += F("><span>LOW = ON</span></label><small>-1 disables. Turns on while any zone/source relay is active.</small></div>");
   html += F("<div class='row'><label>Legacy Default</label><div class='chip'>");
   html += (gpioActiveLow ? "LOW = ON" : "HIGH = ON");
   html += F("</div><small>Used only when loading older saved configs that do not have per-pin polarity values yet.</small></div>");
@@ -7922,6 +7961,12 @@ void loadConfig() {
   }
   // NEW: screen clock format (optional trailing line, 1=24-hour, 0=12-hour)
   if (nextTail(s) && s.length()) clockUse24Hour = (s.toInt() != 0);
+  // NEW: switched power supply GPIO (optional trailing lines)
+  if (nextTail(s) && s.length()) {
+    int p = s.toInt();
+    powerSupplyPin = (p == -1 || isValidOutputPin(p)) ? p : -1;
+  }
+  if (nextTail(s) && s.length()) powerSupplyActiveLow = (s.toInt() == 1);
 
   f.close();
 
@@ -8038,6 +8083,9 @@ void saveConfig() {
   f.println((int)tftPanelHeight);
   // NEW: screen clock format (1=24-hour, 0=12-hour)
   f.println(clockUse24Hour ? 1 : 0);
+  // NEW: switched power supply GPIO
+  f.println(powerSupplyPin);
+  f.println(powerSupplyActiveLow ? 1 : 0);
 
   f.close();
 }
@@ -8277,6 +8325,11 @@ void handleConfigure() {
     if (isValidOutputPin(p)) tankPin = p;
   }
   tankGpioActiveLow = server.hasArg("tankPinLow");
+  if (server.hasArg("powerSupplyPin")) {
+    int p = server.arg("powerSupplyPin").toInt();
+    if (p == -1 || isValidOutputPin(p)) powerSupplyPin = p;
+  }
+  powerSupplyActiveLow = server.hasArg("powerSupplyPinLow");
   if (server.hasArg("tankLevelPin")) {
     int p = server.arg("tankLevelPin").toInt();
     if (isValidAdcPin(p)) tankLevelPin = p;
@@ -8385,6 +8438,7 @@ void handleConfigure() {
     if (zoneGpioActiveLow[i]) { gpioActiveLow = true; break; }
   }
   if (mainsGpioActiveLow || tankGpioActiveLow) gpioActiveLow = true;
+  if (powerSupplyActiveLow) gpioActiveLow = true;
 
   // Timezone mode + values
   if (server.hasArg("tzMode")) {
