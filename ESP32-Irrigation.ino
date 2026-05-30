@@ -6898,7 +6898,7 @@ void handleSetupPage() {
   html += F("</div></details></div>"); // end Delays card
 
   // Physical rain & forecast
-  html += F("<div class='card narrow'><details class='collapse'><summary>Rain Inputs</summary><div class='collapse-body'><p class='card-intro'>Choose whether forecast rain, a physical sensor, or both can stop irrigation.</p>");
+  html += F("<div class='card narrow'><details class='collapse'><summary>Rain Sensor Inputs</summary><div class='collapse-body'><p class='card-intro'>Choose whether forecast rain, a physical sensor, or both can stop irrigation.</p>");
   html += F("<div class='row switchline'><label>Disable Open-Meteo Rain</label><input type='checkbox' name='rainForecastDisabled' ");
   html += (!rainDelayFromForecastEnabled ? "checked" : ""); html += F("><small>Checked = ignore Open-Meteo rain</small></div>");
   html += F("<div class='row switchline'><label>Enable Rain Sensor</label><input type='checkbox' name='rainSensorEnabled' "); html += (rainSensorEnabled?"checked":""); html += F("></div>");
@@ -6943,7 +6943,7 @@ void handleSetupPage() {
   html += F("</div></details></div>");
 
   // Timezone
-  html += F("<div class='card narrow' id='timezone-card'><details class='collapse'><summary>Time & Timezone</summary><div class='collapse-body'><p class='card-intro'>Use a POSIX timezone string or a fixed UTC offset so schedules and weather line up with local time.</p>");
+  html += F("<div class='card narrow' id='timezone-card'><details class='collapse'><summary>Timezone</summary><div class='collapse-body'><p class='card-intro'>Use a POSIX timezone string or a fixed UTC offset so schedules and weather line up with local time.</p>");
 
   // Mode selector - cleaner row, better labels
   html += F("<div class='row switchline'>");
@@ -7156,7 +7156,7 @@ void handleSetupPage() {
   html += F("</div></details></div>");
 
   // GPIO fallback pins
-  html += F("<div class='card narrow'><details class='collapse'><summary>Relay GPIO Fallback</summary><div class='collapse-body'><div class='grid'>");
+  html += F("<div class='card narrow'><details class='collapse'><summary>GPIO/PIN Assignments</summary><div class='collapse-body'><div class='grid'>");
   for (uint8_t i=0;i<MAX_ZONES;i++){
     html += F("<div class='row switchline'><label>Zone "); html += String(i+1);
     html += F(" Pin</label><input class='in-xs' type='number' min='-1' max='"); html += String(uiMaxGpio); html += F("' name='zonePin"); html += String(i);
