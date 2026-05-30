@@ -18,9 +18,9 @@ Built for real-world irrigation setups, from small home gardens to larger multi-
 
 <img width="432" height="934" alt="image" src="https://github.com/user-attachments/assets/db0b085c-d2f0-456b-85e4-010884bfb1f3" />
 
-### Setup Page
+### Diagram
 
-<img width="593" height="856" alt="image" src="https://github.com/user-attachments/assets/e8d30230-f0ed-4341-ab2c-728ea6d53387" />
+<img width="1871" height="1024" alt="DiAG11" src="https://github.com/user-attachments/assets/b2dd7fd0-393c-4e6e-b373-37e8c5efd838" />
 
 ### ESP32-S3 + 6 Zone/Relay + 24V AC
 
@@ -330,5 +330,5 @@ Then configure:
 
 ---
 
-<img width="1871" height="1024" alt="DiAG11" src="https://github.com/user-attachments/assets/b2dd7fd0-393c-4e6e-b373-37e8c5efd838" />
+
 
