@@ -16,7 +16,7 @@ Built for real-world irrigation setups, from small home gardens to larger multi-
 
 ### Main Dashboard
 
-<img width="432" height="934" alt="image" src="https://github.com/user-attachments/assets/db0b085c-d2f0-456b-85e4-010884bfb1f3" />
+<img width="445" height="866" alt="image" src="https://github.com/user-attachments/assets/4e16ba0a-e7e1-4941-a29a-103af87cda42" />
 
 ### Diagram
 
