@@ -4,7 +4,7 @@
 ![Weather](https://img.shields.io/badge/Weather-Aware-success)
 ![OTA](https://img.shields.io/badge/Updates-OTA-informational)
 
-# 🌱 ESP32 1–16 Zone Irrigation Controller
+# 🌱 ESP32 DIY 1–16 Zone Irrigation Controller
 
 **ESP32-based irrigation controller** for managing **1–16 irrigation zones/solenoid valves**, with optional **tank/mains source switching**, **weather-aware delay logic**, and a easy to use **local web interface**.
 
