@@ -285,7 +285,7 @@ Recommended boards:
 
 Recommended partition scheme:
 
-- **Huge App**
+- **Huge App** (SPIFFS)
 
 ### KC868 Library
 
