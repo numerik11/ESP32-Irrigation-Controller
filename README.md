@@ -81,7 +81,7 @@ Recommended boards:
 | **ESP32 + 240×320 SPI TFT** | Full-colour display for system status, active zones, delays, and water source mode |
 | **ESP32 + I²C OLED** | Compact low-pin-count display option |
 | **ESP8266 + I²C LCD** | Lightweight 16×2 LCD version |
-| **KC868-A6/A8** | Relay-expander based setup with built-in I/O convenience |
+| **KC868-A6/A8** | ESP32 Relay-expander based setup with built-in i2c relay control and I/O convenience|
 
 Optional power saving:
 - Add a **photoresistor + resistor** for display backlight control
