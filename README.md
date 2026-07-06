@@ -283,14 +283,14 @@ Recommended boards:
 - **ESP32 Dev Module**
 - **ESP32S3 Dev Module**
 
-Recommended partition scheme:
+###Recommended partition scheme:
 
-No OTA (2MB APP / 2MB SPIFFS) or Huge APP (3MB No OTA/1MB SPIFFS) 
+- No OTA (2MB APP / 2MB SPIFFS) or Huge APP (3MB No OTA/1MB SPIFFS) 
 
 ### KC868 Library
 
-If you are using KC868 hardware, install the **Kincony PCF8574** library.
-https://www.kincony.com/forum/attachment.php?aid=1697
+- If you are using KC868 hardware, install the **Kincony PCF8574** library.
+- https://www.kincony.com/forum/attachment.php?aid=1697
 ---
 
 ## 📡 First-Time Wi-Fi Setup
