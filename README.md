@@ -290,7 +290,7 @@ No OTA (2MB APP / 2MB SPIFFS) or Huge APP (3MB No OTA/1MB SPIFFS)
 ### KC868 Library
 
 If you are using KC868 hardware, install the **Kincony PCF8574** library.
-
+https://www.kincony.com/forum/attachment.php?aid=1697
 ---
 
 ## 📡 First-Time Wi-Fi Setup
