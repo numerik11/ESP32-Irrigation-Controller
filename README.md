@@ -283,7 +283,7 @@ Recommended boards:
 - **ESP32 Dev Module**
 - **ESP32S3 Dev Module**
 
-###Recommended partition scheme:
+### Recommended partition scheme:
 
 - No OTA (2MB APP / 2MB SPIFFS) or Huge APP (3MB No OTA/1MB SPIFFS) 
 
