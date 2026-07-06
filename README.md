@@ -48,25 +48,29 @@ Built for real-world irrigation setups, from small home gardens to larger multi-
 
 ---
 
-## 📋 Feature Overview
+## 🚀 Flashing and Setup
 
-| Feature | Support |
-|---|---|
-| 1–16 zones | ✅ Optional |
-| Two start times per zone | ✅ |
-| 7-day scheduling | ✅ |
-| Minute + second precision | ✅ |
-| Sequential mode | ✅ |
-| Run Together | ✅ |
-| Editable zone names | ✅ |
-| Tank / mains switching | ✅ Optional |
-| Weather integration | ✅ |
-| Rain delay | ✅ Optional |
-| Wind delay | ✅ Optional |
-| OTA updates | ✅ |
-| Event logging | ✅ |
-| TFT / OLED / LCD support | ✅ Optional |
-| KC868-A6/A8 support | ✅ |
+### Arduino IDE
+
+Add this board manager URL:
+
+https://dl.espressif.com/dl/package_esp32_index.json
+
+Install **ESP32 by Espressif Systems**.
+
+Recommended boards:
+
+- **ESP32 Dev Module**
+- **ESP32S3 Dev Module**
+
+### Recommended partition scheme
+
+- No OTA (2MB APP / 2MB SPIFFS) or Huge APP (3MB No OTA/1MB SPIFFS) 
+
+### KC868 Library
+
+- If you are using KC868 hardware, install the **Kincony PCF8574** library.
+- https://www.kincony.com/forum/attachment.php?aid=1697
 
 ---
 
@@ -82,6 +86,27 @@ Built for real-world irrigation setups, from small home gardens to larger multi-
 Optional power saving:
 - Add a **photoresistor + resistor** for display backlight control
 - Screen can dim or turn off when the enclosure door is closed
+
+---
+
+## 📡 First-Time Wi-Fi Setup
+
+1. Connect to **ESPIrrigationAP**
+2. Open **http://192.168.4.1**
+3. Enter your Wi-Fi credentials
+4. Wait for the controller to reboot
+5. Open **espirrigation.local** or the assigned IP address
+
+Then configure:
+
+- **Timezone**
+- **Weather location**
+- **GPS coordinates**
+- **Zone count**
+- **Pin assignments**
+- **Other system options**
+
+
 
 ---
 
@@ -268,47 +293,6 @@ If wind speed rises above the configured threshold, watering is delayed until co
 
 ---
 
-## 🚀 Flashing and Setup
-
-### Arduino IDE
-
-Add this board manager URL:
-
-https://dl.espressif.com/dl/package_esp32_index.json
-
-Install **ESP32 by Espressif Systems**.
-
-Recommended boards:
-
-- **ESP32 Dev Module**
-- **ESP32S3 Dev Module**
-
-### Recommended partition scheme
-
-- No OTA (2MB APP / 2MB SPIFFS) or Huge APP (3MB No OTA/1MB SPIFFS) 
-
-### KC868 Library
-
-- If you are using KC868 hardware, install the **Kincony PCF8574** library.
-- https://www.kincony.com/forum/attachment.php?aid=1697
----
-
-## 📡 First-Time Wi-Fi Setup
-
-1. Connect to **ESPIrrigationAP**
-2. Open **http://192.168.4.1**
-3. Enter your Wi-Fi credentials
-4. Wait for the controller to reboot
-5. Open **espirrigation.local** or the assigned IP address
-
-Then configure:
-
-- **Timezone**
-- **Weather location**
-- **GPS coordinates**
-- **Zone count**
-- **Pin assignments**
-- **Other system options**
 
 ---
 
