@@ -95,7 +95,7 @@ Optional power saving:
 2. Open **http://192.168.4.1**
 3. Enter your Wi-Fi credentials
 4. Wait for the controller to reboot
-5. Open **espirrigation.local** or the assigned IP address
+5. Open **http://espirrigation.local** or the assigned IP address
 
 Then configure:
 
