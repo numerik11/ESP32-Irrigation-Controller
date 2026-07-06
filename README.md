@@ -285,7 +285,7 @@ Recommended boards:
 
 Recommended partition scheme:
 
-- **Huge App** (SPIFFS)
+No OTA (2MB APP / 2MB SPIFFS) or Huge APP (3MB No OTA/1MB SPIFFS) 
 
 ### KC868 Library
 
