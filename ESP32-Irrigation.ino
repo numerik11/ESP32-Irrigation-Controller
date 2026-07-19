@@ -6236,7 +6236,7 @@ void handleRoot() {
   html += F("</div><div class='summary-support'>Zone <span id='nwZone'>--</span></div></div>");
   html += F("<div class='metric-tile'><span class='metric-k'>ETA</span><div class='metric-v' id='nwETA'>--</div></div>");
   html += F("<div class='metric-tile'><span class='metric-k'>Duration</span><div class='metric-v' id='nwDur'>--</div></div>");
-  html += F("</div><div class='summary-note'>During Rain: Active, scheduled watering will be stopped, if rain mm threshold is met all watering will stop for set hours. If Wind: Active, scheduled watering will be postponed until wind conditions drop below set m/s threshold.</div></div>");
+  html += F("</div><div class='summary-note'><strong>Rain Active:</strong> Scheduled watering will stop when the rainfall threshold is reached. All watering will remain disabled for the configured rain-delay period.<br><br><strong>Wind Active:</strong> Scheduled watering will be postponed while wind speed is above the configured threshold. Watering will resume when wind conditions fall below the set m/s limit.</div></div>");
   html += F("</div></div>"); // end glass / grid
   flush();
 
