@@ -114,6 +114,7 @@ Adafruit_ST7789 tft(&SPI, -1, -1, -1);
 #define OLED_RESET -1
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &I2Cbus, OLED_RESET);
 bool displayEnabled = true;
+bool tempUseFahrenheit = false;
 bool displayUseTft = (ENABLE_TFT != 0); // default mode; can be changed in Setup
 bool clockUse24Hour = true;
 
@@ -1308,6 +1309,15 @@ static float smartWateringReferenceTempC() {
   return NAN;
 }
 
+static float temperatureForDisplay(float tempC) {
+  if (!isfinite(tempC) || !tempUseFahrenheit) return tempC;
+  return tempC * 9.0f / 5.0f + 32.0f;
+}
+
+static char temperatureUnitChar() {
+  return tempUseFahrenheit ? 'F' : 'C';
+}
+
 static float smartWateringFactor() {
   if (!smartWateringEnabled) return 1.0f;
 
@@ -2296,7 +2306,8 @@ void setup() {
   doc["tftBrightnessPct"] = tftPct;
   doc["tftWidth"]         = tftPanelWidth;
   doc["tftHeight"]        = tftPanelHeight;
-  doc["displayType"]      = !displayEnabled ? "none" : (displayUseTft ? "tft" : "oled");
+    doc["displayType"]      = !displayEnabled ? "none" : (displayUseTft ? "tft" : "oled");
+    doc["tempUnit"]         = tempUseFahrenheit ? "F" : "C";
 
     // Current rain (actuals)
     doc["rain1hNow"] = rain1hNow;
@@ -4271,15 +4282,17 @@ void HomeScreen() {
     }
 
     char envBuf[32];
+    const float displayTemp = temperatureForDisplay(curTempC);
+    const char tempUnit = temperatureUnitChar();
     const char* condOled = (curWeatherCode >= 0) ? meteoCodeToMain(curWeatherCode) : "--";
     if (isnan(curTempC) && curHumidityPct < 0) {
-      snprintf(envBuf, sizeof(envBuf), "--C --%% %s", condOled);
+      snprintf(envBuf, sizeof(envBuf), "--%c --%% %s", tempUnit, condOled);
     } else if (curHumidityPct < 0) {
-      snprintf(envBuf, sizeof(envBuf), "%.0fC --%% %s", curTempC, condOled);
+      snprintf(envBuf, sizeof(envBuf), "%.0f%c --%% %s", displayTemp, tempUnit, condOled);
     } else if (isnan(curTempC)) {
-      snprintf(envBuf, sizeof(envBuf), "--C %d%% %s", curHumidityPct, condOled);
+      snprintf(envBuf, sizeof(envBuf), "--%c %d%% %s", tempUnit, curHumidityPct, condOled);
     } else {
-      snprintf(envBuf, sizeof(envBuf), "%.0fC %d%% %s", curTempC, curHumidityPct, condOled);
+      snprintf(envBuf, sizeof(envBuf), "%.0f%c %d%% %s", displayTemp, tempUnit, curHumidityPct, condOled);
     }
 
     char nextBuf[28] = "Next none";
@@ -4342,7 +4355,7 @@ void HomeScreen() {
     return;
   }
 
-  float temp = curTempC;
+  float temp = temperatureForDisplay(curTempC);
   int   hum  = curHumidityPct;
   float windNow = curWindMs;
   int   pct  = tankPercent();
@@ -4617,7 +4630,7 @@ void HomeScreen() {
       tft.setTextColor(C_TEXT);
       tft.setCursor(centerX + 8, cardY + 22);
       if (isnan(temp)) tft.print("--");
-      else { tft.print(temp, 0); tft.print("C"); }
+      else { tft.print(temp, 0); tft.print(temperatureUnitChar()); }
       
       tft.setTextSize(1);
       tft.setTextColor(C_MUTED);
@@ -4933,8 +4946,8 @@ void HomeScreen() {
       tft.setTextSize(2);
       tft.setTextColor(C_TEXT);
       tft.setCursor(16, envY + 20);
-      if (isnan(temp)) tft.print("--C");
-      else { tft.print(temp, 0); tft.print("C"); }
+      if (isnan(temp)) { tft.print("--"); tft.print(temperatureUnitChar()); }
+      else { tft.print(temp, 0); tft.print(temperatureUnitChar()); }
       tft.setTextColor(C_MUTED);
       tft.print("  ");
       if (hum < 0) tft.print("--%");
@@ -5201,8 +5214,8 @@ void HomeScreen() {
       int extraY = statY + 18;
       int extraH = contentY + contentH - extraY - 4;
       if (extraH >= 24) {
-        int minT = isnan(todayMin_C) ? 1000 : (int)lroundf(todayMin_C);
-        int maxT = isnan(todayMax_C) ? 1000 : (int)lroundf(todayMax_C);
+        int minT = isnan(todayMin_C) ? 1000 : (int)lroundf(temperatureForDisplay(todayMin_C));
+        int maxT = isnan(todayMax_C) ? 1000 : (int)lroundf(temperatureForDisplay(todayMax_C));
         int gustT = isnan(maxGust24h_ms) ? 1000 : (int)lroundf(maxGust24h_ms * 10.0f);
 
         bool extraChanged = layoutChanged || (minT != lastMinT) || (maxT != lastMaxT) || (gustT != lastGustT);
@@ -5265,7 +5278,7 @@ void HomeScreen() {
       tft.setCursor(rightX + 8, contentY + 11); // push down for better centering
       tft.print("T:");
       if (isnan(temp)) tft.print("--");
-      else { tft.print(temp, 0); tft.print("C"); tft.print(newArrow); }
+      else { tft.print(temp, 0); tft.print(temperatureUnitChar()); tft.print(newArrow); }
       tft.print("  H:");
       if (hum < 0) tft.print("--");
       else { tft.print(hum); tft.print("%"); }
@@ -5741,10 +5754,10 @@ void handleRoot() {
   updateCachedWeather();
 
   // Safe reads from decoded snapshot
-  float temp = curTempC;
+  float temp = temperatureForDisplay(curTempC);
   float hum = (curHumidityPct >= 0) ? (float)curHumidityPct : NAN;
   float ws = curWindMs;
-  float feels = curFeelsC;
+  float feels = temperatureForDisplay(curFeelsC);
   String windDir = formatWindDirection(curWindDirDeg);
   float windDirDeg = normalizeDegrees360(curWindDirDeg);
   int wcode = curWeatherCode;
@@ -5811,7 +5824,7 @@ void handleRoot() {
                               ? String(activeZoneCount) + String(activeZoneCount == 1 ? " zone running" : " zones running")
                               : String("Automation ready"))
                            : String("Automation blocked"));
-  String heroWeatherValue = isnan(temp) ? String("--") : String(temp, 1) + " C";
+  String heroWeatherValue = isnan(temp) ? String("--") : String(temp, 1) + " " + temperatureUnitChar();
 
   // --- HTML ---
   String html; html.reserve(6000);
@@ -6177,10 +6190,10 @@ void handleRoot() {
 
   html += F("<div class='card summary-card weather-card'><h3>Current Weather</h3><div class='summary-metric-grid'>");
   html += F("<div class='metric-tile'><span class='metric-k'>Temperature</span><div class='metric-v big-metric'><span id='tempChip'>");
-  html += (isnan(temp) ? String("--") : String(temp,1)+" C");
+  html += (isnan(temp) ? String("--") : String(temp,1)+" "+temperatureUnitChar());
   html += F("</span> <span id='tempTrend' style='font-weight:900;'>&rarr;</span></div></div>");
   html += F("<div class='metric-tile'><span class='metric-k'>Feels Like</span><div class='metric-v' id='feelsChip'>");
-  html += (isnan(feels) ? String("--") : String(feels,1)+" C");
+  html += (isnan(feels) ? String("--") : String(feels,1)+" "+temperatureUnitChar());
   html += F("</div></div>");
   html += F("<div class='metric-tile'><span class='metric-k'>Humidity</span><div class='metric-v' id='humChip'>");
   html += (isnan(hum) ? String("--") : String((int)hum)+" %");
@@ -6201,8 +6214,8 @@ void handleRoot() {
   html += F("</div></div></div></div>");
   html += F("<div class='summary-subhead'>Today</div><div class='summary-metric-grid'>");
   html += F("<div class='metric-tile'><span class='metric-k'>Low / High</span><div class='metric-split'>");
-  html += F("<div class='metric-split-item'><div class='metric-v'><span id='tmin'>---</span><span class='metric-unit'>C</span></div></div>");
-  html += F("<div class='metric-split-item'><div class='metric-v'><span id='tmax'>---</span><span class='metric-unit'>C</span></div></div>");
+  html += F("<div class='metric-split-item'><div class='metric-v'><span id='tmin'>---</span><span class='metric-unit'>"); html += temperatureUnitChar(); html += F("</span></div></div>");
+  html += F("<div class='metric-split-item'><div class='metric-v'><span id='tmax'>---</span><span class='metric-unit'>"); html += temperatureUnitChar(); html += F("</span></div></div>");
   html += F("</div></div>");
   html += F("<div class='metric-tile'><span class='metric-k'>Pressure</span><div class='metric-v'><span id='press'>--</span><span class='metric-unit'>hPa</span></div></div>");
   html += F("<div class='metric-tile'><span class='metric-k'>Sunrise</span><div class='metric-v' id='sunr'>--:--</div></div>");
@@ -6528,9 +6541,10 @@ void handleRoot() {
 
 
   // Weather stats
+  html += F("const tempUnit=(st.tempUnit==='F')?'F':'C'; const showTemp=v=>(tempUnit==='F'?(v*9/5+32):v);");
   html += F("const tmin=document.getElementById('tmin'); const tmax=document.getElementById('tmax'); const sunr=document.getElementById('sunr'); const suns=document.getElementById('suns'); const press=document.getElementById('press');");
-  html += F("if(tmin) tmin.textContent=(st.tmin??0).toFixed(0);");
-  html += F("if(tmax) tmax.textContent=(st.tmax??0).toFixed(0);");
+  html += F("if(tmin) tmin.textContent=showTemp(st.tmin??0).toFixed(0);");
+  html += F("if(tmax) tmax.textContent=showTemp(st.tmax??0).toFixed(0);");
   html += F("if(sunr) sunr.textContent = st.sunriseLocal || '--:--';");
   html += F("if(suns) suns.textContent = st.sunsetLocal  || '--:--';");
   html += F("if(press){ const p=st.pressure; press.textContent=(typeof p==='number' && p>0)?p.toFixed(0):'--'; }");
@@ -6538,14 +6552,14 @@ void handleRoot() {
   html += F("const heroWeather=document.getElementById('heroWeatherValue'); const heroWeatherTrend=document.getElementById('heroWeatherTrend'); const heroWeatherSub=document.getElementById('heroWeatherSub');");
   html += F("if(tempEl){ const v=st.temp;");
   html += F("  if(typeof v==='number'){");
-  html += F("    tempEl.textContent=v.toFixed(1)+' C';");
+  html += F("    tempEl.textContent=showTemp(v).toFixed(1)+' '+tempUnit;");
   html += F("    if(_lastTemp!==null){ const d=v-_lastTemp; if(d>0.1) _lastTempTrend='\\u2191'; else if(d<-0.1) _lastTempTrend='\\u2193'; }");
   html += F("    _lastTemp=v;");
   html += F("  } else { tempEl.textContent='--'; _lastTemp=null; _lastTempTrend='\\u2192'; }");
   html += F("  if(trendEl){ trendEl.textContent=_lastTempTrend; trendEl.style.color=(_lastTempTrend==='\\u2191')?'#16a34a':(_lastTempTrend==='\\u2193')?'#dc2626':'inherit'; }");
   html += F("  if(heroWeatherTrend){ heroWeatherTrend.textContent=_lastTempTrend; heroWeatherTrend.style.color=(_lastTempTrend==='\\u2191')?'#16a34a':(_lastTempTrend==='\\u2193')?'#dc2626':'inherit'; }");
   html += F("}");
-  html += F("const feelsEl=document.getElementById('feelsChip'); if(feelsEl){ const v=st.feels_like; feelsEl.textContent=(typeof v==='number')?v.toFixed(1)+' C':'--'; }");
+  html += F("const feelsEl=document.getElementById('feelsChip'); if(feelsEl){ const v=st.feels_like; feelsEl.textContent=(typeof v==='number')?showTemp(v).toFixed(1)+' '+tempUnit:'--'; }");
   html += F("const humEl=document.getElementById('humChip'); if(humEl){ const v=st.humidity; humEl.textContent=(typeof v==='number')?Math.round(v)+' %':'--'; }");
   html += F("const windEl=document.getElementById('windChip'); if(windEl){ const v=st.wind; windEl.textContent=(typeof v==='number')?v.toFixed(1)+' m/s':'--'; }");
   html += F("const windDirEl=document.getElementById('windDirChip'); if(windDirEl){ const v=(typeof st.windDirText==='string'&&st.windDirText.length)?st.windDirText:'--'; windDirEl.textContent=v; const m=/\\(([-0-9.]+) deg\\)/.exec(v); setWindCompass((typeof st.windDirDeg==='number')?st.windDirDeg:(m?Number(m[1]):NaN)); }");
@@ -6553,7 +6567,7 @@ void handleRoot() {
   html += F("const cd=(typeof st.condDesc==='string' && st.condDesc.length)?st.condDesc:'';");
   html += F("const cm=(typeof st.condMain==='string' && st.condMain.length)?st.condMain:'';");
   html += F("const condText=cd||cm||'--'; if(condEl){ condEl.textContent=condText; } setWeatherIcon(condText);");
-  html += F("if(heroWeather){ const v=st.temp; heroWeather.textContent=(typeof v==='number')?v.toFixed(1)+' C':'--'; }");
+  html += F("if(heroWeather){ const v=st.temp; heroWeather.textContent=(typeof v==='number')?showTemp(v).toFixed(1)+' '+tempUnit:'--'; }");
   html += F("if(heroWeatherSub) heroWeatherSub.textContent=(condText!=='--')?condText:'Weather data syncing';");
 
   // keep master pill synced
@@ -6983,14 +6997,14 @@ void handleSetupPage() {
   html += (smartWateringEnabled ? "checked" : "");
   html += F("><small>Adjust scheduled runtimes using the rules below.</small></div>");
   html += F("<div class='subhead'>Smart Watering Rules</div><hr class='hr'>");
-  html += F("<div class='row'><label>Cool Below (C)</label><input class='in-sm' type='number' step='0.1' min='-30' max='60' name='smartCoolTemp' value='");
-  html += String(smartCoolTempC, 1); html += F("'><small>Runtime adjustment (%)</small><input class='in-sm' type='number' min='-100' max='300' name='smartCoolPct' value='");
+  html += F("<div class='row'><label>Cool Below (<span data-temp-unit>"); html += temperatureUnitChar(); html += F("</span>)</label><input class='in-sm' data-smart-temp type='number' step='0.1' name='smartCoolTemp' value='");
+  html += String(temperatureForDisplay(smartCoolTempC), 1); html += F("'><small>Runtime adjustment (%)</small><input class='in-sm' type='number' min='-100' max='300' name='smartCoolPct' value='");
   html += String(smartCoolAdjustPct); html += F("'></div>");
-  html += F("<div class='row'><label>Hot At/Above (C)</label><input class='in-sm' type='number' step='0.1' min='-30' max='60' name='smartHotTemp' value='");
-  html += String(smartHotTempC, 1); html += F("'><small>Runtime adjustment (%)</small><input class='in-sm' type='number' min='-100' max='300' name='smartHotPct' value='");
+  html += F("<div class='row'><label>Hot At/Above (<span data-temp-unit>"); html += temperatureUnitChar(); html += F("</span>)</label><input class='in-sm' data-smart-temp type='number' step='0.1' name='smartHotTemp' value='");
+  html += String(temperatureForDisplay(smartHotTempC), 1); html += F("'><small>Runtime adjustment (%)</small><input class='in-sm' type='number' min='-100' max='300' name='smartHotPct' value='");
   html += String(smartHotAdjustPct); html += F("'></div>");
-  html += F("<div class='row'><label>Very Hot At/Above (C)</label><input class='in-sm' type='number' step='0.1' min='-30' max='60' name='smartVeryHotTemp' value='");
-  html += String(smartVeryHotTempC, 1); html += F("'><small>Runtime adjustment (%)</small><input class='in-sm' type='number' min='-100' max='300' name='smartVeryHotPct' value='");
+  html += F("<div class='row'><label>Very Hot At/Above (<span data-temp-unit>"); html += temperatureUnitChar(); html += F("</span>)</label><input class='in-sm' data-smart-temp type='number' step='0.1' name='smartVeryHotTemp' value='");
+  html += String(temperatureForDisplay(smartVeryHotTempC), 1); html += F("'><small>Runtime adjustment (%)</small><input class='in-sm' type='number' min='-100' max='300' name='smartVeryHotPct' value='");
   html += String(smartVeryHotAdjustPct); html += F("'></div>");
   html += F("<div class='row'><label>Actual Rain Skip Above (mm)</label><input class='in-sm' type='number' step='0.1' min='0' max='200' name='smartActualRainMm' value='");
   html += String(smartActualRainSkipMm, 1); html += F("'><small>Light-rain adjustment up to this amount (%)</small><input class='in-sm' type='number' min='-100' max='300' name='smartLightRainPct' value='");
@@ -7160,6 +7174,9 @@ void handleSetupPage() {
   html += F("<option value='12'");
   html += (!clockUse24Hour ? " selected" : "");
   html += F(">12 hour</option></select><small>Controls the clock shown on the screen</small></div>");
+  html += F("<div class='row'><label>Temperature Unit</label><select class='in-sm' name='tempUnit' id='tempUnitSelect'>");
+  html += F("<option value='C'"); html += (!tempUseFahrenheit ? " selected" : ""); html += F(">Celsius (C)</option>");
+  html += F("<option value='F'"); html += (tempUseFahrenheit ? " selected" : ""); html += F(">Fahrenheit (F)</option></select><small>Homepage, screen, and Smart Watering thresholds</small></div>");
   html += F("<div class='row' data-tft-only><label>TFT Rotation</label><select class='in-sm' name='tftRotation'>");
   html += F("<option value='0'"); html += (tftRotation == 0 ? " selected" : ""); html += F(">0</option>");
   html += F("<option value='1'"); html += (tftRotation == 1 ? " selected" : ""); html += F(">1</option>");
@@ -7327,6 +7344,8 @@ void handleSetupPage() {
   html += F("<script>");
   html += F("async function post(path, body){try{await fetch(path,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body});}catch(e){console.error(e)}}");
   html += F("const g=id=>document.getElementById(id);");
+  html += F("let setupTempUnit='"); html += temperatureUnitChar(); html += F("';const tempUnitSel=g('tempUnitSelect');");
+  html += F("tempUnitSel?.addEventListener('change',()=>{const next=tempUnitSel.value==='F'?'F':'C';if(next===setupTempUnit)return;document.querySelectorAll('[data-smart-temp]').forEach(el=>{const v=parseFloat(el.value);if(Number.isFinite(v))el.value=(next==='F'?(v*9/5+32):(v-32)*5/9).toFixed(1);});document.querySelectorAll('[data-temp-unit]').forEach(el=>el.textContent=next);setupTempUnit=next;});");
   html += F("function addRipple(e){const t=e.currentTarget; if(t.disabled) return; const rect=t.getBoundingClientRect();");
   html += F("const size=Math.max(rect.width,rect.height); const x=(e.clientX|| (rect.left+rect.width/2)) - rect.left - size/2;");
   html += F("const y=(e.clientY|| (rect.top+rect.height/2)) - rect.top - size/2;");
@@ -8089,6 +8108,7 @@ void loadConfig() {
   if (nextTail(s) && s.length()) { float v=s.toFloat(); if (v >= 0.0f && v <= 200.0f) smartActualRainSkipMm=v; }
   if (nextTail(s) && s.length()) { int v=s.toInt(); if (v >= -100 && v <= 300) smartLightRainAdjustPct=v; }
   if (nextTail(s) && s.length()) { float v=s.toFloat(); if (v >= 0.0f && v <= 200.0f) smartForecastRainSkipMm=v; }
+  if (nextTail(s) && s.length()) tempUseFahrenheit = (s.toInt() == 1);
 
   if (!(smartCoolTempC < smartHotTempC && smartHotTempC < smartVeryHotTempC)) {
     smartCoolTempC = 18.0f;
@@ -8227,6 +8247,7 @@ void saveConfig() {
   f.println(String(smartActualRainSkipMm, 2));
   f.println(smartLightRainAdjustPct);
   f.println(String(smartForecastRainSkipMm, 2));
+  f.println(tempUseFahrenheit ? 1 : 0);
 
   f.close();
 }
@@ -8309,6 +8330,7 @@ void handleConfigure() {
   bool oldDisplayEnabled = displayEnabled;
   bool oldDisplayUseTft = displayUseTft;
   bool oldClockUse24Hour = clockUse24Hour;
+  bool oldTempUseFahrenheit = tempUseFahrenheit;
 
   // Weather (Open-Meteo)
   if (server.hasArg("meteoLocation")) {
@@ -8363,9 +8385,15 @@ void handleConfigure() {
   runZonesConcurrent = server.hasArg("runConcurrent");
   smartWateringEnabled = server.hasArg("smartWatering");
 
-  float coolTemp = server.hasArg("smartCoolTemp") ? server.arg("smartCoolTemp").toFloat() : smartCoolTempC;
-  float hotTemp = server.hasArg("smartHotTemp") ? server.arg("smartHotTemp").toFloat() : smartHotTempC;
-  float veryHotTemp = server.hasArg("smartVeryHotTemp") ? server.arg("smartVeryHotTemp").toFloat() : smartVeryHotTempC;
+  const bool submittedFahrenheit = server.hasArg("tempUnit")
+                                    ? (server.arg("tempUnit") == "F")
+                                    : tempUseFahrenheit;
+  auto submittedTempToC = [&](float value) -> float {
+    return submittedFahrenheit ? (value - 32.0f) * 5.0f / 9.0f : value;
+  };
+  float coolTemp = server.hasArg("smartCoolTemp") ? submittedTempToC(server.arg("smartCoolTemp").toFloat()) : smartCoolTempC;
+  float hotTemp = server.hasArg("smartHotTemp") ? submittedTempToC(server.arg("smartHotTemp").toFloat()) : smartHotTempC;
+  float veryHotTemp = server.hasArg("smartVeryHotTemp") ? submittedTempToC(server.arg("smartVeryHotTemp").toFloat()) : smartVeryHotTempC;
   if (coolTemp >= -30.0f && veryHotTemp <= 60.0f && coolTemp < hotTemp && hotTemp < veryHotTemp) {
     smartCoolTempC = coolTemp;
     smartHotTempC = hotTemp;
@@ -8539,6 +8567,9 @@ void handleConfigure() {
   if (server.hasArg("clockFormat")) {
     clockUse24Hour = (server.arg("clockFormat") != "12");
   }
+  if (server.hasArg("tempUnit")) {
+    tempUseFahrenheit = (server.arg("tempUnit") == "F");
+  }
   if (server.hasArg("tftRotation")) {
     int r = server.arg("tftRotation").toInt();
     if (r < 0) r = 0;
@@ -8680,6 +8711,7 @@ void handleConfigure() {
   bool i2cPinsChanged = (oldI2cSda != i2cSdaPin || oldI2cScl != i2cSclPin);
   bool displayModeChanged = (oldDisplayEnabled != displayEnabled || oldDisplayUseTft != displayUseTft);
   bool clockFormatChanged = (oldClockUse24Hour != clockUse24Hour);
+  bool tempUnitChanged = (oldTempUseFahrenheit != tempUseFahrenheit);
   bool tftRotationChanged = (oldTftRotation != (int)tftRotation);
 
   // Persist and re-apply runtime things
@@ -8690,7 +8722,7 @@ void handleConfigure() {
   if (!displayModeChanged && !tftGeometryChanged && displayEnabled && displayUseTft && tftRotationChanged) {
     tft.setRotation(tftRotation);
   }
-  if (clockFormatChanged) {
+  if (clockFormatChanged || tempUnitChanged) {
     g_forceHomeReset = true;
     lastScreenRefresh = 0;
   }
