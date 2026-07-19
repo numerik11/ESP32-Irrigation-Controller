@@ -1,4 +1,5 @@
-![Platform](https://img.shields.io/badge/Platform-ESP32%20%7C%20ESP32--S3-blue)
+![Platform](https://img.shields.io/badge/Platform-ESP32%20%7C%20ESP32--S3-blue)<img width="556" height="301" alt="image" src="https://github.com/user-attachments/assets/568259c4-d7b4-455d-a3a7-b4ad6fb9f849" />
+
 ![Zones](https://img.shields.io/badge/Zones-1%E2%80%9316-green)
 ![Web UI](https://img.shields.io/badge/Web%20UI-Local-orange)
 ![Weather](https://img.shields.io/badge/Weather-Aware-success)
