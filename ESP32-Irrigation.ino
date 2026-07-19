@@ -301,6 +301,15 @@ uint32_t rainCooldownUntilEpoch = 0;     // when > now => block starts
 int      rainCooldownMin = 60;           // minutes to wait after rain clears
 int      rainThreshold24h_mm = 5;        // forecast/actual 24h total triggers delay
 bool     smartWateringEnabled = false;   // adjust scheduled runtimes from temp/rain
+float    smartCoolTempC = 18.0f;
+int      smartCoolAdjustPct = -20;
+float    smartHotTempC = 28.0f;
+int      smartHotAdjustPct = 20;
+float    smartVeryHotTempC = 34.0f;
+int      smartVeryHotAdjustPct = 40;
+float    smartActualRainSkipMm = 5.0f;
+int      smartLightRainAdjustPct = -30;
+float    smartForecastRainSkipMm = 5.0f;
 
 // NEW Run mode: sequential (false) or concurrent (true)
 bool runZonesConcurrent = false;
@@ -1305,18 +1314,21 @@ static float smartWateringFactor() {
   const float actualRain24h = last24hActualRain();
   const float forecastRain24h = isfinite(rainNext24h_mm) ? rainNext24h_mm : 0.0f;
 
-  if (actualRain24h > 5.0f || forecastRain24h > 5.0f) return 0.0f;
+  if (actualRain24h > smartActualRainSkipMm ||
+      forecastRain24h > smartForecastRainSkipMm) return 0.0f;
 
   float factor = 1.0f;
   const float tempC = smartWateringReferenceTempC();
   if (isfinite(tempC)) {
-    if (tempC < 18.0f) factor *= 0.80f;
-    else if (tempC >= 34.0f) factor *= 1.40f;
-    else if (tempC >= 28.0f) factor *= 1.20f;
+    if (tempC < smartCoolTempC) factor *= (100.0f + smartCoolAdjustPct) / 100.0f;
+    else if (tempC >= smartVeryHotTempC) factor *= (100.0f + smartVeryHotAdjustPct) / 100.0f;
+    else if (tempC >= smartHotTempC) factor *= (100.0f + smartHotAdjustPct) / 100.0f;
   }
 
-  if (actualRain24h > 0.0f) factor *= 0.70f;
-  return factor;
+  if (actualRain24h > 0.0f && actualRain24h <= smartActualRainSkipMm) {
+    factor *= (100.0f + smartLightRainAdjustPct) / 100.0f;
+  }
+  return (factor > 0.0f) ? factor : 0.0f;
 }
 
 static unsigned long smartWateringDurationForSlot(int z, int slot) {
@@ -6969,7 +6981,22 @@ void handleSetupPage() {
   html += F("'><small>After-Rain Delay if above threshold</small></div>");
   html += F("<div class='row switchline'><label>Smart Watering</label><input type='checkbox' name='smartWatering' ");
   html += (smartWateringEnabled ? "checked" : "");
-  html += F("><small>Scheduled runs only: cool -20%, hot +20%, very hot +40%, light rain -30%, skip if actual/forecast rain exceeds 5 mm.</small></div>");
+  html += F("><small>Adjust scheduled runtimes using the rules below.</small></div>");
+  html += F("<div class='subhead'>Smart Watering Rules</div><hr class='hr'>");
+  html += F("<div class='row'><label>Cool Below (C)</label><input class='in-sm' type='number' step='0.1' min='-30' max='60' name='smartCoolTemp' value='");
+  html += String(smartCoolTempC, 1); html += F("'><small>Runtime adjustment (%)</small><input class='in-sm' type='number' min='-100' max='300' name='smartCoolPct' value='");
+  html += String(smartCoolAdjustPct); html += F("'></div>");
+  html += F("<div class='row'><label>Hot At/Above (C)</label><input class='in-sm' type='number' step='0.1' min='-30' max='60' name='smartHotTemp' value='");
+  html += String(smartHotTempC, 1); html += F("'><small>Runtime adjustment (%)</small><input class='in-sm' type='number' min='-100' max='300' name='smartHotPct' value='");
+  html += String(smartHotAdjustPct); html += F("'></div>");
+  html += F("<div class='row'><label>Very Hot At/Above (C)</label><input class='in-sm' type='number' step='0.1' min='-30' max='60' name='smartVeryHotTemp' value='");
+  html += String(smartVeryHotTempC, 1); html += F("'><small>Runtime adjustment (%)</small><input class='in-sm' type='number' min='-100' max='300' name='smartVeryHotPct' value='");
+  html += String(smartVeryHotAdjustPct); html += F("'></div>");
+  html += F("<div class='row'><label>Actual Rain Skip Above (mm)</label><input class='in-sm' type='number' step='0.1' min='0' max='200' name='smartActualRainMm' value='");
+  html += String(smartActualRainSkipMm, 1); html += F("'><small>Light-rain adjustment up to this amount (%)</small><input class='in-sm' type='number' min='-100' max='300' name='smartLightRainPct' value='");
+  html += String(smartLightRainAdjustPct); html += F("'></div>");
+  html += F("<div class='row'><label>Forecast Rain Skip Above (mm)</label><input class='in-sm' type='number' step='0.1' min='0' max='200' name='smartForecastRainMm' value='");
+  html += String(smartForecastRainSkipMm, 1); html += F("'><small>Forecast total for the next 24 hours</small></div>");
   html += F("</div>");
 
   html += F("</div>"); // end cols2
@@ -7963,7 +7990,7 @@ void loadConfig() {
   tankGpioActiveLow  = gpioActiveLow;
 
   // Read the rest of the file so older configs can safely skip the new per-pin polarity block.
-  String tail[48];
+  String tail[64];
   int tailCount = 0;
   while (f.available() && tailCount < (int)(sizeof(tail) / sizeof(tail[0]))) {
     tail[tailCount++] = _safeReadLine(f);
@@ -8052,6 +8079,22 @@ void loadConfig() {
   if (nextTail(s) && s.length()) displayEnabled = (s.toInt() != 0);
   // NEW: smart watering runtime adjustment (optional trailing line)
   if (nextTail(s) && s.length()) smartWateringEnabled = (s.toInt() == 1);
+  // Smart watering thresholds and percentage adjustments (optional trailing lines)
+  if (nextTail(s) && s.length()) { float v=s.toFloat(); if (v >= -30.0f && v <= 60.0f) smartCoolTempC=v; }
+  if (nextTail(s) && s.length()) { int v=s.toInt(); if (v >= -100 && v <= 300) smartCoolAdjustPct=v; }
+  if (nextTail(s) && s.length()) { float v=s.toFloat(); if (v >= -30.0f && v <= 60.0f) smartHotTempC=v; }
+  if (nextTail(s) && s.length()) { int v=s.toInt(); if (v >= -100 && v <= 300) smartHotAdjustPct=v; }
+  if (nextTail(s) && s.length()) { float v=s.toFloat(); if (v >= -30.0f && v <= 60.0f) smartVeryHotTempC=v; }
+  if (nextTail(s) && s.length()) { int v=s.toInt(); if (v >= -100 && v <= 300) smartVeryHotAdjustPct=v; }
+  if (nextTail(s) && s.length()) { float v=s.toFloat(); if (v >= 0.0f && v <= 200.0f) smartActualRainSkipMm=v; }
+  if (nextTail(s) && s.length()) { int v=s.toInt(); if (v >= -100 && v <= 300) smartLightRainAdjustPct=v; }
+  if (nextTail(s) && s.length()) { float v=s.toFloat(); if (v >= 0.0f && v <= 200.0f) smartForecastRainSkipMm=v; }
+
+  if (!(smartCoolTempC < smartHotTempC && smartHotTempC < smartVeryHotTempC)) {
+    smartCoolTempC = 18.0f;
+    smartHotTempC = 28.0f;
+    smartVeryHotTempC = 34.0f;
+  }
 
   f.close();
 
@@ -8175,6 +8218,15 @@ void saveConfig() {
   f.println(displayEnabled ? 1 : 0);
   // NEW: smart watering runtime adjustment
   f.println(smartWateringEnabled ? 1 : 0);
+  f.println(String(smartCoolTempC, 2));
+  f.println(smartCoolAdjustPct);
+  f.println(String(smartHotTempC, 2));
+  f.println(smartHotAdjustPct);
+  f.println(String(smartVeryHotTempC, 2));
+  f.println(smartVeryHotAdjustPct);
+  f.println(String(smartActualRainSkipMm, 2));
+  f.println(smartLightRainAdjustPct);
+  f.println(String(smartForecastRainSkipMm, 2));
 
   f.close();
 }
@@ -8310,6 +8362,39 @@ void handleConfigure() {
   // Run mode (sequential vs concurrent)
   runZonesConcurrent = server.hasArg("runConcurrent");
   smartWateringEnabled = server.hasArg("smartWatering");
+
+  float coolTemp = server.hasArg("smartCoolTemp") ? server.arg("smartCoolTemp").toFloat() : smartCoolTempC;
+  float hotTemp = server.hasArg("smartHotTemp") ? server.arg("smartHotTemp").toFloat() : smartHotTempC;
+  float veryHotTemp = server.hasArg("smartVeryHotTemp") ? server.arg("smartVeryHotTemp").toFloat() : smartVeryHotTempC;
+  if (coolTemp >= -30.0f && veryHotTemp <= 60.0f && coolTemp < hotTemp && hotTemp < veryHotTemp) {
+    smartCoolTempC = coolTemp;
+    smartHotTempC = hotTemp;
+    smartVeryHotTempC = veryHotTemp;
+  }
+  if (server.hasArg("smartCoolPct")) {
+    int v = server.arg("smartCoolPct").toInt();
+    if (v >= -100 && v <= 300) smartCoolAdjustPct = v;
+  }
+  if (server.hasArg("smartHotPct")) {
+    int v = server.arg("smartHotPct").toInt();
+    if (v >= -100 && v <= 300) smartHotAdjustPct = v;
+  }
+  if (server.hasArg("smartVeryHotPct")) {
+    int v = server.arg("smartVeryHotPct").toInt();
+    if (v >= -100 && v <= 300) smartVeryHotAdjustPct = v;
+  }
+  if (server.hasArg("smartActualRainMm")) {
+    float v = server.arg("smartActualRainMm").toFloat();
+    if (v >= 0.0f && v <= 200.0f) smartActualRainSkipMm = v;
+  }
+  if (server.hasArg("smartLightRainPct")) {
+    int v = server.arg("smartLightRainPct").toInt();
+    if (v >= -100 && v <= 300) smartLightRainAdjustPct = v;
+  }
+  if (server.hasArg("smartForecastRainMm")) {
+    float v = server.arg("smartForecastRainMm").toFloat();
+    if (v >= 0.0f && v <= 200.0f) smartForecastRainSkipMm = v;
+  }
 
   // Rain forecast gate
   rainDelayFromForecastEnabled = !server.hasArg("rainForecastDisabled");
