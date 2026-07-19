@@ -113,6 +113,7 @@ Adafruit_ST7789 tft(&SPI, -1, -1, -1);
 #define SCREEN_HEIGHT 64
 #define OLED_RESET -1
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &I2Cbus, OLED_RESET);
+bool displayEnabled = true;
 bool displayUseTft = (ENABLE_TFT != 0); // default mode; can be changed in Setup
 bool clockUse24Hour = true;
 
@@ -1436,22 +1437,26 @@ static void validatePinMap() {
   warnPinConflict("I2C_SCL", i2cSclPin, "TankLevel", tankLevelPin);
 
   // TFT vs board IO
-  warnPinConflict("TFT_CS",  tftCsPin,  "TankLevel", tankLevelPin);
-  warnPinConflict("TFT_DC",  tftDcPin,  "LED",       LED_PIN);
-  warnPinConflict("TFT_CS",  tftCsPin,  "LED",       LED_PIN);
-  warnPinConflict("TFT_DC",  tftDcPin,  "TankLevel", tankLevelPin);
-  warnPinConflict("TFT_SCLK",tftSclkPin,"RainSensor",rainSensorPin);
-  warnPinConflict("TFT_MOSI",tftMosiPin,"RainSensor",rainSensorPin);
+  if (displayEnabled && displayUseTft) {
+    warnPinConflict("TFT_CS",  tftCsPin,  "TankLevel", tankLevelPin);
+    warnPinConflict("TFT_DC",  tftDcPin,  "LED",       LED_PIN);
+    warnPinConflict("TFT_CS",  tftCsPin,  "LED",       LED_PIN);
+    warnPinConflict("TFT_DC",  tftDcPin,  "TankLevel", tankLevelPin);
+    warnPinConflict("TFT_SCLK",tftSclkPin,"RainSensor",rainSensorPin);
+    warnPinConflict("TFT_MOSI",tftMosiPin,"RainSensor",rainSensorPin);
+  }
   warnPinConflict("PowerSupply", powerSupplyPin, "I2C_SDA", i2cSdaPin);
   warnPinConflict("PowerSupply", powerSupplyPin, "I2C_SCL", i2cSclPin);
   warnPinConflict("PowerSupply", powerSupplyPin, "RainSensor", rainSensorPin);
   warnPinConflict("PowerSupply", powerSupplyPin, "TankLevel", tankLevelPin);
-  warnPinConflict("PowerSupply", powerSupplyPin, "TFT_SCLK", tftSclkPin);
-  warnPinConflict("PowerSupply", powerSupplyPin, "TFT_MOSI", tftMosiPin);
-  warnPinConflict("PowerSupply", powerSupplyPin, "TFT_CS", tftCsPin);
-  warnPinConflict("PowerSupply", powerSupplyPin, "TFT_DC", tftDcPin);
-  warnPinConflict("PowerSupply", powerSupplyPin, "TFT_RST", tftRstPin);
-  warnPinConflict("PowerSupply", powerSupplyPin, "TFT_BL", tftBlPin);
+  if (displayEnabled && displayUseTft) {
+    warnPinConflict("PowerSupply", powerSupplyPin, "TFT_SCLK", tftSclkPin);
+    warnPinConflict("PowerSupply", powerSupplyPin, "TFT_MOSI", tftMosiPin);
+    warnPinConflict("PowerSupply", powerSupplyPin, "TFT_CS", tftCsPin);
+    warnPinConflict("PowerSupply", powerSupplyPin, "TFT_DC", tftDcPin);
+    warnPinConflict("PowerSupply", powerSupplyPin, "TFT_RST", tftRstPin);
+    warnPinConflict("PowerSupply", powerSupplyPin, "TFT_BL", tftBlPin);
+  }
   warnPinConflict("PowerSupply", powerSupplyPin, "CityRelay", mainsPin);
   warnPinConflict("PowerSupply", powerSupplyPin, "TankRelay", tankPin);
   for (uint8_t i = 0; i < zonesCount && i < MAX_ZONES; ++i) {
@@ -1461,10 +1466,12 @@ static void validatePinMap() {
   }
 
   // TFT self-collisions
-  warnPinConflict("TFT_SCLK",tftSclkPin,"TFT_MOSI", tftMosiPin);
-  warnPinConflict("TFT_CS",  tftCsPin,  "TFT_DC",   tftDcPin);
-  warnPinConflict("TFT_CS",  tftCsPin,  "TFT_RST",  tftRstPin);
-  warnPinConflict("TFT_CS",  tftCsPin,  "TFT_BL",   tftBlPin);
+  if (displayEnabled && displayUseTft) {
+    warnPinConflict("TFT_SCLK",tftSclkPin,"TFT_MOSI", tftMosiPin);
+    warnPinConflict("TFT_CS",  tftCsPin,  "TFT_DC",   tftDcPin);
+    warnPinConflict("TFT_CS",  tftCsPin,  "TFT_RST",  tftRstPin);
+    warnPinConflict("TFT_CS",  tftCsPin,  "TFT_BL",   tftBlPin);
+  }
 }
 
 void statusPixelSet(uint8_t r,uint8_t g,uint8_t b) {
@@ -1616,6 +1623,7 @@ static void ledcWriteCompat(int /*pin*/, uint32_t duty) {
 #endif
 
 static void tftInitBacklightPwm() {
+  if (!displayEnabled) return;
   if (!displayUseTft) return;
   g_tftPwmReady = false;
   if (tftBlPin < 0) return;
@@ -1635,6 +1643,7 @@ static void tftInitBacklightPwm() {
 }
 
 static inline void tftDisplay(bool on){
+  if (!displayEnabled) return;
   if (!displayUseTft) return;
   if (g_tftDisplayOn == on) return;
   if (on) {
@@ -1654,6 +1663,7 @@ static inline void tftDisplay(bool on){
 }
 
 static inline void tftBacklight(bool on){
+  if (!displayEnabled) return;
   if (!displayUseTft) return;
   if (tftBlPin >= 0) {
     if (!isValidGpioPin(tftBlPin)) {
@@ -1679,6 +1689,7 @@ static inline void tftBacklight(bool on){
 }
 
 static void tftSetBrightness(uint8_t pct){ // pct: 0-100
+  if (!displayEnabled) return;
   if (!displayUseTft) return;
   if (pct > 100) pct = 100;
   uint8_t duty = map(pct, 0, 100, 0, 255);
@@ -1694,6 +1705,7 @@ static void tftSetBrightness(uint8_t pct){ // pct: 0-100
 }
 
 static void tickAutoBacklight(){
+  if (!displayEnabled) return;
   if (!displayUseTft) return;
   if (!photoAutoEnabled) return;
   if (!isValidPhotoPin(photoPin)) return;
@@ -1831,7 +1843,7 @@ void handleDiagnosticsJson() {
   }
 
   JsonObject display = doc["display"].to<JsonObject>();
-  display["type"] = displayUseTft ? "tft" : "oled";
+  display["type"] = !displayEnabled ? "none" : (displayUseTft ? "tft" : "oled");
   display["tftWidth"] = tftPanelWidth;
   display["tftHeight"] = tftPanelHeight;
   display["tftRotation"] = tftRotation;
@@ -1944,7 +1956,7 @@ void handleDiagnosticsPage() {
   html += F("<tr><td>I2C pins</td><td>"); html += String(i2cSdaPin); html += F(" / "); html += String(i2cSclPin); html += F("</td></tr>");
   html += F("<tr><td>I2C devices</td><td><code>"); html += i2cList; html += F("</code></td></tr>");
   html += F("<tr><td>GPIO fallback</td><td>"); html += (useGpioFallback ? "yes" : "no"); html += F("</td></tr>");
-  html += F("<tr><td>Display</td><td>"); html += (displayUseTft ? "TFT" : "OLED"); html += F("</td></tr>");
+  html += F("<tr><td>Display</td><td>"); html += (!displayEnabled ? "Disabled" : (displayUseTft ? "TFT" : "OLED")); html += F("</td></tr>");
   html += F("</table></div>");
 
   html += F("<div class='card'><h2>Irrigation</h2><table>");
@@ -2045,7 +2057,9 @@ void setup() {
   initTempSensor(); // try to bring up the internal temp sensor (ESP32-S3)
 
   // ---------- Display init ----------
-  if (displayUseTft) {
+  if (!displayEnabled) {
+    Serial.println("[DISPLAY] disabled");
+  } else if (displayUseTft) {
     new (&tft) Adafruit_ST7789(&SPI, tftCsPin, tftDcPin, tftRstPin);
     SPI.begin(tftSclkPin, -1, tftMosiPin, tftCsPin);
 
@@ -2117,7 +2131,9 @@ void setup() {
     }
   }
 
-  if (displayUseTft) {
+  if (!displayEnabled) {
+    // Headless mode: web UI and controller logic stay active.
+  } else if (displayUseTft) {
     tft.fillScreen(ST77XX_BLACK);
 
     // Connected screen (cleaner layout)
@@ -2226,7 +2242,7 @@ void setup() {
   doc["tftBrightnessPct"] = tftPct;
   doc["tftWidth"]         = tftPanelWidth;
   doc["tftHeight"]        = tftPanelHeight;
-  doc["displayType"]      = displayUseTft ? "tft" : "oled";
+  doc["displayType"]      = !displayEnabled ? "none" : (displayUseTft ? "tft" : "oled");
 
     // Current rain (actuals)
     doc["rain1hNow"] = rain1hNow;
@@ -2454,8 +2470,8 @@ void setup() {
   });
   server.on("/tft_selftest", HTTP_GET, [](){
     HttpScope _scope;
-    if (!displayUseTft) {
-      server.send(400, "text/plain", "Display mode is OLED");
+    if (!displayEnabled || !displayUseTft) {
+      server.send(400, "text/plain", displayEnabled ? "Display mode is OLED" : "Display is disabled");
       return;
     }
     String msg;
@@ -2531,7 +2547,7 @@ void setup() {
   });
   server.on("/tft_brightness", HTTP_POST, [](){
     HttpScope _scope;
-    if (!displayUseTft) { server.send(400, "text/plain", "Display mode is OLED"); return; }
+    if (!displayEnabled || !displayUseTft) { server.send(400, "text/plain", displayEnabled ? "Display mode is OLED" : "Display is disabled"); return; }
     if (tftBlPin < 0) { server.send(500,"text/plain","No backlight pin"); return; }
     int lvl = server.hasArg("level") ? server.arg("level").toInt() : 100;
     if (lvl < 0) lvl = 0; if (lvl > 100) lvl = 100;
@@ -2666,7 +2682,9 @@ void loop() {
   } else if (lastWasDelayScreen) {
     // Only clear once delay has actually ended
     lastWasDelayScreen = false;
-    if (displayUseTft) {
+    if (!displayEnabled) {
+      // No display to clear.
+    } else if (displayUseTft) {
       tft.fillScreen(C_BG);
     } else {
       display.clearDisplay();
@@ -2879,6 +2897,7 @@ void showManualSelection() {
 }
 
 void drawManualSelection() {
+  if (!displayEnabled) return;
   const int selectedZone = manualSelectedZone % zonesCount;
   const bool selectedActive = zoneActive[selectedZone];
   const char* selectedZoneName = zoneNames[selectedZone].c_str();
@@ -3612,7 +3631,8 @@ void logEvent(int zone, const char* eventType, const char* source, bool rainDela
 
 // ---------- OLED UI ----------
 void toggleBacklight(){
-  if (!displayUseTft) {
+  if (!displayEnabled) return;
+  if (displayEnabled && !displayUseTft) {
     static bool inverted=false;
     inverted=!inverted;
     display.invertDisplay(inverted);
@@ -3624,6 +3644,7 @@ void toggleBacklight(){
 }
 
 void updateLCDForZone(int zone) {
+  if (!displayEnabled) return;
   static unsigned long lastUpdate = 0; unsigned long now = millis();
   const unsigned long minUiInterval = displayUseTft ? 180UL : 1000UL;
   if (!g_forceRunReset && (now - lastUpdate < minUiInterval)) return;
@@ -3911,7 +3932,8 @@ void updateLCDForZone(int zone) {
 }
 
 void RainScreen(){
-  if (!displayUseTft) {
+  if (!displayEnabled) return;
+  if (displayEnabled && !displayUseTft) {
     display.clearDisplay();
     display.setTextSize(2); display.setCursor(0,0); display.print(isPausedNow()? "System Pause" : "Rain/Wind");
     display.setTextSize(1);
@@ -4167,7 +4189,8 @@ void RainScreen(){
 }
 
 void HomeScreen() {
-  if (!displayUseTft) {
+  if (!displayEnabled) return;
+  if (displayEnabled && !displayUseTft) {
     const int OW = display.width();
     const int pctOled = constrain(tankPercent(), 0, 100);
     const bool masterOff = !systemMasterEnabled;
@@ -5397,7 +5420,7 @@ void turnOnZone(int z) {
 
   logEvent(z, "START", src, false);
 
-  if (!displayUseTft) {
+  if (displayEnabled && !displayUseTft) {
     display.clearDisplay();
     display.setTextSize(2);
     display.setCursor(2, 0);
@@ -5408,7 +5431,7 @@ void turnOnZone(int z) {
   }
 
   // Force a clean redraw immediately for TFT (no ON splash delay).
-  if (displayUseTft) {
+  if (displayEnabled && displayUseTft) {
     g_forceHomeReset = true;
     g_forceRunReset = true;
     tft.fillScreen(C_BG);
@@ -5449,7 +5472,7 @@ void turnOffZone(int z) {
     setWaterSourceRelays(false, false);
   }
 
-  if (!displayUseTft) {
+  if (displayEnabled && !displayUseTft) {
     display.clearDisplay();
     display.setTextSize(2);
     display.setCursor(4, 0);
@@ -5458,7 +5481,7 @@ void turnOffZone(int z) {
     display.display();
     delay(350);
   }
-  if (displayUseTft) {
+  if (displayEnabled && displayUseTft) {
     g_forceHomeReset = true;
     g_forceRunReset = true;
     if (!anyStillOn) tft.fillScreen(C_BG);
@@ -5522,7 +5545,7 @@ void turnOnValveManual(int z) {
   g_forceManualReset = true;
   g_forceRunReset = true;
   lastScreenRefresh = 0;
-  if (displayUseTft) {
+  if (displayEnabled && displayUseTft) {
     tft.fillScreen(C_BG);
     updateLCDForZone(z);
   } else {
@@ -5572,11 +5595,11 @@ void turnOffValveManual(int z) {
   const bool manualOverlayActive =
     (manualScreenUntilMs != 0 && (int32_t)(manualScreenUntilMs - millis()) > 0);
 
-  if (displayUseTft) {
+  if (displayEnabled && displayUseTft) {
     tft.fillScreen(C_BG);
     g_forceRunReset = true;
     if (!manualOverlayActive) g_forceHomeReset = true;
-  } else {
+  } else if (displayEnabled) {
     display.clearDisplay();
     display.display();
   }
@@ -6565,7 +6588,7 @@ void handleSetupPage() {
   String latStr = isfinite(meteoLat) ? String(meteoLat, 6) : String("");
   String lonStr = isfinite(meteoLon) ? String(meteoLon, 6) : String("");
   String setupWeatherLabel = meteoLocation.length() ? meteoLocation : String("Open-Meteo ready");
-  String setupDisplayLabel = displayUseTft ? String("TFT display") : String("OLED display");
+  String setupDisplayLabel = !displayEnabled ? String("Display disabled") : (displayUseTft ? String("TFT display") : String("OLED display"));
   String setupTankLabel = tankEnabled ? String("Tank Enabled") : String("City Water");
   String setupTzLabel = (tzMode == TZ_FIXED) ? String("Fixed offset") : String("POSIX timezone");
   auto addTzOption = [&](const char* name, const char* posix) {
@@ -7039,11 +7062,14 @@ void handleSetupPage() {
   // Display / Auto backlight
   html += F("<div class='card narrow' id='display-card'><details class='collapse'><summary>Display & Backlight</summary><div class='collapse-body'><p class='card-intro'>Choose the screen type, rotation, and light-sensor backlight behavior.</p>");
   html += F("<div class='row'><label>Display</label><select class='in-med' name='displayType' id='displayTypeSelect'>");
+  html += F("<option value='none'");
+  html += (!displayEnabled ? " selected" : "");
+  html += F(">Disabled</option>");
   html += F("<option value='tft'");
-  html += (displayUseTft ? " selected" : "");
+  html += (displayEnabled && displayUseTft ? " selected" : "");
   html += F(">TFT (ST7789)</option>");
   html += F("<option value='oled'");
-  html += (!displayUseTft ? " selected" : "");
+  html += (displayEnabled && !displayUseTft ? " selected" : "");
   html += F(">OLED (SSD1306)</option></select><small>Applied after reboot</small></div>");
   html += F("<div class='row'><label>Clock Format</label><select class='in-sm' name='clockFormat'>");
   html += F("<option value='24'");
@@ -7240,7 +7266,7 @@ void handleSetupPage() {
   html += F("  loadTftStatus();");
   html += F("});");
   html += F("const displayTypeSel=g('displayTypeSelect');");
-  html += F("function syncDisplaySetup(){const isTft=!displayTypeSel||displayTypeSel.value==='tft';document.querySelectorAll('[data-tft-only]').forEach(el=>{el.style.display=isTft?'':'none';});}");
+  html += F("function syncDisplaySetup(){const isTft=displayTypeSel&&displayTypeSel.value==='tft';document.querySelectorAll('[data-tft-only]').forEach(el=>{el.style.display=isTft?'':'none';});}");
   html += F("displayTypeSel?.addEventListener('change',syncDisplaySetup);syncDisplaySetup();");
 
   html += F("async function loadTftStatus(){");
@@ -7967,6 +7993,8 @@ void loadConfig() {
     powerSupplyPin = (p == -1 || isValidOutputPin(p)) ? p : -1;
   }
   if (nextTail(s) && s.length()) powerSupplyActiveLow = (s.toInt() == 1);
+  // NEW: display enabled flag (optional trailing line, 1=enabled, 0=disabled)
+  if (nextTail(s) && s.length()) displayEnabled = (s.toInt() != 0);
 
   f.close();
 
@@ -8086,6 +8114,8 @@ void saveConfig() {
   // NEW: switched power supply GPIO
   f.println(powerSupplyPin);
   f.println(powerSupplyActiveLow ? 1 : 0);
+  // NEW: display enabled flag (1=enabled, 0=disabled)
+  f.println(displayEnabled ? 1 : 0);
 
   f.close();
 }
@@ -8165,6 +8195,7 @@ void handleConfigure() {
   int oldTftRotation = tftRotation;
   int oldI2cSda  = i2cSdaPin;
   int oldI2cScl  = i2cSclPin;
+  bool oldDisplayEnabled = displayEnabled;
   bool oldDisplayUseTft = displayUseTft;
   bool oldClockUse24Hour = clockUse24Hour;
 
@@ -8350,8 +8381,15 @@ void handleConfigure() {
   if (server.hasArg("displayType")) {
     String dm = server.arg("displayType");
     dm.toLowerCase();
-    if (dm == "tft") displayUseTft = true;
-    else if (dm == "oled") displayUseTft = false;
+    if (dm == "none") {
+      displayEnabled = false;
+    } else if (dm == "tft") {
+      displayEnabled = true;
+      displayUseTft = true;
+    } else if (dm == "oled") {
+      displayEnabled = true;
+      displayUseTft = false;
+    }
   }
   if (server.hasArg("clockFormat")) {
     clockUse24Hour = (server.arg("clockFormat") != "12");
@@ -8495,7 +8533,7 @@ void handleConfigure() {
   }
 
   bool i2cPinsChanged = (oldI2cSda != i2cSdaPin || oldI2cScl != i2cSclPin);
-  bool displayModeChanged = (oldDisplayUseTft != displayUseTft);
+  bool displayModeChanged = (oldDisplayEnabled != displayEnabled || oldDisplayUseTft != displayUseTft);
   bool clockFormatChanged = (oldClockUse24Hour != clockUse24Hour);
   bool tftRotationChanged = (oldTftRotation != (int)tftRotation);
 
@@ -8504,7 +8542,7 @@ void handleConfigure() {
   saveConfig();
   initManualButtons();
   initGpioPinsForZones();
-  if (!displayModeChanged && !tftGeometryChanged && displayUseTft && tftRotationChanged) {
+  if (!displayModeChanged && !tftGeometryChanged && displayEnabled && displayUseTft && tftRotationChanged) {
     tft.setRotation(tftRotation);
   }
   if (clockFormatChanged) {
