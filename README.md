@@ -1,5 +1,4 @@
-![Platform](https://img.shields.io/badge/Platform-ESP32%20%7C%20ESP32--S3-blue)<img width="556" height="301" alt="image" src="https://github.com/user-attachments/assets/568259c4-d7b4-455d-a3a7-b4ad6fb9f849" />
-
+![Platform](https://img.shields.io/badge/Platform-ESP32%20%7C%20ESP32--S3-blue)
 ![Zones](https://img.shields.io/badge/Zones-1%E2%80%9316-green)
 ![Web UI](https://img.shields.io/badge/Web%20UI-Local-orange)
 ![Weather](https://img.shields.io/badge/Weather-Aware-success)
@@ -17,7 +16,7 @@ Built for real-world irrigation setups, from small home gardens to larger multi-
 
 ### Main Dashboard
 
-<img width="652" height="938" alt="image" src="https://github.com/user-attachments/assets/a7d3c3d2-d189-473e-b0e2-bc2c4db5f3d9" />
+<img width="652" height="938" alt="image" src="https://github.com/user-attachments/assets/a7d3c3d2-d189-473e-b0e2-bc2c4db5f3d9" /><img width="556" height="301" alt="image" src="https://github.com/user-attachments/assets/201ae87c-f38a-417b-92e1-0acbdc7c395e" />
 
 ### Diagram
 
