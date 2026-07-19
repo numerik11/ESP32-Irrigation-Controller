@@ -300,6 +300,7 @@ bool     systemMasterEnabled = true;     // Master On/Off
 uint32_t rainCooldownUntilEpoch = 0;     // when > now => block starts
 int      rainCooldownMin = 60;           // minutes to wait after rain clears
 int      rainThreshold24h_mm = 5;        // forecast/actual 24h total triggers delay
+bool     smartWateringEnabled = false;   // adjust scheduled runtimes from temp/rain
 
 // NEW Run mode: sequential (false) or concurrent (true)
 bool runZonesConcurrent = false;
@@ -471,6 +472,8 @@ bool isValidGpioPin(int pin);
 bool isValidPhotoPin(int pin);
 void updateStatusPixel();
 static inline unsigned long durationForSlot(int z, int slot);
+static float smartWateringFactor();
+static unsigned long smartWateringDurationForSlot(int z, int slot);
 time_t parseEventTimestamp(const String& ts);
 void rebuildRuntimeCountersFromEvents();
 void statusPixelSet(uint8_t r,uint8_t g,uint8_t b);
@@ -663,6 +666,8 @@ void mqttPublishStatus(){
   d["sourceMode"] = sourceModeText();
   d["rain24hActual"] = last24hActualRain();  // NEW
   d["runConcurrent"] = runZonesConcurrent;   // NEW
+  d["smartWatering"] = smartWateringEnabled;
+  d["smartFactor"] = smartWateringFactor();
   float chipTemp = NAN;
   if (readChipTempC(chipTemp)) d["chipTempC"] = chipTemp;
   else                         d["chipTempC"] = nullptr;
@@ -1286,6 +1291,43 @@ static inline unsigned long durationForSlot(int z, int slot) {
   unsigned long m = (durationMin[z] >= 0) ? (unsigned long)durationMin[z] : 0;
   unsigned long s = (durationSec[z] >= 0) ? (unsigned long)durationSec[z] : 0;
   return m * 60UL + s;
+}
+
+static float smartWateringReferenceTempC() {
+  if (isfinite(todayMax_C)) return todayMax_C;
+  if (isfinite(curTempC)) return curTempC;
+  return NAN;
+}
+
+static float smartWateringFactor() {
+  if (!smartWateringEnabled) return 1.0f;
+
+  const float actualRain24h = last24hActualRain();
+  const float forecastRain24h = isfinite(rainNext24h_mm) ? rainNext24h_mm : 0.0f;
+
+  if (actualRain24h > 5.0f || forecastRain24h > 5.0f) return 0.0f;
+
+  float factor = 1.0f;
+  const float tempC = smartWateringReferenceTempC();
+  if (isfinite(tempC)) {
+    if (tempC < 18.0f) factor *= 0.80f;
+    else if (tempC >= 34.0f) factor *= 1.40f;
+    else if (tempC >= 28.0f) factor *= 1.20f;
+  }
+
+  if (actualRain24h > 0.0f) factor *= 0.70f;
+  return factor;
+}
+
+static unsigned long smartWateringDurationForSlot(int z, int slot) {
+  unsigned long base = durationForSlot(z, slot);
+  if (!smartWateringEnabled || base == 0) return base;
+
+  const float factor = smartWateringFactor();
+  if (factor <= 0.0f) return 0;
+
+  unsigned long adjusted = (unsigned long)lroundf((float)base * factor);
+  return (adjusted > 0) ? adjusted : 1;
 }
 
 inline bool isValidAdcPin(int pin) {
@@ -2301,6 +2343,8 @@ void setup() {
     doc["rainCooldownMin"]   = rainCooldownMin;
     doc["rainCooldownHours"] = rainCooldownMin / 60;
     doc["runConcurrent"] = runZonesConcurrent;
+    doc["smartWatering"] = smartWateringEnabled;
+    doc["smartFactor"] = smartWateringFactor();
 
     // Zones snapshot
     JsonArray zones = doc["zones"].to<JsonArray>();
@@ -5353,7 +5397,14 @@ bool shouldStartZone(int zone) {
   if (match1 || match2) {
     lastCheckedMinute[zone] = mn;
     lastStartSlot[zone] = match2 ? 2 : 1;
-    if (durationForSlot(zone, lastStartSlot[zone]) > 0) return true;
+    unsigned long base = durationForSlot(zone, lastStartSlot[zone]);
+    if (base == 0) return false;
+    unsigned long adjusted = smartWateringDurationForSlot(zone, lastStartSlot[zone]);
+    if (adjusted == 0) {
+      logEvent(zone, "CANCELLED", "SMART", true);
+      return false;
+    }
+    return true;
   }
   return false;
 }
@@ -5396,11 +5447,12 @@ void turnOnZone(int z) {
     return;
   }
 
+  unsigned long total = smartWateringDurationForSlot(z, lastStartSlot[z]);
+  if (total == 0) total = smartWateringDurationForSlot(z, 1);
+  if (total == 0) { cancelStart(z, "SMART", true); return; }
   zoneStartMs[z] = millis();
   zoneActive[z] = true;
   zoneStartedManual[z] = false;
-  unsigned long total = durationForSlot(z, lastStartSlot[z]);
-  if (total == 0) total = durationForSlot(z, 1);
   zoneRunTotalSec[z] = total;
   const char* src = "None";
   bool mainsOn=false, tankOn=false;
@@ -6915,6 +6967,9 @@ void handleSetupPage() {
   html += F("<div class='row'><label>Rain Threshold 24h (mm)</label><input class='in-sm' type='number' min='0' max='200' name='rainThreshold24h' value='");
   html += String(rainThreshold24h_mm);
   html += F("'><small>After-Rain Delay if above threshold</small></div>");
+  html += F("<div class='row switchline'><label>Smart Watering</label><input type='checkbox' name='smartWatering' ");
+  html += (smartWateringEnabled ? "checked" : "");
+  html += F("><small>Scheduled runs only: cool -20%, hot +20%, very hot +40%, light rain -30%, skip if actual/forecast rain exceeds 5 mm.</small></div>");
   html += F("</div>");
 
   html += F("</div>"); // end cols2
@@ -7995,6 +8050,8 @@ void loadConfig() {
   if (nextTail(s) && s.length()) powerSupplyActiveLow = (s.toInt() == 1);
   // NEW: display enabled flag (optional trailing line, 1=enabled, 0=disabled)
   if (nextTail(s) && s.length()) displayEnabled = (s.toInt() != 0);
+  // NEW: smart watering runtime adjustment (optional trailing line)
+  if (nextTail(s) && s.length()) smartWateringEnabled = (s.toInt() == 1);
 
   f.close();
 
@@ -8116,6 +8173,8 @@ void saveConfig() {
   f.println(powerSupplyActiveLow ? 1 : 0);
   // NEW: display enabled flag (1=enabled, 0=disabled)
   f.println(displayEnabled ? 1 : 0);
+  // NEW: smart watering runtime adjustment
+  f.println(smartWateringEnabled ? 1 : 0);
 
   f.close();
 }
@@ -8250,6 +8309,7 @@ void handleConfigure() {
 
   // Run mode (sequential vs concurrent)
   runZonesConcurrent = server.hasArg("runConcurrent");
+  smartWateringEnabled = server.hasArg("smartWatering");
 
   // Rain forecast gate
   rainDelayFromForecastEnabled = !server.hasArg("rainForecastDisabled");
