@@ -46,6 +46,7 @@ Built for real-world irrigation setups, from small home gardens to larger multi-
 - Optional **TFT, OLED, or LCD display support**
 - Compatible with **ESP32**, **ESP32-S3**, and **KC868-A6/A8**
 - Watering logic continues to run locally if Wi-Fi drops
+- MQTT for home asststant ect.
 
 ---
 
