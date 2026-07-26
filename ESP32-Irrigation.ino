@@ -296,7 +296,7 @@ bool     systemPaused = false;
 uint32_t pauseUntilEpoch = 0;
 bool     rainDelayFromForecastEnabled = true;  // gate for forecast-based rain
 
-// NEW Master/Cooldown/Threshold
+// Master/Cooldown/Threshold
 bool     systemMasterEnabled = true;     // Master On/Off
 uint32_t rainCooldownUntilEpoch = 0;     // when > now => block starts
 int      rainCooldownMin = 60;           // minutes to wait after rain clears
@@ -4404,6 +4404,10 @@ void HomeScreen() {
   int   hum  = curHumidityPct;
   float windNow = curWindMs;
   int   pct  = tankPercent();
+  const float smartFactorHome = smartWateringFactor();
+  const int smartPctHome = smartWateringEnabled ? (int)lroundf(smartFactorHome * 100.0f) : -1;
+  const int moisturePctHome = moisturePercent();
+  const bool moistureSkipHome = isSoilWetForSmartSkip();
 
   time_t now = time(nullptr);
   struct tm* tmv = localtime(&now);
@@ -4448,6 +4452,9 @@ void HomeScreen() {
     static int lastCompassWindDir = -1;
     static int lastCompassWindTenths = 10000;
     static int lastCompassGust = -1;
+    static int lastSmartPct = -999;
+    static int lastMoisturePct = -999;
+    static int lastMoistureSkip = -1;
 
     int running = 0;
     int queued = 0;
@@ -4498,6 +4505,9 @@ void HomeScreen() {
       lastCompassWindDir = -1;
       lastCompassWindTenths = 10000;
       lastCompassGust = -1;
+      lastSmartPct = -999;
+      lastMoisturePct = -999;
+      lastMoistureSkip = -1;
       g_forceHomeReset = false;
 
       // ========== MODERN HEADER ==========
@@ -4736,8 +4746,10 @@ void HomeScreen() {
     // ========== SYSTEM STATUS CARD ==========
     if (fullRedraw || running != lastRunning || queued != lastQueued || status != lastSystemStatus ||
         mqttUp != (bool)lastMqtt || windDirRounded != lastCompassWindDir ||
-        windTenths != lastCompassWindTenths || gustVal != lastCompassGust) {
-      tft.fillRect(rightX + 4, cardY + 20, rightW - 8, 94, C_PANEL);
+        windTenths != lastCompassWindTenths || gustVal != lastCompassGust ||
+        smartPctHome != lastSmartPct || moisturePctHome != lastMoisturePct ||
+        (moistureSkipHome ? 1 : 0) != lastMoistureSkip) {
+      tft.fillRect(rightX + 4, cardY + 20, rightW - 8, max(94, cardH - 24), C_PANEL);
 
       // Master status
       tft.setTextSize(1);
@@ -4767,11 +4779,38 @@ void HomeScreen() {
       tft.print("Queued:");
       tft.setTextColor(queued > 0 ? C_WARN : C_MUTED);
       tft.print(queued);
+
+      tft.setTextColor(C_MUTED);
+      tft.setCursor(rightX + 8, cardY + 90);
+      tft.print("Smart:");
+      if (!smartWateringEnabled) {
+        tft.setTextColor(C_MUTED);
+        tft.print(" Off");
+      } else {
+        tft.setTextColor(smartPctHome <= 0 ? C_WARN : C_ACCENT);
+        tft.print(" ");
+        tft.print(smartPctHome);
+        tft.print("%");
+      }
+
+      if (moistureProbeEnabled && cardH >= 126) {
+        tft.setTextColor(C_MUTED);
+        tft.setCursor(rightX + 8, cardY + 106);
+        tft.print("Soil:");
+        tft.setTextColor(moistureSkipHome ? C_WARN : C_TEXT);
+        if (moisturePctHome >= 0) {
+          tft.print(" ");
+          tft.print(moisturePctHome);
+          tft.print("%");
+        } else {
+          tft.print(" --");
+        }
+      }
       
       // Rain delay indicator
-      if (isRainDelayBlockingNow() || windActive) {
+      if ((isRainDelayBlockingNow() || windActive) && cardH >= 142) {
         tft.setTextColor(C_WARN);
-        tft.setCursor(rightX + 8, cardY + 90);
+        tft.setCursor(rightX + 8, cardY + 122);
         tft.print(isCooldownActiveNow() ? "After-rain!" : "Rain delay!");
       }
 
@@ -4797,6 +4836,9 @@ void HomeScreen() {
       lastCompassWindDir = windDirRounded;
       lastCompassWindTenths = windTenths;
       lastCompassGust = gustVal;
+      lastSmartPct = smartPctHome;
+      lastMoisturePct = moisturePctHome;
+      lastMoistureSkip = moistureSkipHome ? 1 : 0;
     }
 
     return;
@@ -4820,6 +4862,8 @@ void HomeScreen() {
     static int lastQueued = -1;
     static int lastSystemStatus = -1;
     static int lastMqtt = -1;
+    static int lastMoisturePct = -999;
+    static int lastMoistureSkip = -1;
 
     int running = 0;
     int queued = 0;
@@ -4864,6 +4908,8 @@ void HomeScreen() {
       lastQueued = -1;
       lastSystemStatus = -1;
       lastMqtt = -1;
+      lastMoisturePct = -999;
+      lastMoistureSkip = -1;
       g_forceHomeReset = false;
 
       drawCard(side, clockY, cardW, clockH, C_PANEL, C_EDGE);
@@ -4932,7 +4978,8 @@ void HomeScreen() {
       lastNextEpoch = nw.epoch;
     }
 
-    if (fullRedraw || pctClamped != lastPct || status != lastSystemStatus) {
+    if (fullRedraw || pctClamped != lastPct || status != lastSystemStatus ||
+        moisturePctHome != lastMoisturePct || (moistureSkipHome ? 1 : 0) != lastMoistureSkip) {
       const char* waterSrc = "";
       bool mainsOn = false;
       bool tankOn = false;
@@ -4951,6 +4998,17 @@ void HomeScreen() {
       tft.setTextColor(C_TEXT);
       tft.setCursor(16, tankY + 7);
       tft.print("TANK LEVEL");
+      if (moistureProbeEnabled) {
+        tft.setTextColor(moistureSkipHome ? C_WARN : C_MUTED);
+        tft.setCursor(86, tankY + 20);
+        tft.print("Soil ");
+        if (moisturePctHome >= 0) {
+          tft.print(moisturePctHome);
+          tft.print("%");
+        } else {
+          tft.print("--");
+        }
+      }
       tft.drawRoundRect(gaugeX, gaugeY, gaugeW, gaugeH, 6, C_EDGE);
       tft.drawFastHLine(gaugeX + 10, gaugeY - 4, gaugeW - 20, C_EDGE);
       tft.fillRect(gaugeX + 3, gaugeY + 3, gaugeW - 6, innerH, RGB(8, 12, 20));
@@ -4982,6 +5040,8 @@ void HomeScreen() {
       tft.print("Source ");
       tft.setTextColor(tankOn ? C_GOOD : (mainsOn ? C_WARN : C_TEXT));
       tft.print(waterSrc && waterSrc[0] ? waterSrc : "--");
+      lastMoisturePct = moisturePctHome;
+      lastMoistureSkip = moistureSkipHome ? 1 : 0;
     }
 
     if (fullRedraw || tempRounded != lastTemp || hum != lastHum || pctClamped != lastPct ||
@@ -5038,412 +5098,6 @@ void HomeScreen() {
     return;
   }
 
-  // -------- LANDSCAPE (H < W): two-column layout --------
-  if (landscape) {
-    static bool init = false;
-    static bool lastDelayed = false;
-    static int lastW = -1;
-    static int lastH = -1;
-    static int lastZonesCount = -1;
-    static char lastTime[8] = "";
-    static char lastDate[20] = "";
-    static int lastTemp = -1000;
-    static float lastTempF = NAN;
-    static char lastTempArrow = '-';
-    static int lastMinT = 1000;
-    static int lastMaxT = 1000;
-    static int lastGustT = 1000;
-    static int lastHum = -2;
-    static int lastPct = -1;
-    static char lastNextZone[12] = "";
-    static char lastNextEta[12] = "";
-    static char lastNextRem[16] = "";
-    static bool lastDelayLine = false;
-    static bool lastMasterLine = false;
-    static String lastCauseLine;
-    static String lastZoneNameShort;
-    static int lastWindTenths = 10000;
-    static int lastRainTenths = 10000;
-    static bool lastZoneState[MAX_ZONES] = {false};
-    static uint32_t lastZoneRem[MAX_ZONES] = {0};
-    if (g_forceHomeReset) {
-      init = false; lastDelayed = false; lastW = lastH = -1; lastZonesCount = -1;
-      lastTime[0] = lastDate[0] = '\0';
-      lastTemp = -1000; lastHum = -2; lastPct = -1;
-      lastTempF = NAN; lastTempArrow = '-';
-      lastMinT = 1000; lastMaxT = 1000; lastGustT = 1000;
-      lastNextZone[0] = lastNextEta[0] = lastNextRem[0] = '\0';
-      lastDelayLine = false; lastMasterLine = false; lastCauseLine = ""; lastZoneNameShort = "";
-      lastWindTenths = 10000; lastRainTenths = 10000;
-      for (int i=0;i<MAX_ZONES;i++){ lastZoneState[i]=false; lastZoneRem[i]=0; }
-      g_forceHomeReset = false;
-    }
-
-    const int contentY = topY;
-    const int bottomH = delayed ? 22 : 0;
-    const int contentH = H - contentY - bottomH - 4;
-    const int colGap = 8;
-
-    const int leftW = 118;
-    const int rightW = W - 2 * pad - colGap - leftW;
-    const int leftX = pad;
-    const int rightX = leftX + leftW + colGap;
-    const int statsH = 46; // slightly taller to fit tank bar
-
-    const bool layoutChanged = (!init || lastW != W || lastH != H || lastZonesCount != (int)zonesCount);
-    const bool stateChanged = (delayed != lastDelayed);
-
-    if (layoutChanged) {
-      init = true;
-      lastW = W;
-      lastH = H;
-      lastZonesCount = zonesCount;
-      tft.fillScreen(C_BG);
-    }
-    lastDelayed = delayed;
-
-    if (layoutChanged) {
-      // Left: time card
-      drawCard(leftX, contentY, leftW, contentH, C_PANEL, C_EDGE);
-
-      // Right: weather/tank card
-      drawCard(rightX, contentY, rightW, statsH, C_PANEL, C_EDGE);
-
-      // Right: zones grid
-      const int zonesY = contentY + statsH + gap;
-      const int zonesH = contentY + contentH - zonesY;
-      drawCard(rightX, zonesY, rightW, zonesH, C_PANEL, C_EDGE);
-
-      tft.setTextSize(1);
-      tft.setTextColor(C_MUTED);
-      tft.setCursor(rightX + 8, zonesY + 4);
-      tft.print("Zones");
-    }
-
-    // Time + date (top bar handles date; keep card for time + status lines)
-    char tbuf[8] = "--:--";
-    if (tmv) formatClockTime(*tmv, tbuf, sizeof(tbuf));
-    if (layoutChanged || strcmp(tbuf, lastTime) != 0) {
-      tft.fillRect(leftX + 4, contentY + 4, leftW - 8, 28, C_PANEL);
-      tft.setTextColor(C_ACCENT);
-      tft.setTextSize(3);
-      int16_t x1, y1; uint16_t tw, th;
-      tft.getTextBounds(tbuf, 0, 0, &x1, &y1, &tw, &th);
-      int timeY = contentY + 6;
-      tft.setCursor(leftX + (leftW - (int)tw) / 2, timeY);
-      tft.print(tbuf);
-      strncpy(lastTime, tbuf, sizeof(lastTime));
-      lastTime[sizeof(lastTime) - 1] = '\0';
-    }
-
-    // Next watering + status lines below the clock
-    NextWaterInfo nw = computeNextWatering();
-    char etaBuf[12] = "--:--";
-    char zoneBuf[12] = "None";
-    char remBuf[16] = "--";
-    if (nw.zone >= 0) {
-      snprintf(zoneBuf, sizeof(zoneBuf), "Z%d", nw.zone + 1);
-      struct tm tnw;
-      localtime_r(&nw.epoch, &tnw);
-      formatClockTime(tnw, etaBuf, sizeof(etaBuf));
-      long diff = (long)difftime(nw.epoch, now);
-      if (diff < 0) diff = 0;
-      int hrs = (int)(diff / 3600L);
-      int mins = (int)((diff % 3600L) / 60L);
-      if (hrs > 0) {
-        snprintf(remBuf, sizeof(remBuf), "in %dh%02dm", hrs, mins);
-      } else {
-        snprintf(remBuf, sizeof(remBuf), "in %dm", mins);
-      }
-    }
-
-    const int nextY = contentY + 40; // push down away from clock
-    const int nextH = 44;
-    bool nextChanged =
-      layoutChanged ||
-      (strcmp(zoneBuf, lastNextZone) != 0) ||
-      (strcmp(etaBuf, lastNextEta) != 0) ||
-      (strcmp(remBuf, lastNextRem) != 0);
-    if (nextChanged) {
-      tft.fillRect(leftX + 4, nextY, leftW - 8, nextH, C_PANEL);
-      tft.drawRect(leftX + 4, nextY, leftW - 8, nextH, C_EDGE);
-      tft.setTextSize(1);
-      tft.setTextColor(C_TEXT);
-      tft.setCursor(leftX + 8, nextY + 2);
-      tft.print("Next ");
-      tft.print(zoneBuf);
-      tft.setCursor(leftX + 8, nextY + 16);
-      tft.print("Runs at ");
-      tft.print(etaBuf);
-      tft.setTextSize(1);
-      tft.setTextColor(C_MUTED);
-      tft.setCursor(leftX + 8, nextY + 30);
-      tft.print(remBuf);
-      strncpy(lastNextZone, zoneBuf, sizeof(lastNextZone));
-      lastNextZone[sizeof(lastNextZone) - 1] = '\0';
-      strncpy(lastNextEta, etaBuf, sizeof(lastNextEta));
-      lastNextEta[sizeof(lastNextEta) - 1] = '\0';
-      strncpy(lastNextRem, remBuf, sizeof(lastNextRem));
-      lastNextRem[sizeof(lastNextRem) - 1] = '\0';
-    }
-
-    const bool showExtra = (contentH >= 112);
-    int infoY = nextY + nextH + 2;
-    if (showExtra) {
-      String zn = (nw.zone >= 0) ? zoneNames[nw.zone] : "None";
-      if (zn.length() > 12) zn = zn.substring(0, 12);
-      int windT = isfinite(windNow) ? (int)lroundf(windNow * 10.0f) : 10000;
-      int rainT = (int)lroundf(rain1hNow * 10.0f);
-      bool extraChanged = layoutChanged ||
-                          (zn != lastZoneNameShort) ||
-                          (windT != lastWindTenths) ||
-                          (rainT != lastRainTenths);
-      if (extraChanged) {
-        tft.fillRect(leftX + 4, infoY, leftW - 8, 22, C_PANEL);
-        tft.setTextSize(1);
-        tft.setTextColor(C_MUTED);
-        tft.setCursor(leftX + 8, infoY + 2);
-        tft.print("Zone ");
-        tft.setTextColor(C_ACCENT);
-        tft.print(zn);
-
-        tft.setTextColor(C_MUTED);
-        tft.setCursor(leftX + 8, infoY + 12);
-        if (isfinite(windNow)) {
-          tft.print("W ");
-          tft.setTextColor(C_WARN);
-          tft.print(windNow, 1);
-          tft.setTextColor(C_MUTED);
-          tft.print("m/s ");
-        } else {
-          tft.print("W -- ");
-        }
-        tft.print("R ");
-        tft.setTextColor(C_GOOD);
-        tft.print(lastRainAmount, 1);
-        tft.setTextColor(C_MUTED);
-        tft.print("mm");
-
-        lastZoneNameShort = zn;
-        lastWindTenths = windT;
-        lastRainTenths = rainT;
-      }
-    }
-
-    tft.setTextColor(delayed ? C_WARN : C_MUTED);
-    const int statY = infoY + (showExtra ? 22 : 0) + 2;
-    String causeLine = delayed ? rainDelayCauseText() : "";
-    bool lineChanged = layoutChanged ||
-                       (delayed != lastDelayLine) ||
-                       (systemMasterEnabled != lastMasterLine) ||
-                       (causeLine != lastCauseLine);
-    if (lineChanged) {
-      tft.fillRect(leftX + 4, statY, leftW - 8, 16, C_PANEL);
-      tft.setTextSize(1);
-      tft.setCursor(leftX + 8, statY + 2);
-      if (delayed) {
-        tft.print("Delay: ");
-        tft.print(causeLine.c_str());
-      } else {
-        tft.print("Master ");
-        tft.print(systemMasterEnabled ? "ON" : "OFF");
-      }
-      lastDelayLine = delayed;
-      lastMasterLine = systemMasterEnabled;
-      lastCauseLine = causeLine;
-    }
-
-    // Extra space for 240x320: show min/max + gust card under status
-    const bool tallLayout = (contentH >= 170);
-    if (tallLayout) {
-      int extraY = statY + 18;
-      int extraH = contentY + contentH - extraY - 4;
-      if (extraH >= 24) {
-        int minT = isnan(todayMin_C) ? 1000 : (int)lroundf(temperatureForDisplay(todayMin_C));
-        int maxT = isnan(todayMax_C) ? 1000 : (int)lroundf(temperatureForDisplay(todayMax_C));
-        int gustT = isnan(maxGust24h_ms) ? 1000 : (int)lroundf(maxGust24h_ms * 10.0f);
-
-        bool extraChanged = layoutChanged || (minT != lastMinT) || (maxT != lastMaxT) || (gustT != lastGustT);
-        if (extraChanged) {
-          drawCard(leftX + 4, extraY, leftW - 8, extraH, C_PANEL, C_EDGE);
-          tft.setTextSize(1);
-          tft.setTextColor(C_MUTED);
-          tft.setCursor(leftX + 8, extraY + 4);
-          tft.print("Today");
-
-          tft.setTextColor(C_TEXT);
-          tft.setCursor(leftX + 8, extraY + 14);
-          if (minT == 1000 || maxT == 1000) {
-            tft.print("Min -- Max --");
-          } else {
-            tft.print("Min ");
-            tft.print(minT);
-            tft.print(" Max ");
-            tft.print(maxT);
-          }
-
-          tft.setTextColor(C_MUTED);
-          tft.setCursor(leftX + 8, extraY + 24);
-          tft.print("Gust ");
-          if (gustT == 1000) {
-            tft.print("--");
-          } else {
-            tft.setTextColor(C_WARN);
-            tft.print(maxGust24h_ms, 1);
-            tft.setTextColor(C_MUTED);
-          }
-          tft.print(" m/s");
-
-          lastMinT = minT;
-          lastMaxT = maxT;
-          lastGustT = gustT;
-        }
-      }
-    }
-
-    // Weather/tank
-    int t0 = isnan(temp) ? -1000 : (int)lroundf(temp);
-    char newArrow = lastTempArrow;
-    if (isfinite(temp)) {
-      if (isfinite(lastTempF)) {
-        float d = temp - lastTempF;
-        if (d > 0.1f) newArrow = '^';
-        else if (d < -0.1f) newArrow = 'v';
-      }
-    } else {
-      newArrow = '-';
-    }
-    bool arrowChanged = (newArrow != lastTempArrow);
-
-    if (layoutChanged || t0 != lastTemp || hum != lastHum || pct != lastPct || arrowChanged) {
-      tft.fillRect(rightX + 4, contentY + 4, rightW - 8, statsH - 8, C_PANEL);
-
-      tft.setTextSize(2);
-      tft.setTextColor(C_TEXT);
-      tft.setCursor(rightX + 8, contentY + 11); // push down for better centering
-      tft.print("T:");
-      if (isnan(temp)) tft.print("--");
-      else { tft.print(temp, 0); tft.print(temperatureUnitChar()); tft.print(newArrow); }
-      tft.print("  H:");
-      if (hum < 0) tft.print("--");
-      else { tft.print(hum); tft.print("%"); }
-
-      int pctClamped = constrain(pct, 0, 100);
-      tft.setTextSize(1);
-      tft.setTextColor(C_MUTED);
-      tft.setCursor(rightX + 8, contentY + 27);
-      tft.print("Tank ");
-      tft.print(pctClamped);
-      tft.print("%");
-
-      // Tank bar
-      int barX = rightX + 8;
-      int barY = contentY + statsH - 10;
-      int barW = rightW - 16;
-      int barH = 6;
-      tft.drawRect(barX, barY, barW, barH, C_EDGE);
-      int fillW = (barW - 2) * pctClamped / 100;
-      if (fillW < 0) fillW = 0;
-      uint16_t barColor = (pctClamped <= (int)tankLowThresholdPct) ? C_BAD : C_GOOD;
-      if (fillW > 0) tft.fillRect(barX + 1, barY + 1, fillW, barH - 2, barColor);
-      
-      lastTemp = t0;
-      lastTempF = isfinite(temp) ? temp : NAN;
-      lastTempArrow = newArrow;
-      lastHum = hum;
-      lastPct = pct;
-    }
-
-    // Zones grid
-    const int zonesY = contentY + statsH + gap;
-    const int zonesH = contentY + contentH - zonesY;
-    const int gridY = zonesY + 14;
-    const int gridH = zonesY + zonesH - gridY - 6;
-    const int cols = 2;
-    int colW = (rightW - gap) / cols;
-    int rows = (zonesCount + 1) / 2;          // two columns
-    if (rows < 1) rows = 1;
-    int rowH = gridH / rows;
-    if (rowH < 8) rowH = 8;                   // allow more rows when >6 zones
-
-    for (int i = 0; i < (int)zonesCount; i++) {
-      int r = i / 2;
-      int c = i % 2;
-      int x = rightX + 6 + c * colW;
-      int y = gridY + r * rowH;
-      if (y + rowH > zonesY + zonesH) break;
-
-      bool on = zoneActive[i];
-      uint32_t rem = 0;
-      if (on) {
-        unsigned long elapsed = (millis() - zoneStartMs[i]) / 1000UL;
-        unsigned long total = zoneRunTotalSec[i];
-        if (total == 0) total = durationForSlot(i,1);
-        rem = (elapsed < total ? total - elapsed : 0UL);
-      }
-
-      bool stateChanged = (on != lastZoneState[i]);
-      bool remChanged = (rem != lastZoneRem[i]);
-
-      if (layoutChanged || stateChanged || remChanged) {
-        // Clear full cell to prevent overlap artifacts
-        tft.fillRect(x - 2, y - 1, colW - 4, rowH - 1, C_PANEL);
-
-        // Single-line layout: Z#, pill, timer on the right
-        tft.setTextSize(1);
-        tft.setTextColor(C_TEXT);
-        tft.setCursor(x, y + 2);
-        tft.print("Z"); tft.print(i + 1);
-
-        int pillX = x + 16;
-        int pillY = y + 1;
-        int pillW = 22;
-        int pillH = 12;
-        tft.fillRect(pillX, pillY, pillW, pillH, on ? C_GOOD : C_EDGE);
-        tft.drawRect(pillX, pillY, pillW, pillH, C_EDGE);
-        tft.setTextColor(on ? ST77XX_BLACK : C_TEXT);
-        tft.setCursor(pillX + 4, pillY + 2);
-        tft.print(on ? "ON" : "OFF");
-
-        // Timer or placeholder at right
-        char rbuf[10] = "--";
-        if (on) { fmtMMSS(rbuf, sizeof(rbuf), rem); }
-        tft.setTextColor(on ? C_TEXT : C_MUTED);
-        int16_t bx, by; uint16_t bw, bh;
-        tft.getTextBounds(rbuf, 0, 0, &bx, &by, &bw, &bh);
-        // Position timer just to the right of the pill with a small gap
-        int tx = pillX + pillW + 4;
-        if (tx + (int)bw > x + colW - 4) tx = x + colW - 4 - (int)bw; // clamp inside cell
-        tft.setCursor(tx, y + 2);
-        tft.print(rbuf);
-
-        lastZoneState[i] = on;
-        lastZoneRem[i] = rem;
-      }
-    }
-
-    // Bottom banner update
-    if (layoutChanged || stateChanged) {
-      if (delayed) {
-        String cS = rainDelayCauseText();
-        const char* c = cS.c_str();
-        const int bh = 22;
-        tft.fillRect(0, H - bh, W, bh, RGB(24, 18, 8));
-        tft.drawFastHLine(0, H - bh, W, C_EDGE);
-        tft.setTextSize(1);
-        tft.setTextColor(C_WARN);
-        tft.setCursor(6, H - bh + 6);
-        tft.print("Delay:");
-        tft.setTextColor(C_TEXT);
-        tft.setCursor(52, H - bh + 6);
-        tft.print((c && c[0]) ? c : "--");
-      } else if (!layoutChanged) {
-        tft.fillRect(0, H - 22, W, 22, C_BG);
-      }
-    }
-
-    return;
-  }
 }
 
 
