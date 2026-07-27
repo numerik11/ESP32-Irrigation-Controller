@@ -40,6 +40,7 @@ Built for real-world irrigation setups, from small home gardens to larger multi-
 - **Editable zone names**
 - Optional **tank ↔ mains switching**
 - Optional **Rain and wind-aware delays**
+- Optional **Cool, Hot, Very Hot Temperature/Moisture based Time Ajustment**
 - **Live weather display**
 - **Local web dashboard**
 - **OTA firmware updates**
