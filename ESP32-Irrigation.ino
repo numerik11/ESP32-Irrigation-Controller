@@ -262,7 +262,7 @@ static unsigned long totalManualRuntimeSec = 0;
 float  meteoLat = NAN;
 float  meteoLon = NAN;
 String meteoLocation; // Open-Meteo display label (optional)
-String meteoModel = "gfs"; // Open-Meteo model endpoint (e.g., gfs, icon, ecmwf)
+String meteoModel = "best_match"; // Open-Meteo forecast model slug
 String cachedWeatherData;
 String lastWeatherError;
 String lastForecastError;
@@ -917,14 +917,29 @@ static String cleanMeteoModel(String s) {
       out += c;
     }
   }
-  if (!out.length()) out = "gfs";
+  if (!out.length() || out == "auto" || out == "forecast" || out == "best") out = "best_match";
+  // Compatibility for older configs that stored provider/endpoint names.
+  if (out == "gfs" || out == "noaa") out = "gfs_seamless";
+  else if (out == "icon" || out == "dwd-icon" || out == "dwd_icon") out = "icon_seamless";
+  else if (out == "ecmwf") out = "ecmwf_ifs025";
+  else if (out == "meteofrance" || out == "meteo-france" || out == "meteo_france") out = "meteofrance_seamless";
+  else if (out == "jma") out = "jma_seamless";
+  else if (out == "cma") out = "cma_grapes_global";
+  else if (out == "gem") out = "gem_seamless";
+  else if (out == "bom") out = "bom_access_global";
+  else if (out == "ukmo") out = "ukmo_seamless";
   return out;
 }
 
 static bool isKnownMeteoModel(const String& s) {
-  return (s == "gfs" || s == "icon" || s == "ecmwf" || s == "meteofrance" ||
-          s == "jma" || s == "cma" || s == "gem" || s == "icon_seamless" ||
-          s == "icon_global" || s == "icon_eu" || s == "bom" ||
+  return (s == "best_match" ||
+          s == "gfs_seamless" ||
+          s == "icon_seamless" || s == "icon_global" || s == "icon_eu" ||
+          s == "ecmwf_ifs025" ||
+          s == "meteofrance_seamless" ||
+          s == "jma_seamless" ||
+          s == "cma_grapes_global" ||
+          s == "gem_seamless" ||
           s == "bom_access_global" || s == "ukmo_seamless");
 }
 
@@ -943,8 +958,9 @@ static String meteoErrorReason(const String& payload) {
 }
 
 static String meteoBaseUrl(const String& model, bool useForecastEndpoint) {
-  if (useForecastEndpoint) return "https://api.open-meteo.com/v1/forecast";
-  return "https://api.open-meteo.com/v1/" + model;
+  (void)model;
+  (void)useForecastEndpoint;
+  return "https://api.open-meteo.com/v1/forecast";
 }
 
 static String httpGetMeteo(const String& url, int& code, uint16_t timeoutMs) {
@@ -3237,19 +3253,19 @@ String fetchWeather() {
   lastWeatherError = "";
   lastWeatherHttpCode = 0;
 
-  auto buildUrl = [&](bool useForecastEndpoint) -> String {
-    String url = meteoBaseUrl(model, useForecastEndpoint);
+  auto buildUrl = [&](bool useSelectedModel) -> String {
+    String url = meteoBaseUrl(model, useSelectedModel);
     url += "?latitude=" + String(meteoLat,6) + "&longitude=" + String(meteoLon,6);
     url += "&current=temperature_2m,relative_humidity_2m,apparent_temperature,pressure_msl,surface_pressure,"
            "wind_speed_10m,wind_gusts_10m,wind_direction_10m,precipitation,weather_code";
-    if (useForecastEndpoint) url += "&models=" + model;
+    if (useSelectedModel && model != "best_match") url += "&models=" + model;
     url += "&temperature_unit=celsius&wind_speed_unit=ms&precipitation_unit=mm&pressure_unit=hPa&timezone=auto";
     return url;
   };
 
   for (int pass = 0; pass < 2; ++pass) {
-    bool useForecastEndpoint = (pass == 1);
-    String url = buildUrl(useForecastEndpoint);
+    bool useSelectedModel = (pass == 0);
+    String url = buildUrl(useSelectedModel);
     int code = 0;
     String payload = httpGetMeteo(url, code, 2500);
     lastWeatherHttpCode = code;
@@ -3266,12 +3282,12 @@ String fetchWeather() {
   }
 
   // Fallback: derive current from hourly
-  String hourlyPayload = fetchWeatherHourlyForCurrent(model, meteoLat, meteoLon, false);
+  String hourlyPayload = fetchWeatherHourlyForCurrent(model, meteoLat, meteoLon, true);
   if (hourlyPayload.length()) {
     String out;
     if (buildCurrentFromHourlyPayload(hourlyPayload, out)) return out;
   }
-  String hourlyPayloadForecast = fetchWeatherHourlyForCurrent(model, meteoLat, meteoLon, true);
+  String hourlyPayloadForecast = fetchWeatherHourlyForCurrent(model, meteoLat, meteoLon, false);
   if (hourlyPayloadForecast.length()) {
     String out;
     if (buildCurrentFromHourlyPayload(hourlyPayloadForecast, out)) return out;
@@ -3279,13 +3295,13 @@ String fetchWeather() {
   return "";
 }
 
-String fetchWeatherHourlyForCurrent(const String& model, float lat, float lon, bool useForecastEndpoint) {
+String fetchWeatherHourlyForCurrent(const String& model, float lat, float lon, bool useSelectedModel) {
   if (!isValidLatLon(lat, lon)) return "";
-  String url = meteoBaseUrl(model, useForecastEndpoint);
+  String url = meteoBaseUrl(model, useSelectedModel);
   url += "?latitude=" + String(lat,6) + "&longitude=" + String(lon,6);
   url += "&hourly=temperature_2m,relative_humidity_2m,apparent_temperature,pressure_msl,surface_pressure,"
          "wind_speed_10m,wind_gusts_10m,wind_direction_10m,precipitation,weather_code";
-  if (useForecastEndpoint) url += "&models=" + model;
+  if (useSelectedModel && model != "best_match") url += "&models=" + model;
   url += "&forecast_hours=48&timeformat=unixtime&temperature_unit=celsius&wind_speed_unit=ms"
          "&precipitation_unit=mm&pressure_unit=hPa&timezone=auto";
   int code = 0;
@@ -3349,20 +3365,20 @@ String fetchForecast(float lat, float lon) {
   lastForecastError = "";
   lastForecastHttpCode = 0;
 
-  auto buildUrl = [&](bool useForecastEndpoint) -> String {
-    String url = meteoBaseUrl(model, useForecastEndpoint);
+  auto buildUrl = [&](bool useSelectedModel) -> String {
+    String url = meteoBaseUrl(model, useSelectedModel);
     url += "?latitude=" + String(lat,6) + "&longitude=" + String(lon,6);
     url += "&hourly=precipitation,precipitation_probability,wind_gusts_10m"
            "&daily=temperature_2m_min,temperature_2m_max,sunrise,sunset"
            "&forecast_hours=24&forecast_days=2";
-    if (useForecastEndpoint) url += "&models=" + model;
+    if (useSelectedModel && model != "best_match") url += "&models=" + model;
     url += "&temperature_unit=celsius&wind_speed_unit=ms&precipitation_unit=mm&pressure_unit=hPa&timezone=auto";
     return url;
   };
 
   for (int pass = 0; pass < 2; ++pass) {
-    bool useForecastEndpoint = (pass == 1);
-    String url = buildUrl(useForecastEndpoint);
+    bool useSelectedModel = (pass == 0);
+    String url = buildUrl(useSelectedModel);
     int code = 0;
     String payload = httpGetMeteo(url, code, 3000);
     lastForecastHttpCode = code;
@@ -6409,6 +6425,14 @@ void handleSetupPage() {
   String setupDisplayLabel = !displayEnabled ? String("Display disabled") : (displayUseTft ? String("TFT display") : String("OLED display"));
   String setupTankLabel = tankEnabled ? String("Tank Enabled") : String("City Water");
   String setupTzLabel = (tzMode == TZ_FIXED) ? String("Fixed offset") : String("POSIX timezone");
+  String setupModelLabel = cleanMeteoModel(meteoModel);
+  if (setupModelLabel == "best_match") setupModelLabel = "Best match";
+  else setupModelLabel.replace("_", " ");
+  int setupMoistureRaw = moistureRaw();
+  int setupMoisturePct = -1;
+  if (setupMoistureRaw >= 0 && moistureDryRaw != moistureWetRaw) {
+    setupMoisturePct = constrain(map(setupMoistureRaw, moistureDryRaw, moistureWetRaw, 0, 100), 0, 100);
+  }
   auto addTzOption = [&](const char* name, const char* posix) {
     html += F("<option value='");
     html += name;
@@ -6621,7 +6645,7 @@ void handleSetupPage() {
   html += F("@media(max-width:760px){.page-head{padding:10px 12px}.page-head h1{font-size:1.2rem}.setup-hero{grid-template-columns:1fr}.setup-badges{grid-template-columns:1fr 1fr}.setup-nav{top:8px;flex-wrap:nowrap;overflow:auto;padding-bottom:6px}.setup-nav a{white-space:nowrap}.setup-actions-top{top:8px;z-index:9;padding:10px;border-radius:14px;background:rgba(13,23,24,.88);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);border:1px solid rgba(92,131,125,.2)}.row{padding-top:8px;flex-direction:column;align-items:stretch}.row label{min-width:0;width:100%}.row .btn,.row .btn-alt{width:100%}.switchline{align-items:flex-start}}");
   html += F("</style></head><body>");
 
-  html += F("<div class='wrap'><div class='page-head'><div class='page-head-copy'><div class='page-kicker'>Controller configuration</div><h1>System Setup</h1></div>");
+  html += F("<div class='wrap'><div class='page-head'><div class='page-head-copy'><div class='page-kicker'>Controller configuration</div><h1>System Setup</h1><div class='page-sub'>Start with zones and water source, then set weather, time, display, and hardware pins.</div></div>");
   html += F("<div class='theme-switch'><span>Light</span><label class='switch'><input type='checkbox' id='themeToggle'><span class='slider'></span></label><span>Dark</span></div>");
   html += F("</div>");
   html += F("<div class='setup-hero badges-only'><div class='setup-overview-title'>Current Configuration</div><div class='setup-badges'>");
@@ -6630,10 +6654,10 @@ void handleSetupPage() {
   html += F("<div class='setup-badge'><div class='setup-badge-k'>Water Source</div><div class='setup-badge-v'>"); html += setupTankLabel; html += F("</div></div>");
   html += F("<div class='setup-badge'><div class='setup-badge-k'>Time Mode</div><div class='setup-badge-v'>"); html += setupTzLabel; html += F("</div></div>");
   html += F("<div class='setup-badge'><div class='setup-badge-k'>Forecast Site</div><div class='setup-badge-v'>"); html += setupWeatherLabel; html += F("</div></div>");
-  html += F("<div class='setup-badge'><div class='setup-badge-k'>Forecast Model</div><div class='setup-badge-v'>"); html += meteoModel; html += F("</div></div>");
+  html += F("<div class='setup-badge'><div class='setup-badge-k'>Forecast Model</div><div class='setup-badge-v'>"); html += setupModelLabel; html += F("</div></div>");
   html += F("</div></div>");
   html += F("<form id='setupForm' action='/configure' method='POST' novalidate>");
-  html += F("<div class='setup-nav'><a href='#zones-card'>Zones</a><a href='#tank-card'>Water</a><a href='#delays-card'>Delays</a><a href='#smart-card'>Smart</a><a href='#weather-card'>Forecast</a><a href='#timezone-card'>Time</a><a href='#display-card'>Display</a><a href='#mqtt-card'>MQTT</a></div>");
+  html += F("<div class='setup-nav'><a href='#zones-card'>Zones</a><a href='#tank-card'>Water</a><a href='#delays-card'>Delays</a><a href='#smart-card'>Smart</a><a href='#rain-card'>Rain</a><a href='#weather-card'>Forecast</a><a href='#timezone-card'>Time</a><a href='#pins-card'>Relay Pins</a><a href='#display-card'>Display</a><a href='#i2c-card'>I2C</a><a href='#advanced-card'>TFT Pins</a><a href='#buttons-card'>Buttons</a><a href='#mqtt-card'>MQTT</a></div>");
   html += F("<div class='setup-actions-top'><button class='btn' type='submit' id='btn-save-setup'>Save Changes</button><a class='btn-alt' href='/'>Home</a><button class='btn-alt' type='button' id='btn-clear-cooldown'>Clear After-Rain Delay</button><button class='btn btn-danger' type='button' onclick=\"if(confirm('Reboot controller now?'))fetch('/reboot',{method:'POST'})\">Reboot</button><span class='save-confirm' id='save-confirm'>Saved</span></div>");
 
   // Zones
@@ -6774,6 +6798,17 @@ void handleSetupPage() {
     html += F("<div class='row'><label>Moisture Probe GPIO</label><input class='in-xs' type='number' min='-1' max='20' name='moisturePin' value='");
     html += String(moisturePin); html += F("'><small>ADC pin, ESP32-S3 GPIO1-20, or -1 disabled</small></div>");
   #endif
+  html += F("<div class='row'><label>Current Moisture</label><div class='chip' id='moistureLiveRaw'>Raw: ");
+  if (setupMoistureRaw < 0) html += F("--");
+  else html += String(setupMoistureRaw);
+  html += F("</div><div class='chip' id='moistureLivePct'>Wet: ");
+  if (setupMoisturePct < 0) html += F("--");
+  else { html += String(setupMoisturePct); html += F("%"); }
+  html += F("</div><small id='moistureLiveHint'>");
+  if (!moistureProbeEnabled) html += F("Enable the probe and save to start live calibration readings.");
+  else if (setupMoistureRaw < 0) html += F("No valid ADC reading. Check the GPIO and wiring.");
+  else html += F("Use the raw value to set Dry and Wet calibration points.");
+  html += F("</small></div>");
   html += F("<div class='row'><label>Moisture Raw Dry</label><input class='in-sm' type='number' min='0' max='4095' name='moistureDryRaw' value='");
   html += String(moistureDryRaw);
   html += F("'><small>Raw ADC value measured in dry soil</small></div>");
@@ -6787,16 +6822,16 @@ void handleSetupPage() {
   html += F("</div></div></details></div>");
 
   // Physical rain & forecast
-  html += F("<div class='card narrow'><details class='collapse'><summary>Rain Sensor Inputs</summary><div class='collapse-body'><p class='card-intro'>Choose whether forecast rain, a physical sensor, or both can stop irrigation.</p>");
+  html += F("<div class='card narrow' id='rain-card'><details class='collapse'><summary>Rain Inputs</summary><div class='collapse-body'><p class='card-intro'>Choose which rain sources can stop or delay irrigation. Open-Meteo uses the forecast location below; the physical sensor uses the GPIO here.</p>");
   html += F("<div class='row switchline'><label>Disable Open-Meteo Rain</label><input type='checkbox' name='rainForecastDisabled' ");
-  html += (!rainDelayFromForecastEnabled ? "checked" : ""); html += F("><small>Checked = ignore Open-Meteo rain</small></div>");
-  html += F("<div class='row switchline'><label>Enable Rain Sensor</label><input type='checkbox' name='rainSensorEnabled' "); html += (rainSensorEnabled?"checked":""); html += F("></div>");
+  html += (!rainDelayFromForecastEnabled ? "checked" : ""); html += F("><small>Checked = forecast rain will not block starts</small></div>");
+  html += F("<div class='row switchline'><label>Use Physical Rain Sensor</label><input type='checkbox' name='rainSensorEnabled' "); html += (rainSensorEnabled?"checked":""); html += F("></div>");
   html += F("<div class='row'><label>Rain Sensor GPIO</label><input class='in-xs' type='number' min='0' max='"); html += String(uiMaxGpio); html += F("' name='rainSensorPin' value='"); html += String(rainSensorPin); html += F("'><small>e.g. 27</small></div>");
   html += F("<div class='row switchline'><label>Invert Sensor</label><input type='checkbox' name='rainSensorInvert' "); html += (rainSensorInvert?"checked":""); html += F("><small>Use if board is NO</small></div>");
   html += F("</div></details></div>");
 
   // Weather
-  html += F("<div class='card narrow' id='weather-card'><details class='collapse'><summary>Forecast Location</summary><div class='collapse-body'><p class='card-intro'>Enter the site coordinates and choose the forecast model used for delay logic and dashboard weather.</p>");
+  html += F("<div class='card narrow' id='weather-card'><details class='collapse'><summary>Forecast Location & Model</summary><div class='collapse-body'><p class='card-intro'>Enter the irrigation site coordinates and choose the Open-Meteo forecast model used for dashboard weather, rain delay, wind delay, and Smart Watering.</p>");
   html += F("<div class='row'><label>Open-Meteo</label><a class='btn-alt' id='setupMeteoLink' href='https://open-meteo.com/en/docs?latitude=");
   html += (isfinite(meteoLat) ? String(meteoLat, 6) : String("-35.107600"));
   html += F("&longitude=");
@@ -6808,26 +6843,25 @@ void handleSetupPage() {
   html += F("<div class='row'><label>Latitude</label><input class='in-med' type='text' name='meteoLat' value='"); html += latStr; html += F("'><small>e.g. -34.9285</small></div>");
   html += F("<div class='row'><label>Longitude</label><input class='in-med' type='text' name='meteoLon' value='"); html += lonStr; html += F("'><small>e.g. 138.6007</small></div>");
   html += F("<div class='row'><label>Model</label><select class='in-med' name='meteoModelSelect' id='meteoModelSelect'>");
-  html += F("<option value='gfs'");           html += (modelSel == "gfs" ? " selected" : ""); html += F(">gfs</option>");
-  html += F("<option value='icon'");          html += (modelSel == "icon" ? " selected" : ""); html += F(">icon</option>");
-  html += F("<option value='ecmwf'");         html += (modelSel == "ecmwf" ? " selected" : ""); html += F(">ecmwf</option>");
-  html += F("<option value='meteofrance'");   html += (modelSel == "meteofrance" ? " selected" : ""); html += F(">meteofrance</option>");
-  html += F("<option value='jma'");           html += (modelSel == "jma" ? " selected" : ""); html += F(">jma</option>");
-  html += F("<option value='cma'");           html += (modelSel == "cma" ? " selected" : ""); html += F(">cma</option>");
-  html += F("<option value='gem'");           html += (modelSel == "gem" ? " selected" : ""); html += F(">gem</option>");
-  html += F("<option value='icon_seamless'"); html += (modelSel == "icon_seamless" ? " selected" : ""); html += F(">icon_seamless</option>");
-  html += F("<option value='icon_global'");   html += (modelSel == "icon_global" ? " selected" : ""); html += F(">icon_global</option>");
-  html += F("<option value='icon_eu'");       html += (modelSel == "icon_eu" ? " selected" : ""); html += F(">icon_eu</option>");
-  html += F("<option value='bom'");           html += (modelSel == "bom" ? " selected" : ""); html += F(">bom</option>");
+  html += F("<option value='best_match'");    html += (modelSel == "best_match" ? " selected" : ""); html += F(">Best match</option>");
+  html += F("<option value='gfs_seamless'");  html += (modelSel == "gfs_seamless" ? " selected" : ""); html += F(">GFS seamless</option>");
+  html += F("<option value='icon_seamless'"); html += (modelSel == "icon_seamless" ? " selected" : ""); html += F(">ICON seamless</option>");
+  html += F("<option value='ecmwf_ifs025'");  html += (modelSel == "ecmwf_ifs025" ? " selected" : ""); html += F(">ECMWF IFS 0.25</option>");
+  html += F("<option value='meteofrance_seamless'"); html += (modelSel == "meteofrance_seamless" ? " selected" : ""); html += F(">Meteo-France seamless</option>");
+  html += F("<option value='jma_seamless'");  html += (modelSel == "jma_seamless" ? " selected" : ""); html += F(">JMA seamless</option>");
+  html += F("<option value='cma_grapes_global'"); html += (modelSel == "cma_grapes_global" ? " selected" : ""); html += F(">CMA GRAPES global</option>");
+  html += F("<option value='gem_seamless'");  html += (modelSel == "gem_seamless" ? " selected" : ""); html += F(">GEM seamless</option>");
   html += F("<option value='bom_access_global'"); html += (modelSel == "bom_access_global" ? " selected" : ""); html += F(">bom_access_global</option>");
-  html += F("<option value='ukmo_seamless'"); html += (modelSel == "ukmo_seamless" ? " selected" : ""); html += F(">ukmo_seamless</option>");
+  html += F("<option value='ukmo_seamless'"); html += (modelSel == "ukmo_seamless" ? " selected" : ""); html += F(">UKMO seamless</option>");
+  html += F("<option value='icon_global'");   html += (modelSel == "icon_global" ? " selected" : ""); html += F(">ICON global</option>");
+  html += F("<option value='icon_eu'");       html += (modelSel == "icon_eu" ? " selected" : ""); html += F(">ICON EU</option>");
   html += F("<option value='custom'");        html += (!modelIsKnown ? " selected" : ""); html += F(">custom</option>");
-  html += F("</select><small>Open-Meteo model endpoint</small></div>");
+  html += F("</select><small>Open-Meteo forecast model</small></div>");
   html += F("<div class='row' id='meteoModelCustomRow' style='display:");
   html += (modelIsKnown ? "none" : "flex");
   html += F("'><label>Custom Model</label><input class='in-med' type='text' name='meteoModelCustom' value='");
   html += (modelIsKnown ? "" : modelSel);
-  html += F("'><small>Use an Open-Meteo model slug (e.g., gfs, icon, ecmwf)</small></div>");
+  html += F("'><small>Use an Open-Meteo models value, e.g. gfs_seamless</small></div>");
   html += F("<div class='row helptext'><label></label><small>No API key required. Enter your coordinates for Open-Meteo.</small></div>");
   html += F("</div></details></div>");
 
@@ -6987,7 +7021,7 @@ void handleSetupPage() {
   html += F("</div></details></div>");
 
   // SPI (TFT) config
-  html += F("<div class='card narrow' id='advanced-card' data-tft-only><details class='collapse'><summary>TFT SPI Pins</summary><div class='collapse-body'><p class='card-intro'>Advanced screen pin mapping and backlight tools. Change these only if your display wiring differs from the defaults.</p>");
+  html += F("<div class='card narrow' id='advanced-card' data-tft-only><details class='collapse'><summary>TFT Display Pins</summary><div class='collapse-body'><p class='card-intro'>Advanced TFT SPI and backlight pin mapping. These pins are only used when Display is set to TFT.</p>");
   html += F("<div class='row'><label>TFT Size</label><div class='chip'>");
   html += String(tftPanelWidth); html += "x"; html += String(tftPanelHeight);
   html += F("</div><small>Saved display geometry</small></div>");
@@ -7042,37 +7076,37 @@ void handleSetupPage() {
   html += F("</div></details></div>");
 
   // I2C config
-  html += F("<div class='card narrow'><details class='collapse'><summary>I2C Relay Expander</summary><div class='collapse-body'><p class='card-intro'>Expander bus pins for the relay hardware. These normally only need changing during custom wiring.</p>");
+  html += F("<div class='card narrow' id='i2c-card'><details class='collapse'><summary>I2C Relay Expander Pins</summary><div class='collapse-body'><p class='card-intro'>SDA and SCL for the PCF8574 relay expanders. Leave these alone unless your expander wiring is different.</p>");
   html += F("<div class='row'><label>SDA</label><input class='in-xs' type='number' min='0' max='48' name='i2cSda' value='");
   html += String(i2cSdaPin); html += F("'></div>");
   html += F("<div class='row'><label>SCL</label><input class='in-xs' type='number' min='0' max='48' name='i2cScl' value='");
   html += String(i2cSclPin); html += F("'></div>");
-  html += F("<div class='row helptext'><label></label><small>Changing I2C pins requires reboot. Avoid strapping pins and SPI flash/PSRAM pins. 4/15 for KC868 </small></div>");
+  html += F("<div class='row helptext'><label></label><small>Changing I2C pins requires reboot. Avoid strapping pins and SPI flash/PSRAM pins. KC868 boards commonly use SDA 4 and SCL 15.</small></div>");
   html += F("</div></details></div>");
 
   // GPIO fallback pins
-  html += F("<div class='card narrow'><details class='collapse'><summary>GPIO/PIN Assignments</summary><div class='collapse-body'><div class='grid'>");
+  html += F("<div class='card narrow' id='pins-card'><details class='collapse'><summary>Relay GPIO Pins</summary><div class='collapse-body'><p class='card-intro'>Assign direct ESP32 GPIO outputs for zone, city-water, tank, and power-supply relays. Tick LOW = ON for active-low relay modules.</p><div class='grid'>");
   for (uint8_t i=0;i<MAX_ZONES;i++){
     html += F("<div class='row switchline'><label>Zone "); html += String(i+1);
-    html += F(" Pin</label><input class='in-xs' type='number' min='-1' max='"); html += String(uiMaxGpio); html += F("' name='zonePin"); html += String(i);
+    html += F(" GPIO</label><input class='in-xs' type='number' min='-1' max='"); html += String(uiMaxGpio); html += F("' name='zonePin"); html += String(i);
     html += F("' value='"); html += String(zonePins[i]); html += F("'>");
     html += F("<label class='chip'><input type='checkbox' name='zonePinLow"); html += String(i); html += F("' ");
     html += (zoneGpioActiveLow[i] ? "checked" : "");
-    html += F("><span>LOW = ON</span></label></div>");
+    html += F("><span>LOW = ON</span></label><small>-1 = unused</small></div>");
   }
-  html += F("<div class='row'><label></label><small>Use -1 to leave a zone unassigned. Zones above the PCF channels use GPIO pins when set.</small></div>");
-  html += F("<div class='row switchline'><label>City Water Relay Pin</label><input class='in-xs' type='number' min='0' max='"); html += String(uiMaxGpio); html += F("' name='mainsPin' value='");
+  html += F("<div class='row helptext'><label></label><small>Use output-capable GPIOs only. Avoid boot strapping pins, flash pins, and any pins already used by display, I2C, sensors, or buttons.</small></div>");
+  html += F("<div class='row switchline'><label>City Water Relay GPIO</label><input class='in-xs' type='number' min='0' max='"); html += String(uiMaxGpio); html += F("' name='mainsPin' value='");
   html += String(mainsPin); html += F("'><label class='chip'><input type='checkbox' name='mainsPinLow' ");
   html += (mainsGpioActiveLow ? "checked" : "");
-  html += F("><span>LOW = ON</span></label><small>Relay for city water in (use check/backflow prevention device)</small></div>");
-  html += F("<div class='row switchline'><label>Tank Relay Pin</label><input class='in-xs' type='number' min='0' max='"); html += String(uiMaxGpio); html += F("' name='tankPin' value='");
+  html += F("><span>LOW = ON</span></label><small>City water relay. Use a check/backflow prevention device.</small></div>");
+  html += F("<div class='row switchline'><label>Tank Relay GPIO</label><input class='in-xs' type='number' min='0' max='"); html += String(uiMaxGpio); html += F("' name='tankPin' value='");
   html += String(tankPin); html += F("'><label class='chip'><input type='checkbox' name='tankPinLow' ");
   html += (tankGpioActiveLow ? "checked" : "");
-  html += F("><span>LOW = ON</span></label><small>Pump on low pressure (Relay on) and off at a higher pressure (Relay off).</small></div>");
-  html += F("<div class='row switchline'><label>Power Supply Relay Pin</label><input class='in-xs' type='number' min='-1' max='"); html += String(uiMaxGpio); html += F("' name='powerSupplyPin' value='");
+  html += F("><span>LOW = ON</span></label><small>Tank pump/source relay output.</small></div>");
+  html += F("<div class='row switchline'><label>Power Supply Relay GPIO</label><input class='in-xs' type='number' min='-1' max='"); html += String(uiMaxGpio); html += F("' name='powerSupplyPin' value='");
   html += String(powerSupplyPin); html += F("'><label class='chip'><input type='checkbox' name='powerSupplyPinLow' ");
   html += (powerSupplyActiveLow ? "checked" : "");
-  html += F("><span>LOW = ON</span></label><small>-1 disables. Turns on while any zone/source relay is active.</small></div>");
+  html += F("><span>LOW = ON</span></label><small>-1 disables. Turns on while any zone or source relay is active.</small></div>");
   html += F("<div class='row'><label>Legacy Default</label><div class='chip'>");
   html += (gpioActiveLow ? "LOW = ON" : "HIGH = ON");
   html += F("</div><small>Used only when loading older saved configs that do not have per-pin polarity values yet.</small></div>");
@@ -7084,11 +7118,11 @@ void handleSetupPage() {
   html += F("</div></details></div>");
 
   // Manual buttons
-  html += F("<div class='card narrow'><details class='collapse'><summary>Physical Buttons</summary><div class='collapse-body'><p class='card-intro'>Optional physical buttons for cycling a zone and toggling it on or off without using the web UI.</p>");
-  html += F("<div class='row switchline'><label>Select Button Pin</label><input class='in-xs' type='number' min='-1' max='"); html += String(uiMaxGpio); html += F("' name='manualSelectPin' value='");
+  html += F("<div class='card narrow' id='buttons-card'><details class='collapse'><summary>Physical Button Pins</summary><div class='collapse-body'><p class='card-intro'>Optional input pins for local controls. Buttons use INPUT_PULLUP, so wire the button to pull the pin LOW when pressed.</p>");
+  html += F("<div class='row switchline'><label>Select Button GPIO</label><input class='in-xs' type='number' min='-1' max='"); html += String(uiMaxGpio); html += F("' name='manualSelectPin' value='");
   html += String(manualSelectPin);
   html += F("'><small>-1 to disable. Uses INPUT_PULLUP; press = LOW.</small></div>");
-  html += F("<div class='row switchline'><label>Start/Stop Button Pin</label><input class='in-xs' type='number' min='-1' max='"); html += String(uiMaxGpio); html += F("' name='manualStartPin' value='");
+  html += F("<div class='row switchline'><label>Start/Stop Button GPIO</label><input class='in-xs' type='number' min='-1' max='"); html += String(uiMaxGpio); html += F("' name='manualStartPin' value='");
   html += String(manualStartPin);
   html += F("'><small>Toggles the selected zone on/off.</small></div>");
   html += F("<div class='row'><label>Selected Zone</label><div class='sub'>");
@@ -7151,6 +7185,20 @@ void handleSetupPage() {
   html += F("      el.textContent='Backlight: display '+(disp?'on':'off');");
   html += F("    }");
   html += F("  }catch(e){ el.textContent='Backlight: --'; }");
+  html += F("}");
+  html += F("async function loadMoistureStatus(){");
+  html += F("  const rawEl=g('moistureLiveRaw'); const pctEl=g('moistureLivePct'); const hint=g('moistureLiveHint');");
+  html += F("  if(!rawEl&&!pctEl&&!hint) return;");
+  html += F("  try{const r=await fetch('/status'); const st=await r.json();");
+  html += F("    const en=!!st.moistureEnabled; const raw=(typeof st.moistureRaw==='number')?st.moistureRaw:-1; const pct=(typeof st.moisturePct==='number')?st.moisturePct:-1;");
+  html += F("    if(rawEl) rawEl.textContent='Raw: '+(en&&raw>=0?raw:'--');");
+  html += F("    if(pctEl) pctEl.textContent='Wet: '+(en&&pct>=0?(Math.round(pct)+'%'):'--');");
+  html += F("    if(hint){");
+  html += F("      if(!en) hint.textContent='Enable the probe and save to start live calibration readings.';");
+  html += F("      else if(raw<0) hint.textContent='No valid ADC reading. Check the GPIO and wiring.';");
+  html += F("      else hint.textContent='Use the raw value to set Dry and Wet calibration points.'+(st.moistureSkip?' Skip is active.':'');");
+  html += F("    }");
+  html += F("  }catch(e){ if(hint) hint.textContent='Moisture reading unavailable.'; }");
   html += F("}");
 
   // === Timezone loading from Nayarsystems posix_tz_db with fallback ===
@@ -7280,6 +7328,7 @@ void handleSetupPage() {
   html += F("initThemeToggle();");
   html += F("loadTimezones();");
   html += F("loadTftStatus();");
+  html += F("loadMoistureStatus(); setInterval(loadMoistureStatus,3000);");
   // === END TZ CODE ===
 
   html += F("</script>");
