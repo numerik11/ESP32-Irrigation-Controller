@@ -140,6 +140,7 @@ Use **Open-Meteo** to get your latitude and longitude:
 The controller can display:
 
 - Temperature
+- Soil Moisture
 - Feels like
 - Humidity
 - Wind speed
@@ -158,7 +159,7 @@ Supports:
 - Rain cooldown timer
 - 24-hour rainfall threshold limits
 - Rolling rainfall totals for **1 hour** and **24 hours**
-
+- Cool,Hot,Very Hot Temp Time Ajustment 
 ---
 
 ## 📊 Dashboard
@@ -291,8 +292,8 @@ If wind speed rises above the configured threshold, watering is delayed until co
 - Relay 6 → Tank valve
 - Tank sensor → **IO36**
 - Rain sensor → **IO27** *(configurable)*
-
-> **Important:** Tank sensor input must not exceed **3.3 V**
+- Soil Moisture → **IO20** *(configurable)*
+> **Important:** sensor input must not exceed **3.3 V**
 
 ---
 
