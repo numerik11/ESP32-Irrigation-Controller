@@ -23,7 +23,10 @@ Built for real-world irrigation setups, from small home gardens to larger multi-
 ### Diagram
 
 <img width="1862" height="1014" alt="image" src="https://github.com/user-attachments/assets/df3b2d56-5021-43df-a429-55fd85ebc625" />
+
+**(If you controller is reseting when the relay turns off it will need a flyback diode 1n4007 across - and + of solenoid wiring.)**
 <img width="294" height="199" alt="image" src="https://github.com/user-attachments/assets/8ce21f2a-198a-449b-9082-7f07cec89855" />
+
 
 ### ESP32-S3 + 6 Zone/Relay + 24V AC
 
