@@ -259,9 +259,9 @@ static ManualButtonState g_manualStartBtn;
 static unsigned long totalScheduledRuntimeSec = 0;
 static unsigned long totalManualRuntimeSec = 0;
 
-float  meteoLat = NAN;
-float  meteoLon = NAN;
-String meteoLocation; // Open-Meteo display label (optional)
+float  meteoLat = -35.1076f;
+float  meteoLon = 138.5573f;
+String meteoLocation = "Adelaide"; // Open-Meteo display label (optional)
 String meteoModel = "best_match"; // Open-Meteo forecast model slug
 String cachedWeatherData;
 String lastWeatherError;
@@ -382,6 +382,7 @@ static const uint32_t LOOP_SLEEP_MS    = 20;
 static const uint32_t I2C_CHECK_MS     = 1000;
 static const uint32_t TIME_QUERY_MS    = 1000;
 static const uint32_t SCHEDULE_TICK_MS = 1000;
+static const uint32_t TFT_CONNECTED_SCREEN_MS = 1200;
 static uint32_t lastI2cCheck     = 0;
 static uint32_t lastTimeQuery    = 0;
 static uint32_t lastScheduleTick = 0;
@@ -390,6 +391,7 @@ static tm cachedTm = {};
 
 // Uptime
 uint32_t bootMillis = 0;
+uint32_t bootCount = 0;
 
 // ---------- NEW: Actual rainfall history (rolling 24h) + globals for 1h ----------
 static float rainHist[24] = {0};   // last 24 hourly buckets (mm/hour)
@@ -451,8 +453,9 @@ bool shouldStartZone(int zone);
 bool hasDurationCompleted(int zone);
 void turnOnZone(int zone);
 void turnOffZone(int zone);
-void turnOnValveManual(int z);
+bool turnOnValveManual(int z, String* error = nullptr);
 void turnOffValveManual(int z);
+static void updateBootCount();
 void handleRoot();
 void handleSubmit();
 void handleSetupPage();
@@ -975,6 +978,11 @@ static String httpGetMeteo(const String& url, int& code, uint16_t timeoutMs) {
   return payload;
 }
 
+static uint16_t meteoHttpTimeoutMs() {
+  const int rssi = WiFi.RSSI();
+  return (WiFi.status() == WL_CONNECTED && rssi >= -75) ? 6000 : 3000;
+}
+
 static inline bool isValidLatLon(float lat, float lon) {
   return isfinite(lat) && isfinite(lon) && lat >= -90.0f && lat <= 90.0f && lon >= -180.0f && lon <= 180.0f;
 }
@@ -1134,6 +1142,17 @@ static time_t parseLocalIsoTime(const char* s) {
   return (t < 0) ? 0 : t;
 }
 
+static int readTankRaw() {
+  if (!isValidAdcPin(tankLevelPin)) return -1;
+  const int samples = 16;
+  uint32_t total = 0;
+  for (int i = 0; i < samples; ++i) {
+    total += analogRead(tankLevelPin);
+    delayMicroseconds(200);
+  }
+  return (int)(total / samples);
+}
+
 int tankPercent() {
   if (!isValidAdcPin(tankLevelPin)) {
     static bool warned = false;
@@ -1147,9 +1166,8 @@ int tankPercent() {
     }
     return 0;
   }
-  const int N=8; uint32_t acc=0;
-  for (int i=0;i<N;i++){ acc += analogRead(tankLevelPin); delayMicroseconds(200); }
-  int raw=acc/N;
+  int raw = readTankRaw();
+  if (raw < 0) return 0;
   int pct = map(raw, tankEmptyRaw, tankFullRaw, 0, 100);
   return constrain(pct, 0, 100);
 }
@@ -1911,6 +1929,8 @@ void handleDiagnosticsJson() {
   doc["sketchSize"] = ESP.getSketchSize();
   doc["freeSketchSpace"] = ESP.getFreeSketchSpace();
   doc["resetReason"] = resetReasonText(esp_reset_reason());
+  doc["resetReasonCode"] = (int)esp_reset_reason();
+  doc["bootCount"] = bootCount;
 
   JsonObject heap = doc["heap"].to<JsonObject>();
   heap["free"] = ESP.getFreeHeap();
@@ -1996,6 +2016,7 @@ void handleDiagnosticsJson() {
   weather["lastForecastHttp"] = lastForecastHttpCode;
   weather["lastCurrentAgeSec"] = lastWeatherUpdate ? (nowMs - lastWeatherUpdate) / 1000UL : 0;
   weather["lastForecastAgeSec"] = lastForecastUpdate ? (nowMs - lastForecastUpdate) / 1000UL : 0;
+  weather["httpTimeoutMs"] = meteoHttpTimeoutMs();
   if (lastWeatherError.length()) weather["lastCurrentError"] = lastWeatherError;
   if (lastForecastError.length()) weather["lastForecastError"] = lastForecastError;
 
@@ -2036,30 +2057,35 @@ void handleDiagnosticsPage() {
   html += kFirmwareSignature;
   html += F(" -->");
   html += F("<title>ESP32 Diagnostics</title><style>");
-  html += F(":root{color-scheme:light dark;--bg:#eef4f1;--panel:#fff;--ink:#14232b;--muted:#60736d;--line:#ccddd5;--ok:#21885f;--warn:#b7791f;--bad:#c53030}");
-  html += F("@media(prefers-color-scheme:dark){:root{--bg:#08111f;--panel:#102126;--ink:#e6f0ec;--muted:#9ab4ad;--line:#27464d}}");
-  html += F("*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font-family:Segoe UI,Arial,sans-serif;line-height:1.4}.wrap{max-width:1100px;margin:0 auto;padding:18px}");
-  html += F(".nav{display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:18px}.brand{font-weight:800;font-size:1.3rem}.links{display:flex;gap:8px;flex-wrap:wrap}");
-  html += F("a,.btn{display:inline-flex;align-items:center;justify-content:center;border:1px solid var(--line);border-radius:8px;padding:8px 12px;color:inherit;text-decoration:none;background:var(--panel);font-weight:650}");
-  html += F(".grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:12px}.card{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:14px}");
-  html += F("h1,h2{margin:0}h2{font-size:1rem;margin-bottom:10px}.k{color:var(--muted);font-size:.82rem;text-transform:uppercase;letter-spacing:.08em}.v{font-size:1.35rem;font-weight:800;word-break:break-word}");
-  html += F("table{width:100%;border-collapse:collapse;font-size:.95rem}td{padding:7px 0;border-top:1px solid var(--line)}td:last-child{text-align:right;font-weight:650}.ok{color:var(--ok)}.warn{color:var(--warn)}.bad{color:var(--bad)}code{font-family:Consolas,monospace}</style></head><body><main class='wrap'>");
+  html += F(":root{color-scheme:light dark;--bg:#f4f7fb;--panel:#fff;--ink:#172033;--muted:#68758a;--line:#dce4ef;--brand:#2563eb;--brand-dark:#1e3a8a;--ok:#15803d;--warn:#b45309;--bad:#b91c1c}");
+  html += F("@media(prefers-color-scheme:dark){:root{--bg:#0b1220;--panel:#111c2e;--ink:#e7eef9;--muted:#9aa9bd;--line:#293a54;--brand:#60a5fa;--brand-dark:#1d4ed8}}");
+  html += F("*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font-family:'Segoe UI',Arial,sans-serif;line-height:1.45;-webkit-font-smoothing:antialiased}.wrap{max-width:1180px;margin:0 auto;padding:20px}");
+  html += F(".nav{display:flex;justify-content:space-between;gap:16px;align-items:center;flex-wrap:wrap;margin:-20px -20px 24px;padding:16px 20px;background:var(--brand-dark);color:#fff;box-shadow:0 6px 18px rgba(15,23,42,.18)}.brand{font-weight:800;font-size:1.3rem}.links{display:flex;gap:8px;flex-wrap:wrap}");
+  html += F("a,.btn{display:inline-flex;align-items:center;justify-content:center;border:1px solid var(--line);border-radius:7px;padding:8px 12px;color:inherit;text-decoration:none;background:var(--panel);font-weight:700;transition:filter .15s,transform .08s}a:hover,.btn:hover{filter:brightness(1.08)}a:active,.btn:active{transform:translateY(1px)}.links a{border-color:rgba(255,255,255,.28);background:rgba(255,255,255,.1);color:#fff;font-size:.9rem}.links a:last-child{background:#fff;color:var(--brand-dark)}");
+  html += F(".grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:14px}.card{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:16px;box-shadow:0 5px 16px rgba(15,23,42,.06)}");
+  html += F("h1,h2{margin:0}h1{font-size:1.55rem;letter-spacing:-.01em}h2{font-size:1rem;margin-bottom:12px}.k{color:var(--muted);font-size:.76rem;text-transform:uppercase;letter-spacing:.09em;font-weight:750}.v{font-size:1.35rem;font-weight:800;word-break:break-word}.card .k+.v{margin-top:4px}");
+  html += F("table{width:100%;border-collapse:collapse;font-size:.93rem}td{padding:8px 0;border-top:1px solid var(--line);vertical-align:top}td:first-child{color:var(--muted);padding-right:14px}td:last-child{text-align:right;font-weight:700;word-break:break-word}.ok{color:var(--ok)}.warn{color:var(--warn)}.bad{color:var(--bad)}code{font-family:Consolas,monospace;font-size:.86em}@media(max-width:640px){.wrap{padding:14px}.nav{margin:-14px -14px 18px;padding:14px;align-items:flex-start}.links{width:100%;overflow-x:auto;flex-wrap:nowrap;padding-bottom:2px}.links a{white-space:nowrap}.grid{grid-template-columns:1fr;gap:10px}h1{font-size:1.35rem}td{padding:7px 0}}</style></head><body><main class='wrap'>");
   html += F("<div class='nav'><div><div class='k'>Controller Health</div><h1>Diagnostics</h1></div><div class='links'><a href='/'>Home</a><a href='/setup'>Setup</a><a href='/events'>Events</a><a href='/diagnostics.json'>JSON</a></div></div>");
+  html += F("<style>.metric-grid{grid-template-columns:repeat(5,minmax(150px,1fr))}.metric-card{min-height:112px;display:flex;flex-direction:column;justify-content:space-between}.metric-card .v{font-size:1.22rem}.metric-card .k{font-size:.7rem}.metric-card:before{content:'';display:block;height:3px;background:var(--brand);margin:-16px -16px 12px}.metric-card:nth-child(2):before{background:var(--warn)}.metric-card:nth-child(3):before{background:var(--ok)}.metric-card:nth-child(4):before{background:#7c3aed}.metric-card:nth-child(5):before{background:#0891b2}.section-title{grid-column:1/-1;margin:10px 0 -2px;color:var(--muted);font-size:.75rem;text-transform:uppercase;letter-spacing:.12em;font-weight:800}.status{display:inline-flex;align-items:center;gap:6px}.status:before{content:'';width:8px;height:8px;border-radius:50%;background:currentColor}.grid+.grid{margin-top:14px}.grid>.card h2{padding-bottom:9px;border-bottom:1px solid var(--line)}@media(max-width:980px){.metric-grid{grid-template-columns:repeat(3,minmax(160px,1fr))}}@media(max-width:640px){.metric-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.metric-grid .metric-card:first-child{grid-column:1/-1}}</style>");
 
-  html += F("<section class='grid'>");
-  html += F("<div class='card'><div class='k'>Uptime</div><div class='v'>"); html += formatRuntimeClock(uptimeSec); html += F("</div></div>");
-  html += F("<div class='card'><div class='k'>WiFi</div><div class='v "); html += (WiFi.status() == WL_CONNECTED ? "ok" : "bad"); html += F("'>");
+  html += F("<section class='grid metric-grid'>");
+  html += F("<div class='card metric-card'><div class='k'>Uptime</div><div class='v'>"); html += formatRuntimeClock(uptimeSec); html += F("</div></div>");
+  html += F("<div class='card metric-card'><div class='k'>Boot Count</div><div class='v'>"); html += String(bootCount); html += F("</div><div class='k'>Reset: "); html += resetReasonText(esp_reset_reason()); html += F("</div></div>");
+  html += F("<div class='card metric-card'><div class='k'>WiFi</div><div class='v status ");
+  html += (WiFi.status() == WL_CONNECTED ? "ok" : "bad"); html += F("'>");
   html += (WiFi.status() == WL_CONNECTED ? WiFi.localIP().toString() : String("Disconnected")); html += F("</div><div class='k'>RSSI ");
   html += String(WiFi.RSSI()); html += F(" dBm</div></div>");
-  html += F("<div class='card'><div class='k'>Heap Free</div><div class='v'>"); html += String(ESP.getFreeHeap()); html += F(" B</div><div class='k'>Min ");
+  html += F("<div class='card metric-card'><div class='k'>Heap Free</div><div class='v'>"); html += String(ESP.getFreeHeap()); html += F(" B</div><div class='k'>Min ");
   html += String(ESP.getMinFreeHeap()); html += F(" B</div></div>");
-  html += F("<div class='card'><div class='k'>LittleFS</div><div class='v'>"); html += String(fsUsed); html += F(" / "); html += String(fsTotal); html += F(" B</div></div>");
+  html += F("<div class='card metric-card'><div class='k'>LittleFS</div><div class='v'>"); html += String(fsUsed); html += F(" / "); html += String(fsTotal); html += F(" B</div></div>");
   html += F("</section>");
 
   html += F("<section class='grid' style='margin-top:12px'>");
   html += F("<div class='card'><h2>Runtime</h2><table>");
   html += F("<tr><td>Device</td><td>"); html += kHost; html += F("</td></tr>");
   html += F("<tr><td>Reset reason</td><td>"); html += resetReasonText(esp_reset_reason()); html += F("</td></tr>");
+  html += F("<tr><td>Reset code</td><td>"); html += String((int)esp_reset_reason()); html += F("</td></tr>");
+  html += F("<tr><td>Boot count</td><td>"); html += String(bootCount); html += F("</td></tr>");
   html += F("<tr><td>SDK</td><td>"); html += ESP.getSdkVersion(); html += F("</td></tr>");
   html += F("<tr><td>CPU</td><td>"); html += String(ESP.getCpuFreqMHz()); html += F(" MHz</td></tr>");
   html += F("<tr><td>Sketch</td><td>"); html += String(ESP.getSketchSize()); html += F(" B</td></tr>");
@@ -2092,6 +2118,7 @@ void handleDiagnosticsPage() {
   html += F("<tr><td>Model</td><td>"); html += meteoModel; html += F("</td></tr>");
   html += F("<tr><td>Current HTTP</td><td>"); html += String(lastWeatherHttpCode); html += F("</td></tr>");
   html += F("<tr><td>Forecast HTTP</td><td>"); html += String(lastForecastHttpCode); html += F("</td></tr>");
+  html += F("<tr><td>HTTP timeout</td><td>"); html += String(meteoHttpTimeoutMs()); html += F(" ms</td></tr>");
   html += F("</table></div>");
   html += F("</section></main></body></html>");
 
@@ -2133,6 +2160,11 @@ void setup() {
       while (true) delay(1000);
     }
   }
+  updateBootCount();
+  Serial.printf("[BOOT] count=%lu reset=%s (%d)\n",
+                (unsigned long)bootCount,
+                resetReasonText(esp_reset_reason()),
+                (int)esp_reset_reason());
 
   // Config + schedule
   loadConfig();
@@ -2284,7 +2316,7 @@ void setup() {
     tft.print(WiFi.RSSI());
     tft.print(" dBm");
 
-    delay(4000);
+    delay(TFT_CONNECTED_SCREEN_MS);
   } else {
     display.clearDisplay();
     display.setTextSize(2); display.setCursor(0, 0);  display.print("Connected!");
@@ -2344,6 +2376,9 @@ void setup() {
   doc["rainDelayCause"]  = rainDelayCauseText();
   doc["zonesCount"]      = zonesCount;
   doc["tankPct"]         = tankPercent();
+  doc["tankRaw"]         = readTankRaw();
+  doc["tankEmptyRaw"]    = tankEmptyRaw;
+  doc["tankFullRaw"]     = tankFullRaw;
   doc["sourceMode"]      = sourceModeText();
   doc["rssi"]            = WiFi.RSSI();
   doc["uptimeSec"]       = (millis() - bootMillis) / 1000;
@@ -2525,7 +2560,7 @@ void setup() {
   server.on("/setTankEmpty", HTTP_POST, []() {
     HttpScope _scope;
     if (isValidAdcPin(tankLevelPin)) {
-      tankEmptyRaw = analogRead(tankLevelPin);
+      tankEmptyRaw = readTankRaw();
       saveConfig();
       server.sendHeader("Location", "/tank", true);
       server.send(302, "text/plain", "");
@@ -2536,7 +2571,7 @@ void setup() {
   server.on("/setTankFull", HTTP_POST, []() {
     HttpScope _scope;
     if (isValidAdcPin(tankLevelPin)) {
-      tankFullRaw = analogRead(tankLevelPin);
+      tankFullRaw = readTankRaw();
       saveConfig();
       server.sendHeader("Location", "/tank", true);
       server.send(302, "text/plain", "");
@@ -2547,7 +2582,12 @@ void setup() {
 
   // Manual control per zone
   for (int i=0; i<MAX_ZONES; i++){
-    server.on(String("/valve/on/")+i,  HTTP_POST, [i](){ HttpScope _s; turnOnValveManual(i);  server.send(200,"text/plain","OK"); });
+    server.on(String("/valve/on/")+i,  HTTP_POST, [i](){
+      HttpScope _s;
+      String error;
+      if (turnOnValveManual(i, &error)) server.send(200, "text/plain", "OK");
+      else server.send(409, "text/plain", error.length() ? error : "Manual start failed");
+    });
     server.on(String("/valve/off/")+i, HTTP_POST, [i](){ HttpScope _s; turnOffValveManual(i); server.send(200,"text/plain","OK"); });
   }
   server.on("/stopall", HTTP_POST, [](){
@@ -3267,7 +3307,7 @@ String fetchWeather() {
     bool useSelectedModel = (pass == 0);
     String url = buildUrl(useSelectedModel);
     int code = 0;
-    String payload = httpGetMeteo(url, code, 2500);
+    String payload = httpGetMeteo(url, code, meteoHttpTimeoutMs());
     lastWeatherHttpCode = code;
 
     if (code == 200 && payload.length() && !isMeteoErrorPayload(payload)) {
@@ -3305,7 +3345,7 @@ String fetchWeatherHourlyForCurrent(const String& model, float lat, float lon, b
   url += "&forecast_hours=48&timeformat=unixtime&temperature_unit=celsius&wind_speed_unit=ms"
          "&precipitation_unit=mm&pressure_unit=hPa&timezone=auto";
   int code = 0;
-  String payload = httpGetMeteo(url, code, 3000);
+  String payload = httpGetMeteo(url, code, meteoHttpTimeoutMs());
   if (code != 200 || isMeteoErrorPayload(payload)) return "";
   return payload;
 }
@@ -3380,7 +3420,7 @@ String fetchForecast(float lat, float lon) {
     bool useSelectedModel = (pass == 0);
     String url = buildUrl(useSelectedModel);
     int code = 0;
-    String payload = httpGetMeteo(url, code, 3000);
+    String payload = httpGetMeteo(url, code, meteoHttpTimeoutMs());
     lastForecastHttpCode = code;
     if (code == 200 && payload.length() && !isMeteoErrorPayload(payload)) {
       return payload;
@@ -5284,9 +5324,12 @@ void turnOffZone(int z) {
 }
 
 
-void turnOnValveManual(int z) {
-  if (z < 0 || z >= (int)zonesCount || z >= (int)MAX_ZONES) return;
-  if (zoneActive[z])   return;
+bool turnOnValveManual(int z, String* error) {
+  if (z < 0 || z >= (int)zonesCount || z >= (int)MAX_ZONES) {
+    if (error) *error = "Invalid zone";
+    return false;
+  }
+  if (zoneActive[z]) return true;
 
   const bool usePcf = useExpanderForZone(z);
   if (!usePcf) {
@@ -5295,7 +5338,8 @@ void turnOnValveManual(int z) {
       Serial.printf("[VALVE] Z%d has no GPIO pin assigned; skipping manual start\n", z+1);
       cancelStart(z, "NO_PIN", false);
       showManualSelection();
-      return;
+      if (error) *error = "Zone has no valid output GPIO";
+      return false;
     }
   }
 
@@ -5306,18 +5350,28 @@ void turnOnValveManual(int z) {
         manualSelectedZone = i;
         Serial.printf("[VALVE] Manual start blocked: Z%d is already running\n", i + 1);
         showManualSelection();
-        return;
+        if (error) *error = "Another zone is already running";
+        return false;
       }
       break; // concurrent: allow additional zone
     }
   }
 
   lastStartSlot[z] = 1;
+  const unsigned long baseDuration = durationForSlot(z, 1);
+  if (baseDuration == 0) {
+    Serial.printf("[VALVE] Manual start blocked: Z%d duration is 0\n", z + 1);
+    cancelStart(z, "NO_DURATION", false);
+    showManualSelection();
+    if (error) *error = "Zone duration is 0. Save a non-zero duration before manual start.";
+    return false;
+  }
   unsigned long total = smartWateringDurationForSlot(z, 1);
   if (total == 0) {
     cancelStart(z, "SMART", true);
     showManualSelection();
-    return;
+    if (error) *error = "Smart Watering reduced the zone duration to 0 seconds";
+    return false;
   }
   zoneStartMs[z] = millis();
   zoneActive[z] = true;
@@ -5349,6 +5403,7 @@ void turnOnValveManual(int z) {
   } else {
     HomeScreen();
   }
+  return true;
 }
 
 void turnOffValveManual(int z) {
@@ -5835,6 +5890,7 @@ void handleRoot() {
   html += F("html[data-theme='dark'] .summary-link,html[data-theme='dark'] .metric-tile,html[data-theme='dark'] .hero-mini{background:#102126}");
   html += F("@media(max-width:720px){.wrap{padding:0 12px;margin:12px auto}.nav .meta{width:100%}.pill,#themeBtn{flex:1 1 auto;justify-content:center}.dash-nav{top:116px;border-radius:8px}.hero-shell{padding:16px}.section-head{margin-bottom:10px}.card{padding:16px}}");
   html += F("@media(max-width:720px){.nav{padding-top:8px}.chip{font-size:.88rem}.hero-shell{padding:18px}.hero-title{max-width:none;font-size:1.95rem}.hero-mini-grid{grid-template-columns:1fr}.zone-row{grid-template-columns:1fr}.zone-row-status,.zone-row-actions{justify-content:flex-start}.zone-row-actions .btn{flex:1 1 140px}.brand-title{letter-spacing:.55px}.summary-card{min-height:auto}.summary-link{min-height:0}.summary-metric-grid{grid-template-columns:1fr 1fr}.summary-metric-grid.metric-pair{grid-template-columns:1fr}.summary-meta.status-pills{grid-template-columns:1fr}.dash-nav{top:120px;overflow:auto;flex-wrap:nowrap;padding-bottom:8px}.dash-nav a{white-space:nowrap}.sched-top{padding:16px}.sched-body{padding:16px}.sched-tools .btn{flex:1 1 140px}}");
+  html += F(".nav{background:#1e3a8a;box-shadow:0 4px 14px rgba(15,23,42,.18)}.dot{box-shadow:none}.hero-shell{background:var(--card);border-left:4px solid var(--primary);box-shadow:0 8px 22px rgba(15,23,42,.08)}.hero-title{letter-spacing:-.02em}.hero-text{max-width:54ch}.hero-mini{background:var(--panel);box-shadow:none;border-color:var(--line)}.hero-mini.hero-mini-strong{background:var(--chip);border-color:var(--chip-brd)}.dash-nav{background:var(--card);border:1px solid var(--line);box-shadow:0 5px 14px rgba(15,23,42,.08)}.dash-nav a{border-radius:6px;background:transparent;border-color:transparent}.dash-nav a:hover{transform:none;box-shadow:none;background:rgba(37,99,235,.1)}.summary-shell{padding:0;background:transparent;border:0;box-shadow:none}.summary-card{border-top:3px solid var(--primary);background:var(--card);box-shadow:0 6px 18px rgba(15,23,42,.06)}.summary-card:nth-child(2){border-top-color:#7c3aed}.summary-card:nth-child(3){border-top-color:#0891b2}.summary-card:nth-child(4){border-top-color:#15803d}.summary-card:nth-child(5){border-top-color:#b45309}.zone-row{background:var(--card);border-radius:7px;box-shadow:0 2px 8px rgba(15,23,42,.05)}.zone-row.is-active{box-shadow:0 6px 16px rgba(22,163,74,.12)}.zone-dot{box-shadow:none}.section-head h2{letter-spacing:-.01em}.action-card{background:var(--card)}@media(max-width:720px){.nav .meta{gap:6px}.hero-shell{border-left:0;border-top:3px solid var(--primary)}.summary-shell{padding:0}.summary-grid{gap:10px}.zone-row-actions .btn{min-height:42px}}");
   html += F("</style></head><body>");
   flush();
 
@@ -6643,6 +6699,7 @@ void handleSetupPage() {
   html += F("html[data-theme='light'] input[type=checkbox]:not(#themeToggle):focus-visible,html[data-theme='light'] input[type=radio]:focus-visible{border-color:#2563eb;box-shadow:0 0 0 3px rgba(37,99,235,.14)}html[data-theme='light'] .setup-nav a:hover{background:#eef5ff;border-color:#bfdbfe;box-shadow:0 10px 24px rgba(37,99,235,.08)}");
   html += F("details.collapse summary,html[data-theme='dark'] details.collapse summary{color:#ffffff}html[data-theme='light'] details.collapse summary{color:#000000}");
   html += F("@media(max-width:760px){.page-head{padding:10px 12px}.page-head h1{font-size:1.2rem}.setup-hero{grid-template-columns:1fr}.setup-badges{grid-template-columns:1fr 1fr}.setup-nav{top:8px;flex-wrap:nowrap;overflow:auto;padding-bottom:6px}.setup-nav a{white-space:nowrap}.setup-actions-top{top:8px;z-index:9;padding:10px;border-radius:14px;background:rgba(13,23,24,.88);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);border:1px solid rgba(92,131,125,.2)}.row{padding-top:8px;flex-direction:column;align-items:stretch}.row label{min-width:0;width:100%}.row .btn,.row .btn-alt{width:100%}.switchline{align-items:flex-start}}");
+  html += F(":root{--setup-bg:#f3f7fc;--setup-panel:#ffffff;--setup-ink:#172033;--setup-muted:#68758a;--setup-line:#dbe4ef;--setup-blue:#2563eb}html[data-theme='dark']{--setup-bg:#0b1220;--setup-panel:#111c2e;--setup-ink:#e7eef9;--setup-muted:#9aa9bd;--setup-line:#293a54;--setup-blue:#60a5fa}.wrap{max-width:1180px;margin:0 auto;padding:0 20px}body{background:var(--setup-bg);color:var(--setup-ink)}.page-head{margin:0 -20px 16px;padding:16px 20px;border:0;border-bottom:1px solid var(--setup-line);border-radius:0;background:var(--setup-panel);box-shadow:0 4px 14px rgba(15,23,42,.06)}.page-kicker{color:var(--setup-blue)}.page-sub,.setup-hero-copy p,.card-intro,.row small{color:var(--setup-muted)}.setup-hero{display:block;margin:0 -20px 16px;padding:18px 20px;border-radius:0;background:var(--setup-panel);border:0;border-bottom:1px solid var(--setup-line);box-shadow:none}.setup-overview-title{color:var(--setup-blue);margin-bottom:10px}.setup-badges{grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}.setup-badge{border-radius:7px;padding:12px;background:var(--setup-bg);border:1px solid var(--setup-line)}.setup-badge-k{color:var(--setup-muted)}.setup-badge-v{color:var(--setup-ink)}.setup-nav{top:8px;margin:0 0 10px;padding:7px;border-radius:7px;background:var(--setup-panel);border:1px solid var(--setup-line);box-shadow:0 5px 14px rgba(15,23,42,.08)}.setup-nav a{border-radius:6px;background:transparent;color:var(--setup-muted);border-color:transparent;padding:8px 11px}.setup-nav a:hover{transform:none;background:rgba(37,99,235,.1);border-color:rgba(37,99,235,.22);color:var(--setup-blue);box-shadow:none}.setup-actions-top{top:61px;margin:0 0 16px;padding:8px;border-radius:7px;background:var(--setup-panel);border:1px solid var(--setup-line);box-shadow:0 5px 14px rgba(15,23,42,.08)}.card{border-radius:7px;background:var(--setup-panel);border:1px solid var(--setup-line);box-shadow:0 6px 18px rgba(15,23,42,.06)}.card::before{height:2px;background:var(--setup-blue)}.card h3{color:var(--setup-ink)}details.collapse summary{color:var(--setup-ink);padding:7px 0;font-size:1rem}details.collapse summary:after{border-radius:6px;border-color:var(--setup-line);background:var(--setup-bg)}.collapse-body{border-top:1px solid var(--setup-line);padding-top:12px}.row{border-top-color:var(--setup-line)}label{color:var(--setup-ink)}input[type=text],input[type=number],select{background:var(--setup-bg);color:var(--setup-ink);border-color:var(--setup-line);border-radius:6px}.chip{background:var(--setup-bg);border-color:var(--setup-line);color:var(--setup-ink);border-radius:6px}.btn,.btn-alt{border-radius:6px}.btn-alt{background:var(--setup-bg);color:var(--setup-ink);border-color:var(--setup-line)}.save-confirm{margin-left:auto}@media(max-width:760px){.wrap{padding:0 12px}.page-head,.setup-hero{margin-left:-12px;margin-right:-12px;padding-left:12px;padding-right:12px}.setup-badges{grid-template-columns:repeat(2,minmax(0,1fr))}.setup-nav{top:8px}.setup-actions-top{top:58px}.setup-actions-top .save-confirm{margin-left:0}.row{padding-top:10px}}@media(max-width:440px){.setup-badges{grid-template-columns:1fr}.setup-actions-top .btn,.setup-actions-top .btn-alt{flex:1 1 100%}}</style></head><body>"); 
   html += F("</style></head><body>");
 
   html += F("<div class='wrap'><div class='page-head'><div class='page-head-copy'><div class='page-kicker'>Controller configuration</div><h1>System Setup</h1><div class='page-sub'>Start with zones and water source, then set weather, time, display, and hardware pins.</div></div>");
@@ -6840,8 +6897,8 @@ void handleSetupPage() {
   String modelSel = cleanMeteoModel(meteoModel);
   bool modelIsKnown = isKnownMeteoModel(modelSel);
   html += F("<div class='row'><label>Location Name</label><input class='in-wide' type='text' name='meteoLocation' value='"); html += meteoLocation; html += F("'><small>Optional label for UI/logs</small></div>");
-  html += F("<div class='row'><label>Latitude</label><input class='in-med' type='text' name='meteoLat' value='"); html += latStr; html += F("'><small>e.g. -34.9285</small></div>");
-  html += F("<div class='row'><label>Longitude</label><input class='in-med' type='text' name='meteoLon' value='"); html += lonStr; html += F("'><small>e.g. 138.6007</small></div>");
+  html += F("<div class='row'><label>Latitude</label><input class='in-med' type='text' name='meteoLat' value='"); html += latStr; html += F("'><small>e.g. -35.1076</small></div>");
+  html += F("<div class='row'><label>Longitude</label><input class='in-med' type='text' name='meteoLon' value='"); html += lonStr; html += F("'><small>e.g. 138.5573</small></div>");
   html += F("<div class='row'><label>Model</label><select class='in-med' name='meteoModelSelect' id='meteoModelSelect'>");
   html += F("<option value='best_match'");    html += (modelSel == "best_match" ? " selected" : ""); html += F(">Best match</option>");
   html += F("<option value='gfs_seamless'");  html += (modelSel == "gfs_seamless" ? " selected" : ""); html += F(">GFS seamless</option>");
@@ -7648,29 +7705,25 @@ void handleLogPage() {
 // ---------- Tank Calibration Page ----------
 void handleTankCalibration() {
   HttpScope _scope;
-  int raw = isValidAdcPin(tankLevelPin) ? analogRead(tankLevelPin) : -1;
-  int pct=tankPercent();
+  int raw = readTankRaw();
+  int pct = tankPercent();
 
-  String html; html.reserve(2000);
+  String html; html.reserve(4800);
   html += F("<!DOCTYPE html><html><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'>");
   html += F("<title>Tank Calibration</title>");
-  html += F("<style>@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@500;700&family=Sora:wght@400;600;700;800&display=swap');");
-  html += F("body{font-family:'Sora','Avenir Next','Trebuchet MS',sans-serif;background:linear-gradient(180deg,#0d1b2f,#08111f);color:#e8eef6;margin:0;font-size:15px;letter-spacing:0}");
-  html += F(".wrap{max-width:620px;margin:28px auto;padding:0 16px}.card{background:#0f1d31;border:1px solid #24405f;border-radius:8px;padding:20px 16px;box-shadow:0 10px 28px rgba(0,0,0,.24);position:relative;overflow:hidden}");
-  html += F(".card:before{content:'';position:absolute;left:0;right:0;top:0;height:3px;background:linear-gradient(90deg,#2563eb,#38bdf8)}");
-  html += F("h2{margin:0 0 12px 0;font-size:1.25em;letter-spacing:.8px;text-transform:uppercase}");
-  html += F("p b:first-child{font-family:'JetBrains Mono','Consolas',monospace}");
-  html += F(".btn{background:linear-gradient(180deg,#2563eb,#1e40af);color:#fff;border:1px solid rgba(0,0,0,.18);border-radius:8px;padding:10px 16px;font-weight:700;cursor:pointer;font-size:.95rem;box-shadow:0 6px 16px rgba(37,99,235,.22)}.row{display:flex;gap:12px;justify-content:space-between;margin-top:12px;flex-wrap:wrap}");
-  html += F(".btn{transition:transform .06s ease,box-shadow .06s ease,filter .06s ease}");
-  html += F(".btn:active{transform:translateY(1px);box-shadow:inset 0 2px 6px rgba(0,0,0,.25)}");
-  html += F(".btn{position:relative;overflow:hidden}");
-  html += F(".ripple{position:absolute;border-radius:999px;transform:scale(0);background:rgba(255,255,255,.35);animation:ripple .5s ease-out;pointer-events:none}");
-  html += F("@keyframes ripple{to{transform:scale(3.2);opacity:0;}}");
-  html += F("@media(max-width:600px){.btn{width:100%}.row form{flex:1 1 100%}}");
-  html += F("a{color:#bfdbfe}</style></head><body><div class='wrap'><h2>Tank Calibration</h2><div class='card'>");
+  html += F("<style>:root{color-scheme:light dark;--bg:#f3f7fc;--panel:#fff;--ink:#172033;--muted:#68758a;--line:#dbe4ef;--blue:#2563eb;--blue-dark:#1e3a8a;--warn:#b45309}");
+  html += F("@media(prefers-color-scheme:dark){:root{--bg:#0b1220;--panel:#111c2e;--ink:#e7eef9;--muted:#9aa9bd;--line:#293a54;--blue:#60a5fa;--blue-dark:#1d4ed8}}");
+  html += F("*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font-family:'Segoe UI',Arial,sans-serif;line-height:1.45}.wrap{max-width:760px;margin:0 auto;padding:20px}");
+  html += F(".nav{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin:-20px -20px 24px;padding:16px 20px;background:var(--blue-dark);color:#fff}.nav h1{margin:0;font-size:1.35rem}.links{display:flex;gap:7px}.nav a,.links-bottom a{color:inherit;text-decoration:none;font-weight:700}.nav a{border:1px solid rgba(255,255,255,.3);padding:7px 10px;border-radius:7px;font-size:.9rem}");
+  html += F(".card{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:18px;box-shadow:0 6px 18px rgba(15,23,42,.08);margin-bottom:14px}.k{color:var(--muted);font-size:.76rem;text-transform:uppercase;letter-spacing:.08em;font-weight:800}.reading{display:flex;align-items:end;justify-content:space-between;gap:16px;margin:5px 0 14px}.reading strong{font-size:2.7rem;line-height:1;font-variant-numeric:tabular-nums}.mono{font-family:Consolas,monospace;font-variant-numeric:tabular-nums}");
+  html += F(".meter{height:16px;border-radius:99px;background:var(--line);overflow:hidden}.fill{height:100%;width:");
+  html += String(constrain(pct, 0, 100));
+  html += F("%;background:var(--blue);transition:width .25s ease}.stats,.steps{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:14px}.stat,.step{border:1px solid var(--line);border-radius:8px;padding:12px}.stat strong{display:block;margin-top:3px;font-size:1.15rem}.steps{grid-template-columns:1fr 1fr;margin-top:0}.step h2{margin:0 0 6px;font-size:1rem}.step p,.note{margin:0 0 12px;color:var(--muted);font-size:.9rem}.btn{width:100%;border:0;border-radius:7px;padding:11px 14px;background:var(--blue);color:#fff;font-weight:800;cursor:pointer;font-size:.95rem}.btn:hover{filter:brightness(1.08)}.warning{color:var(--warn);font-weight:700}.links-bottom{display:flex;justify-content:space-between;gap:12px;margin-top:16px;color:var(--blue)}");
+  html += F(".card{position:relative;overflow:hidden}.card:before{content:'';position:absolute;left:0;right:0;top:0;height:3px;background:var(--blue)}.reading strong{color:var(--blue)}.step{background:rgba(37,99,235,.04)}.step:nth-child(2){background:rgba(21,128,61,.04)}.step:nth-child(2) .btn{background:#15803d}.live-dot{color:#15803d;font-weight:800}");
+  html += F("@media(max-width:600px){.wrap{padding:14px}.nav{margin:-14px -14px 18px;padding:14px}.links{width:100%}.links a{flex:1;text-align:center}.steps,.stats{grid-template-columns:1fr}.reading strong{font-size:2.2rem}}</style></head><body><main class='wrap'>");
+  html += F("<header class='nav'><h1>Tank calibration</h1><div class='links'><a href='/'>Home</a><a href='/setup'>Setup</a><a href='/diagnostics'>Diagnostics</a></div></header><section class='card'>");
 
-  html += F("<p>Raw: <b>"); html += String(raw); html += F("</b></p>");
-  html += F("<p>Calibrated range: <b>"); html += String(tankEmptyRaw); html += F("</b> to <b>"); html += String(tankFullRaw); html += F("</b></p>");
+  html += F("<div class='k'>Live tank reading</div><div class='reading'><strong id='pct'>"); html += String(pct); html += F("%</strong><span class='mono' id='raw'>Raw "); html += String(raw); html += F("</span></div><div class='meter'><div class='fill' id='fill'></div></div><div class='stats'><div class='stat'><span class='k'>Empty point</span><strong class='mono' id='empty'>"); html += String(tankEmptyRaw); html += F("</strong></div><div class='stat'><span class='k'>Full point</span><strong class='mono' id='full'>"); html += String(tankFullRaw); html += F("</strong></div><div class='stat'><span class='k'>Sensor GPIO</span><strong class='mono'>"); html += String(tankLevelPin); html += F("</strong></div></div></section><section class='card'><div class='k'>Two-point calibration</div><p class='note'>Put the tank in the stated physical condition, wait for the reading to settle, then capture that point. The averaged value is saved to flash.</p><div class='steps'><div class='step'><h2>1. Empty tank</h2><p>Tank empty or at the chosen minimum level.</p>");
   if (!isValidAdcPin(tankLevelPin)) {
     #if defined(CONFIG_IDF_TARGET_ESP32)
       html += F("<p style='color:#f59e0b'>Invalid ADC pin. Set tank sensor GPIO to 32-39 (ESP32) in Setup.</p>");
@@ -7680,18 +7733,9 @@ void handleTankCalibration() {
   } else {
     html += F("<p>Level: <b>"); html += String(pct); html += F("%</b></p>");
   }
-  html += F("<div class='row'><form method='POST' action='/setTankEmpty'><button class='btn' type='submit'>Set Empty</button></form>");
-  html += F("<form method='POST' action='/setTankFull'><button class='btn' type='submit'>Set Full</button></form></div>");
-  html += F("<p><a href='/'>Home</a> | <a href='/setup'>Setup</a></p></div></div>");
+  html += F("<form method='POST' action='/setTankEmpty'><button class='btn' type='submit'>Capture empty point</button></form></div><div class='step'><h2>2. Full tank</h2><p>Tank full at the maximum level you want to measure.</p><form method='POST' action='/setTankFull'><button class='btn' type='submit'>Capture full point</button></form></div></div></section><div class='links-bottom'><a href='/'>Back to dashboard</a><a href='/diagnostics'>Open diagnostics</a></div></main>");
   html += F("<script>");
-  html += F("function addRipple(e){const t=e.currentTarget; if(t.disabled) return; const rect=t.getBoundingClientRect();");
-  html += F("const size=Math.max(rect.width,rect.height); const x=(e.clientX|| (rect.left+rect.width/2)) - rect.left - size/2;");
-  html += F("const y=(e.clientY|| (rect.top+rect.height/2)) - rect.top - size/2;");
-  html += F("const r=document.createElement('span'); r.className='ripple'; r.style.width=size+'px'; r.style.height=size+'px';");
-  html += F("r.style.left=x+'px'; r.style.top=y+'px'; const old=t.querySelector('.ripple'); if(old) old.remove(); t.appendChild(r);");
-  html += F("setTimeout(()=>{r.remove();},520);}");
-  html += F("document.querySelectorAll('.btn').forEach(el=>{el.addEventListener('pointerdown',addRipple);});");
-  html += F("setTimeout(()=>location.reload(),2000);");
+  html += F("async function update(){try{const r=await fetch('/status',{cache:'no-store'});const s=await r.json();const p=Math.max(0,Math.min(100,Number(s.tankPct)||0));document.getElementById('pct').textContent=p+'%';document.getElementById('fill').style.width=p+'%';document.getElementById('raw').textContent='Raw '+(s.tankRaw==null?'--':s.tankRaw);document.getElementById('empty').textContent=s.tankEmptyRaw==null?'--':s.tankEmptyRaw;document.getElementById('full').textContent=s.tankFullRaw==null?'--':s.tankFullRaw;}catch(e){}}update();setInterval(update,1000);");
   html += F("</script></body></html>");
 
   server.send(200,"text/html",html);
@@ -7712,9 +7756,9 @@ void loadConfig() {
   if (!f) return;
 
   String s;
-  meteoLat = NAN;
-  meteoLon = NAN;
-  meteoLocation = "";
+  meteoLat = -35.1076f;
+  meteoLon = 138.5573f;
+  meteoLocation = "Adelaide";
 
   // Legacy & core (now: Open-Meteo coords)
   if ((s = _safeReadLine(f)).length()) {
@@ -8652,4 +8696,31 @@ void handleClearEvents() {
   }
   server.sendHeader("Location", "/events", true);
   server.send(302, "text/plain", "");
+}
+
+static uint32_t readBootCount() {
+  if (!LittleFS.exists("/boot_count.txt")) return 0;
+  File f = LittleFS.open("/boot_count.txt", "r");
+  if (!f) return 0;
+  String value = f.readString();
+  f.close();
+  value.trim();
+  if (!value.length()) return 0;
+  return (uint32_t)strtoul(value.c_str(), nullptr, 10);
+}
+
+static void saveBootCount(uint32_t count) {
+  File f = LittleFS.open("/boot_count.txt", "w");
+  if (!f) {
+    Serial.println("[BOOT] Unable to persist boot count");
+    return;
+  }
+  f.print(count);
+  f.close();
+}
+
+static void updateBootCount() {
+  bootCount = readBootCount();
+  if (bootCount != 0xFFFFFFFFUL) ++bootCount;
+  saveBootCount(bootCount);
 }
