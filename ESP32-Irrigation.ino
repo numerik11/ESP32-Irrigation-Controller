@@ -7,6 +7,9 @@
 #ifndef ENABLE_OTA
   #define ENABLE_OTA 0
 #endif
+#ifndef ENABLE_WIFI_LONG_RANGE
+  #define ENABLE_WIFI_LONG_RANGE 0   // long-range mode improves weak links but slows HTTP browsing
+#endif
 #ifndef TFT_MISO
   #define TFT_MISO -1   // ST7789 typically doesn't use MISO
 #endif
@@ -186,6 +189,16 @@ static String formatRuntimeClock(unsigned long totalSec) {
   if (hours > 0) snprintf(buf, sizeof(buf), "%lu:%02lu:%02lu", hours, minutes, seconds);
   else snprintf(buf, sizeof(buf), "%lu:%02lu", minutes, seconds);
   return String(buf);
+}
+
+static const char* wifiSignalQuality(int rssi) {
+  if (WiFi.status() != WL_CONNECTED) return "Disconnected";
+  if (rssi >= -50) return "Excellent";
+  if (rssi >= -60) return "Strong";
+  if (rssi >= -67) return "Good";
+  if (rssi >= -75) return "Fair";
+  if (rssi >= -82) return "Weak";
+  return "Very weak";
 }
 
 WiFiManager wifiManager;
@@ -419,6 +432,22 @@ struct HttpScope {
   HttpScope()  { g_inHttp = true; }
   ~HttpScope() { g_inHttp = false; }
 };
+
+static void configureWifiForHttp() {
+  WiFi.setSleep(false);
+  WiFi.setTxPower(WIFI_POWER_19_5dBm);
+#if ENABLE_WIFI_LONG_RANGE
+  WiFi.enableLongRange(true);
+  const uint8_t protocols = WIFI_PROTOCOL_11B | WIFI_PROTOCOL_11G | WIFI_PROTOCOL_11N | WIFI_PROTOCOL_LR;
+#else
+  WiFi.enableLongRange(false);
+  const uint8_t protocols = WIFI_PROTOCOL_11B | WIFI_PROTOCOL_11G | WIFI_PROTOCOL_11N;
+#endif
+  esp_err_t err = esp_wifi_set_protocol(WIFI_IF_STA, protocols);
+  if (err != ESP_OK) {
+    Serial.printf("[WiFi] set_protocol failed: %d\n", (int)err);
+  }
+}
 
 #if defined(BOARD_HAS_PSRAM)
 static constexpr size_t PSRAM_LARGE_ALLOC_THRESHOLD = 2048;
@@ -1990,6 +2019,52 @@ void handleDiagnosticsJson() {
   display["pwm"] = g_tftPwmReady;
   display["brightnessPct"] = (int)lroundf((float)g_tftBrightness * 100.0f / 255.0f);
 
+  JsonObject pins = doc["pins"].to<JsonObject>();
+  JsonObject busPins = pins["buses"].to<JsonObject>();
+  busPins["i2cSda"] = i2cSdaPin;
+  busPins["i2cScl"] = i2cSclPin;
+  busPins["tftSclk"] = tftSclkPin;
+  busPins["tftMosi"] = tftMosiPin;
+  busPins["tftCs"] = tftCsPin;
+  busPins["tftDc"] = tftDcPin;
+  busPins["tftRst"] = tftRstPin;
+  busPins["tftBacklight"] = tftBlPin;
+  busPins["statusPixel"] = STATUS_PIXEL_PIN;
+  JsonObject relayPins = pins["relays"].to<JsonObject>();
+  relayPins["gpioFallback"] = useGpioFallback;
+  relayPins["powerSupply"] = powerSupplyPin;
+  relayPins["powerSupplyActiveLow"] = powerSupplyActiveLow;
+  relayPins["mainsGpio"] = mainsPin;
+  relayPins["mainsActiveLow"] = mainsGpioActiveLow;
+  relayPins["mainsPcfChannel"] = mainsChannel;
+  relayPins["tankGpio"] = tankPin;
+  relayPins["tankActiveLow"] = tankGpioActiveLow;
+  relayPins["tankPcfChannel"] = tankChannel;
+  JsonArray zonePinArray = pins["zones"].to<JsonArray>();
+  for (int i = 0; i < MAX_ZONES; ++i) {
+    JsonObject z = zonePinArray.add<JsonObject>();
+    z["zone"] = i + 1;
+    z["name"] = zoneNames[i];
+    z["enabled"] = i < (int)zonesCount;
+    z["gpio"] = zonePins[i];
+    z["activeLow"] = zoneGpioActiveLow[i];
+    if (i < ALL_P) z["pcfChannel"] = PCH[i];
+    else z["pcfChannel"] = nullptr;
+  }
+  JsonObject sensorPins = pins["sensors"].to<JsonObject>();
+  sensorPins["tankLevel"] = tankLevelPin;
+  sensorPins["rainSensor"] = rainSensorPin;
+  sensorPins["rainSensorEnabled"] = rainSensorEnabled;
+  sensorPins["rainSensorInvert"] = rainSensorInvert;
+  sensorPins["moisture"] = moisturePin;
+  sensorPins["moistureEnabled"] = moistureProbeEnabled;
+  sensorPins["photo"] = photoPin;
+  sensorPins["photoAutoEnabled"] = photoAutoEnabled;
+  sensorPins["photoInvert"] = photoInvert;
+  JsonObject buttonPins = pins["buttons"].to<JsonObject>();
+  buttonPins["manualSelect"] = manualSelectPin;
+  buttonPins["manualStart"] = manualStartPin;
+
   JsonObject water = doc["water"].to<JsonObject>();
   water["zonesCount"] = zonesCount;
   water["sourceMode"] = sourceModeText();
@@ -2021,7 +2096,7 @@ void handleDiagnosticsJson() {
   if (lastForecastError.length()) weather["lastForecastError"] = lastForecastError;
 
   String out;
-  out.reserve(2600);
+  out.reserve(5200);
   serializeJson(doc, out);
   server.send(200, "application/json", out);
 }
@@ -2033,6 +2108,8 @@ void handleDiagnosticsPage() {
   const uint32_t uptimeSec = (nowMs - bootMillis) / 1000UL;
   const uint32_t fsTotal = LittleFS.totalBytes();
   const uint32_t fsUsed = LittleFS.usedBytes();
+  const int rssi = WiFi.RSSI();
+  const String rssiLabel = wifiSignalQuality(rssi);
   const int activeZones = []() {
     int n = 0;
     for (int i = 0; i < (int)zonesCount; ++i) if (zoneActive[i]) ++n;
@@ -2051,7 +2128,22 @@ void handleDiagnosticsPage() {
   if (!i2cList.length()) i2cList = "none";
 
   String html;
-  html.reserve(5200);
+  html.reserve(12000);
+  auto pinText = [](int pin) -> String {
+    return pin < 0 ? String("disabled") : String("GPIO") + String(pin);
+  };
+  auto activeText = [](bool activeLow) -> const char* {
+    return activeLow ? "active LOW" : "active HIGH";
+  };
+  auto appendPinRow = [&](const String& assignment, const String& pin, const String& notes) {
+    html += F("<tr><td>");
+    html += assignment;
+    html += F("</td><td><code>");
+    html += pin;
+    html += F("</code></td><td>");
+    html += notes;
+    html += F("</td></tr>");
+  };
   html += F("<!doctype html><html lang='en'><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'>");
   html += F("<!-- ");
   html += kFirmwareSignature;
@@ -2062,11 +2154,12 @@ void handleDiagnosticsPage() {
   html += F("*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font-family:'Segoe UI',Arial,sans-serif;line-height:1.45;-webkit-font-smoothing:antialiased}.wrap{max-width:1180px;margin:0 auto;padding:20px}");
   html += F(".nav{display:flex;justify-content:space-between;gap:16px;align-items:center;flex-wrap:wrap;margin:-20px -20px 24px;padding:16px 20px;background:var(--brand-dark);color:#fff;box-shadow:0 6px 18px rgba(15,23,42,.18)}.brand{font-weight:800;font-size:1.3rem}.links{display:flex;gap:8px;flex-wrap:wrap}");
   html += F("a,.btn{display:inline-flex;align-items:center;justify-content:center;border:1px solid var(--line);border-radius:7px;padding:8px 12px;color:inherit;text-decoration:none;background:var(--panel);font-weight:700;transition:filter .15s,transform .08s}a:hover,.btn:hover{filter:brightness(1.08)}a:active,.btn:active{transform:translateY(1px)}.links a{border-color:rgba(255,255,255,.28);background:rgba(255,255,255,.1);color:#fff;font-size:.9rem}.links a:last-child{background:#fff;color:var(--brand-dark)}");
-  html += F(".grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:14px}.card{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:16px;box-shadow:0 5px 16px rgba(15,23,42,.06)}");
-  html += F("h1,h2{margin:0}h1{font-size:1.55rem;letter-spacing:-.01em}h2{font-size:1rem;margin-bottom:12px}.k{color:var(--muted);font-size:.76rem;text-transform:uppercase;letter-spacing:.09em;font-weight:750}.v{font-size:1.35rem;font-weight:800;word-break:break-word}.card .k+.v{margin-top:4px}");
-  html += F("table{width:100%;border-collapse:collapse;font-size:.93rem}td{padding:8px 0;border-top:1px solid var(--line);vertical-align:top}td:first-child{color:var(--muted);padding-right:14px}td:last-child{text-align:right;font-weight:700;word-break:break-word}.ok{color:var(--ok)}.warn{color:var(--warn)}.bad{color:var(--bad)}code{font-family:Consolas,monospace;font-size:.86em}@media(max-width:640px){.wrap{padding:14px}.nav{margin:-14px -14px 18px;padding:14px;align-items:flex-start}.links{width:100%;overflow-x:auto;flex-wrap:nowrap;padding-bottom:2px}.links a{white-space:nowrap}.grid{grid-template-columns:1fr;gap:10px}h1{font-size:1.35rem}td{padding:7px 0}}</style></head><body><main class='wrap'>");
+  html += F(".grid{display:grid;gap:14px}.diag-grid{grid-template-columns:repeat(12,minmax(0,1fr));align-items:start}.card{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:16px;box-shadow:0 4px 14px rgba(15,23,42,.055)}.status-card{grid-column:span 4}.status-card-wide{grid-column:span 6}.pin-card{grid-column:span 6;overflow:hidden}.card-wide{grid-column:1/-1}");
+  html += F("h1,h2{margin:0}h1{font-size:1.55rem}h2{font-size:1rem}.card-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:-2px 0 5px;padding-bottom:10px;border-bottom:1px solid var(--line)}.card-tag{color:var(--muted);font-size:.7rem;font-weight:750;text-transform:uppercase;letter-spacing:.08em}.k{color:var(--muted);font-size:.76rem;text-transform:uppercase;letter-spacing:.09em;font-weight:750}.v{font-size:1.35rem;font-weight:800;overflow-wrap:anywhere}.card .k+.v{margin-top:4px}");
+  html += F("table{width:100%;border-collapse:collapse;font-size:.9rem}td,th{padding:9px 0;border-top:1px solid var(--line);vertical-align:top}tbody tr:first-child td{border-top:0}th{text-align:left;color:var(--muted);font-size:.68rem;text-transform:uppercase;letter-spacing:.08em}td:first-child{width:44%;color:var(--muted);padding-right:16px}td:last-child{text-align:right;font-weight:700;overflow-wrap:anywhere}.pin-table th:nth-child(2),.pin-table td:nth-child(2){width:104px;text-align:left}.pin-table th:nth-child(3),.pin-table td:nth-child(3){padding-left:16px}.pin-table td:first-child{width:auto;color:var(--ink);font-weight:700}.pin-table td:last-child{text-align:left;font-weight:500;color:var(--muted)}.pin-table td:nth-child(2){font-weight:800;white-space:nowrap}.ok{color:var(--ok)}.warn{color:var(--warn)}.bad{color:var(--bad)}code{display:inline-block;border:1px solid var(--line);border-radius:5px;padding:2px 6px;background:var(--bg);font-family:Consolas,monospace;font-size:.82rem;color:var(--ink)}");
+  html += F("@media(max-width:820px){.status-card,.status-card-wide{grid-column:span 6}.pin-card{grid-column:1/-1}}@media(max-width:640px){.wrap{padding:12px}.nav{margin:-12px -12px 16px;padding:14px 12px;align-items:flex-start}.links{width:100%;display:grid;grid-template-columns:repeat(4,1fr);gap:6px}.links a{padding:7px 5px;font-size:.8rem;white-space:nowrap}.diag-grid{grid-template-columns:1fr;gap:10px}.status-card,.status-card-wide,.pin-card,.card-wide{grid-column:1}.card{padding:14px}h1{font-size:1.35rem}.card-head{margin-top:0}.pin-table thead{display:none}.pin-table tr{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:2px 10px;padding:9px 0;border-top:1px solid var(--line)}.pin-table tbody tr:first-child{border-top:0}.pin-table td{display:block;width:auto!important;padding:0!important;border:0}.pin-table td:nth-child(2){text-align:right}.pin-table td:nth-child(3){grid-column:1/-1;font-size:.82rem}.pin-table td:last-child{text-align:left}td,th{padding:8px 0}}</style></head><body><main class='wrap'>");
   html += F("<div class='nav'><div><div class='k'>Controller Health</div><h1>Diagnostics</h1></div><div class='links'><a href='/'>Home</a><a href='/setup'>Setup</a><a href='/events'>Events</a><a href='/diagnostics.json'>JSON</a></div></div>");
-  html += F("<style>.metric-grid{grid-template-columns:repeat(5,minmax(150px,1fr))}.metric-card{min-height:112px;display:flex;flex-direction:column;justify-content:space-between}.metric-card .v{font-size:1.22rem}.metric-card .k{font-size:.7rem}.metric-card:before{content:'';display:block;height:3px;background:var(--brand);margin:-16px -16px 12px}.metric-card:nth-child(2):before{background:var(--warn)}.metric-card:nth-child(3):before{background:var(--ok)}.metric-card:nth-child(4):before{background:#7c3aed}.metric-card:nth-child(5):before{background:#0891b2}.section-title{grid-column:1/-1;margin:10px 0 -2px;color:var(--muted);font-size:.75rem;text-transform:uppercase;letter-spacing:.12em;font-weight:800}.status{display:inline-flex;align-items:center;gap:6px}.status:before{content:'';width:8px;height:8px;border-radius:50%;background:currentColor}.grid+.grid{margin-top:14px}.grid>.card h2{padding-bottom:9px;border-bottom:1px solid var(--line)}@media(max-width:980px){.metric-grid{grid-template-columns:repeat(3,minmax(160px,1fr))}}@media(max-width:640px){.metric-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.metric-grid .metric-card:first-child{grid-column:1/-1}}</style>");
+  html += F("<style>.metric-grid{grid-template-columns:repeat(5,minmax(0,1fr))}.metric-card{min-height:108px;display:flex;flex-direction:column;justify-content:space-between;overflow:hidden}.metric-card .v{font-size:1.18rem}.metric-card .k{font-size:.68rem}.metric-card:before{content:'';display:block;width:42px;height:3px;border-radius:3px;background:var(--brand);margin:-3px 0 12px}.metric-card:nth-child(2):before{background:var(--warn)}.metric-card:nth-child(3):before{background:var(--ok)}.metric-card:nth-child(4):before{background:#7c3aed}.metric-card:nth-child(5):before{background:#0891b2}.section-title{grid-column:1/-1;display:flex;align-items:center;gap:12px;margin:14px 0 0;color:var(--ink);font-size:.82rem;text-transform:uppercase;letter-spacing:.1em;font-weight:800}.section-title:after{content:'';height:1px;flex:1;background:var(--line)}.status{display:inline-flex;align-items:center;gap:7px}.status:before{content:'';flex:0 0 auto;width:8px;height:8px;border-radius:50%;background:currentColor}.grid+.grid{margin-top:12px}@media(max-width:980px){.metric-grid{grid-template-columns:repeat(3,minmax(0,1fr))}}@media(max-width:640px){.metric-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.metric-grid .metric-card:first-child{grid-column:1/-1}.metric-card{min-height:98px}.metric-card .v{font-size:1.08rem}}</style>");
 
   html += F("<section class='grid metric-grid'>");
   html += F("<div class='card metric-card'><div class='k'>Uptime</div><div class='v'>"); html += formatRuntimeClock(uptimeSec); html += F("</div></div>");
@@ -2074,14 +2167,15 @@ void handleDiagnosticsPage() {
   html += F("<div class='card metric-card'><div class='k'>WiFi</div><div class='v status ");
   html += (WiFi.status() == WL_CONNECTED ? "ok" : "bad"); html += F("'>");
   html += (WiFi.status() == WL_CONNECTED ? WiFi.localIP().toString() : String("Disconnected")); html += F("</div><div class='k'>RSSI ");
-  html += String(WiFi.RSSI()); html += F(" dBm</div></div>");
+  html += String(rssi); html += F(" dBm - "); html += rssiLabel; html += F("</div></div>");
   html += F("<div class='card metric-card'><div class='k'>Heap Free</div><div class='v'>"); html += String(ESP.getFreeHeap()); html += F(" B</div><div class='k'>Min ");
   html += String(ESP.getMinFreeHeap()); html += F(" B</div></div>");
   html += F("<div class='card metric-card'><div class='k'>LittleFS</div><div class='v'>"); html += String(fsUsed); html += F(" / "); html += String(fsTotal); html += F(" B</div></div>");
   html += F("</section>");
 
-  html += F("<section class='grid' style='margin-top:12px'>");
-  html += F("<div class='card'><h2>Runtime</h2><table>");
+  html += F("<section class='grid diag-grid'>");
+  html += F("<div class='section-title'>System Status</div>");
+  html += F("<div class='card status-card'><div class='card-head'><h2>Runtime</h2><span class='card-tag'>Controller</span></div><table>");
   html += F("<tr><td>Device</td><td>"); html += kHost; html += F("</td></tr>");
   html += F("<tr><td>Reset reason</td><td>"); html += resetReasonText(esp_reset_reason()); html += F("</td></tr>");
   html += F("<tr><td>Reset code</td><td>"); html += String((int)esp_reset_reason()); html += F("</td></tr>");
@@ -2091,35 +2185,82 @@ void handleDiagnosticsPage() {
   html += F("<tr><td>Sketch</td><td>"); html += String(ESP.getSketchSize()); html += F(" B</td></tr>");
   html += F("</table></div>");
 
-  html += F("<div class='card'><h2>Network</h2><table>");
+  html += F("<div class='card status-card'><div class='card-head'><h2>Network</h2><span class='card-tag'>Connectivity</span></div><table>");
   html += F("<tr><td>SSID</td><td>"); html += WiFi.SSID(); html += F("</td></tr>");
   html += F("<tr><td>Hostname</td><td>"); html += WiFi.getHostname(); html += F("</td></tr>");
+  html += F("<tr><td>WiFi signal</td><td>"); html += String(rssi); html += F(" dBm - "); html += rssiLabel; html += F("</td></tr>");
   html += F("<tr><td>MQTT</td><td class='"); html += (_mqtt.connected() ? "ok" : (mqttEnabled ? "warn" : "")); html += F("'>");
   html += (mqttEnabled ? (_mqtt.connected() ? "connected" : "offline") : "disabled"); html += F("</td></tr>");
   html += F("<tr><td>Base topic</td><td>"); html += mqttBase; html += F("</td></tr>");
   html += F("</table></div>");
 
-  html += F("<div class='card'><h2>Hardware</h2><table>");
+  html += F("<div class='card status-card'><div class='card-head'><h2>Hardware</h2><span class='card-tag'>Devices</span></div><table>");
   html += F("<tr><td>I2C pins</td><td>"); html += String(i2cSdaPin); html += F(" / "); html += String(i2cSclPin); html += F("</td></tr>");
   html += F("<tr><td>I2C devices</td><td><code>"); html += i2cList; html += F("</code></td></tr>");
   html += F("<tr><td>GPIO fallback</td><td>"); html += (useGpioFallback ? "yes" : "no"); html += F("</td></tr>");
   html += F("<tr><td>Display</td><td>"); html += (!displayEnabled ? "Disabled" : (displayUseTft ? "TFT" : "OLED")); html += F("</td></tr>");
   html += F("</table></div>");
 
-  html += F("<div class='card'><h2>Irrigation</h2><table>");
+  html += F("<div class='card status-card-wide'><div class='card-head'><h2>Irrigation</h2><span class='card-tag'>Live state</span></div><table>");
   html += F("<tr><td>Zones</td><td>"); html += String(activeZones); html += F(" active / "); html += String(zonesCount); html += F("</td></tr>");
   html += F("<tr><td>Source</td><td>"); html += sourceModeText(); html += F("</td></tr>");
   html += F("<tr><td>Tank</td><td>"); html += String(tankPercent()); html += F("%</td></tr>");
   html += F("<tr><td>Delay</td><td>"); html += rainDelayCauseText(); html += F("</td></tr>");
   html += F("</table></div>");
 
-  html += F("<div class='card'><h2>Weather</h2><table>");
+  html += F("<div class='card status-card-wide'><div class='card-head'><h2>Weather</h2><span class='card-tag'>Service</span></div><table>");
   html += F("<tr><td>Location</td><td>"); html += meteoLocationLabel(); html += F("</td></tr>");
   html += F("<tr><td>Model</td><td>"); html += meteoModel; html += F("</td></tr>");
   html += F("<tr><td>Current HTTP</td><td>"); html += String(lastWeatherHttpCode); html += F("</td></tr>");
   html += F("<tr><td>Forecast HTTP</td><td>"); html += String(lastForecastHttpCode); html += F("</td></tr>");
   html += F("<tr><td>HTTP timeout</td><td>"); html += String(meteoHttpTimeoutMs()); html += F(" ms</td></tr>");
   html += F("</table></div>");
+
+  html += F("<div class='section-title'>Pin Assignments</div>");
+
+  html += F("<div class='card pin-card'><div class='card-head'><h2>Display & Buses</h2><span class='card-tag'>9 assignments</span></div><table class='pin-table'><thead><tr><th>Assignment</th><th>Pin</th><th>Notes</th></tr></thead><tbody>");
+  appendPinRow(F("I2C SDA"), pinText(i2cSdaPin), F("OLED and PCF8574 bus"));
+  appendPinRow(F("I2C SCL"), pinText(i2cSclPin), F("OLED and PCF8574 bus"));
+  appendPinRow(F("TFT SCLK"), pinText(tftSclkPin), displayUseTft ? F("ST7789 SPI clock") : F("Configured, TFT not selected"));
+  appendPinRow(F("TFT MOSI"), pinText(tftMosiPin), displayUseTft ? F("ST7789 SPI data") : F("Configured, TFT not selected"));
+  appendPinRow(F("TFT CS"), pinText(tftCsPin), F("ST7789 chip select"));
+  appendPinRow(F("TFT DC"), pinText(tftDcPin), F("ST7789 data/command"));
+  appendPinRow(F("TFT RST"), pinText(tftRstPin), F("-1 means tied to reset or unused"));
+  appendPinRow(F("TFT Backlight"), pinText(tftBlPin), g_tftPwmReady ? F("PWM brightness control") : F("-1 means tied on or disabled"));
+  appendPinRow(F("Status Pixel"), pinText(STATUS_PIXEL_PIN), statusPixelReady ? F("WS2812 status LED ready") : F("Not initialized"));
+  html += F("</tbody></table></div>");
+
+  html += F("<div class='card pin-card'><div class='card-head'><h2>Sensors & Inputs</h2><span class='card-tag'>6 assignments</span></div><table class='pin-table'><thead><tr><th>Assignment</th><th>Pin</th><th>Notes</th></tr></thead><tbody>");
+  appendPinRow(F("Tank Level ADC"), pinText(tankLevelPin), F("Tank percentage sensor"));
+  appendPinRow(F("Rain Sensor"), pinText(rainSensorPin), String(rainSensorEnabled ? "enabled" : "disabled") + (rainSensorInvert ? F(", inverted") : F(", normal polarity")));
+  appendPinRow(F("Moisture Probe ADC"), pinText(moisturePin), String(moistureProbeEnabled ? "enabled" : "disabled"));
+  appendPinRow(F("Photoresistor ADC"), pinText(photoPin), String(photoAutoEnabled ? "auto backlight enabled" : "auto backlight disabled") + (photoInvert ? F(", inverted") : F(", normal polarity")));
+  appendPinRow(F("Manual Select Button"), pinText(manualSelectPin), F("INPUT_PULLUP, -1 disabled"));
+  appendPinRow(F("Manual Start Button"), pinText(manualStartPin), F("INPUT_PULLUP, -1 disabled"));
+  html += F("</tbody></table></div>");
+
+  html += F("<div class='card card-wide pin-card'><div class='card-head'><h2>Relays & Zones</h2><span class='card-tag'>Outputs</span></div><table class='pin-table'><thead><tr><th>Assignment</th><th>Pin</th><th>Notes</th></tr></thead><tbody>");
+  appendPinRow(F("Power Supply Enable"), pinText(powerSupplyPin), String(activeText(powerSupplyActiveLow)));
+  appendPinRow(F("City Water Relay"), pinText(mainsPin), String(activeText(mainsGpioActiveLow)) + F(", PCF P") + String(mainsChannel));
+  appendPinRow(F("Tank Relay"), pinText(tankPin), String(activeText(tankGpioActiveLow)) + F(", PCF P") + String(tankChannel));
+  for (int z = 0; z < MAX_ZONES; ++z) {
+    String name = String("Zone ") + String(z + 1);
+    if (zoneNames[z].length()) {
+      name += F(" - ");
+      name += zoneNames[z];
+    }
+    String notes = (z < (int)zonesCount) ? F("enabled") : F("not in active zone count");
+    notes += F(", ");
+    notes += activeText(zoneGpioActiveLow[z]);
+    if (z < ALL_P) {
+      notes += F(", PCF P");
+      notes += String(PCH[z]);
+    } else {
+      notes += F(", GPIO only");
+    }
+    appendPinRow(name, pinText(zonePins[z]), notes);
+  }
+  html += F("</tbody></table></div>");
   html += F("</section></main></body></html>");
 
   server.send(200, "text/html", html);
@@ -2273,16 +2414,7 @@ void setup() {
   }
 
   // Improve HTTP responsiveness
-  WiFi.setSleep(false); // NEW: disable modem sleep for snappier responses
-  WiFi.setTxPower(WIFI_POWER_19_5dBm); // boost TX within legal limit
-  WiFi.enableLongRange(true);          // trade speed for sensitivity
-  {
-    esp_err_t err = esp_wifi_set_protocol(WIFI_IF_STA,
-      WIFI_PROTOCOL_11B | WIFI_PROTOCOL_11G | WIFI_PROTOCOL_11N | WIFI_PROTOCOL_LR);
-    if (err != ESP_OK) {
-      Serial.printf("[WiFi] set_protocol failed: %d\n", (int)err);
-    }
-  }
+  configureWifiForHttp();
 
   if (!displayEnabled) {
     // Headless mode: web UI and controller logic stay active.
@@ -2963,14 +3095,7 @@ void wifiCheck() {
 
     if (WiFi.status()==WL_CONNECTED) {
       Serial.println("Reconnected.");
-      WiFi.setSleep(false); // keep disabled after reconnect
-      WiFi.setTxPower(WIFI_POWER_19_5dBm);
-      WiFi.enableLongRange(true);
-      esp_err_t err = esp_wifi_set_protocol(WIFI_IF_STA,
-        WIFI_PROTOCOL_11B | WIFI_PROTOCOL_11G | WIFI_PROTOCOL_11N | WIFI_PROTOCOL_LR);
-      if (err != ESP_OK) {
-        Serial.printf("[WiFi] set_protocol failed: %d\n", (int)err);
-      }
+      configureWifiForHttp();
     } else {
       Serial.println("Reconnection failed (kept creds, not opening portal).");
     }
@@ -5543,6 +5668,8 @@ void handleRoot() {
   if (cityName == "") cityName = "-";
 
   const int    tankPct   = tankPercent();
+  const int    rssi      = WiFi.RSSI();
+  const String rssiLabel = wifiSignalQuality(rssi);
   const String causeText = rainDelayCauseText();
   const bool   pausedNow = isPausedNow();
   int activeZoneCount = 0;
@@ -5617,7 +5744,6 @@ void handleRoot() {
   html += F("<meta name='theme-color' content='#1e40af'><meta name='color-scheme' content='light dark'>");
   html += F("<title>ESP32 Irrigation</title>");
   html += F("<style>");
-  html += F("@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@500;700&family=Sora:wght@400;600;700;800&display=swap');");
   html += F(".center{max-width:1280px;margin:0 auto}");
   html += F(":root[data-theme='light']{--bg:#edf3ef;--bg2:#f8fbf8;--glass:rgba(255,255,255,.58);--glass-brd:rgba(122,149,140,.32);--panel:#ffffff;--line:#d3dfd9;");
   html += F("--card:#ffffff;--ink:#14232b;--muted:#5f736f;--primary:#2563eb;--primary-2:#1e40af;--ok:#2f9e44;--warn:#c97a1a;--bad:#d9485f;");
@@ -5914,8 +6040,8 @@ void handleRoot() {
 
   // --- Hero ---
   html += F("<div class='wrap'><div class='hero-shell glass'><div class='hero-grid'>");
-  html += F("<div class='hero-copy'><div class='hero-kicker'>Smart dashboard</div>");
-  html += F("<h1 class='hero-title'>ESP32 Irrigation.</h1>");
+  html += F("<div class='hero-copy'><div class='hero-kicker'>16-Zone irrigation</div>");
+  html += F("<h1 class='hero-title'>ESP32 Irrigation Valve Control</h1>");
   html += F("<p class='hero-text'></p>");
   html += F("<div class='hero-actions'><a class='btn' href='/setup'>Setup</a><a class='btn btn-secondary' href='/events'>Events</a><a class='btn btn-secondary' href='/diagnostics'>Diagnostics</a></div></div>");
   html += F("<div class='hero-mini-grid'>");
@@ -5956,7 +6082,8 @@ void handleRoot() {
   html += F("<div class='card summary-card'><h3>Local Time</h3><div class='summary-k'>Device clock</div><div id='upChip' class='summary-value'>--:--:--</div><div class='summary-support'>Controller timezone and DST-aware local time.</div></div>");
 
   html += F("<div class='card summary-card'><h3>WiFi Signal</h3><div class='summary-k'>Wireless health</div><div id='rssiChip' class='summary-value'>");
-  html += String(WiFi.RSSI()); html += F(" dBm</div></div>");
+  html += String(rssi); html += F(" dBm</div><div id='rssiQuality' class='summary-support'>");
+  html += rssiLabel; html += F("</div></div>");
 
   html += F("<div class='card summary-card'><h3>Tank Level</h3><div class='summary-row'><div><div class='summary-k'>Available reserve</div><div class='summary-value'><span id='tankPctLabel'>");
   html += String(tankPct);
@@ -6311,7 +6438,8 @@ void handleRoot() {
   html += F("const heroTank=document.getElementById('heroTankValue'); const heroTankSub=document.getElementById('heroTankSub');");
   html += F("if(heroTank) heroTank.textContent=pct+'%'; if(heroTankSub) heroTankSub.textContent=st.sourceMode||'';");
   html += F("const up=document.getElementById('upChip'); if(up) up.textContent=fmtClock12(st.deviceEpoch, st.utcOffsetMin);");
-  html += F("const rssi=document.getElementById('rssiChip'); if(rssi) rssi.textContent=(st.rssi)+' dBm';");
+  html += F("function wifiQuality(v){if(typeof v!=='number')return'Disconnected';if(v>=-50)return'Excellent';if(v>=-60)return'Strong';if(v>=-67)return'Good';if(v>=-75)return'Fair';if(v>=-82)return'Weak';return'Very weak';}");
+  html += F("const rssi=document.getElementById('rssiChip'); if(rssi) rssi.textContent=(st.rssi)+' dBm'; const rq=document.getElementById('rssiQuality'); if(rq) rq.textContent=wifiQuality(st.rssi);");
   // Location chip + Open-Meteo link
   html += F("const cityEl=document.getElementById('cityName'); const cityLink=document.getElementById('meteoLink');");
   html += F("if(typeof st.cityName==='string' && st.cityName.length){");
@@ -6505,7 +6633,6 @@ void handleSetupPage() {
   html += F("<meta name='theme-color' content='#1e40af'><meta name='color-scheme' content='light dark'>");
   html += F("<title>Setup - ESP32 Irrigation</title>");
   html += F("<style>");
-  html += F("@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@500;700&family=Sora:wght@400;600;700;800&display=swap');");
   html += F("html{scroll-behavior:smooth}body{margin:0;font-family:'Trebuchet MS','Candara','Segoe UI',sans-serif;background:#0d1b2f;color:#e7f1ec;font-size:15px;line-height:1.4}");
   html += F(".wrap{max-width:1100px;margin:28px auto;padding:0 16px}");
   html += F("h1{margin:0 0 16px 0;font-size:1.7em;letter-spacing:.3px;font-weight:800}");
@@ -7470,7 +7597,6 @@ void handleLogPage() {
   html += F("<meta name='theme-color' content='#1e40af'><meta name='color-scheme' content='light dark'>");
   html += F("<title>ESP32 Irrigation Events</title>");
   html += F("<style>");
-  html += F("@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@500;700&family=Sora:wght@400;600;700;800&display=swap');");
   html += F(":root[data-theme='light']{--bg:#edf3ef;--bg2:#f8fbf8;--glass:rgba(255,255,255,.58);--glass-brd:rgba(122,149,140,.32);--panel:#ffffff;--line:#d3dfd9;");
   html += F("--card:#ffffff;--ink:#14232b;--muted:#5f736f;--primary:#2563eb;--primary-2:#1e40af;--ok:#2f9e44;--warn:#c97a1a;--bad:#d9485f;");
   html += F("--chip:#edf4ff;--chip-brd:#c9daf5;--ring:#dcebe5;--ring2:#b4d4cb;--shadow:0 18px 40px rgba(20,47,45,.14)}");
