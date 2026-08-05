@@ -425,6 +425,7 @@ int   curHumidityPct = -1;
 int   curWeatherCode = -1;
 int   curUtcOffsetSec = 0;
 bool  curWeatherValid = false;
+bool  g_configLoadedFromFs = false;
 
 // ---------- NEW: guard to avoid fetching while serving HTTP ----------
 volatile bool g_inHttp = false;
@@ -1972,6 +1973,7 @@ void handleDiagnosticsJson() {
   fs["total"] = LittleFS.totalBytes();
   fs["used"] = LittleFS.usedBytes();
   fs["configExists"] = LittleFS.exists("/config.txt");
+  fs["configLoaded"] = g_configLoadedFromFs;
   fs["scheduleExists"] = LittleFS.exists("/schedule.txt");
   fs["eventsExists"] = LittleFS.exists("/events.csv");
 
@@ -2480,6 +2482,7 @@ void setup() {
   mdnsStart();
 
   // -------- Routes --------
+  Serial.println("[BOOT] registering routes");
   server.on("/", HTTP_GET, handleRoot);
   server.on("/submit", HTTP_POST, handleSubmit);
 
@@ -2901,15 +2904,24 @@ void setup() {
     server.send(200,"text/plain","OK");
   });
 
+  Serial.println("[BOOT] starting web server");
   server.begin();
+  Serial.println("[BOOT] web server started");
 
   // MQTT
+  Serial.println("[BOOT] mqtt setup");
   mqttSetup();
   _lastMqttAttempt = millis();
+  Serial.println("[BOOT] setup complete");
 }
 
 // ---------- Loop ----------
 void loop() {
+  static bool firstLoopLogged = false;
+  if (!firstLoopLogged) {
+    firstLoopLogged = true;
+    Serial.println("[BOOT] first loop");
+  }
   const uint32_t now = millis();
   #if ENABLE_OTA
   ArduinoOTA.handle();
@@ -3661,6 +3673,10 @@ bool refreshCurrentWeatherSnapshotFromCache() {
 void updateCachedWeather() {
   // NEW: never start fetches while handling HTTP requests
   if (g_inHttp) return;
+  // On erased flash, do not make HTTPS weather requests before the user has
+  // saved setup once. This keeps first WiFi provisioning focused on bringing
+  // up the local UI and avoids early heap-heavy TLS work after WiFiManager.
+  if (!g_configLoadedFromFs) return;
 
   unsigned long nowms = millis();
   bool needCur = (cachedWeatherData == "" ||
@@ -7877,9 +7893,11 @@ static String _safeReadLine(File& f) {
 }
 
 void loadConfig() {
+  g_configLoadedFromFs = false;
   if (!LittleFS.exists("/config.txt")) return;
   File f = LittleFS.open("/config.txt", "r");
   if (!f) return;
+  g_configLoadedFromFs = true;
 
   String s;
   meteoLat = -35.1076f;
@@ -8133,6 +8151,7 @@ void loadConfig() {
 void saveConfig() {
   File f = LittleFS.open("/config.txt", "w");
   if (!f) return;
+  g_configLoadedFromFs = true;
 
   if (zonesCount < 1) zonesCount = 1;
   if (zonesCount > MAX_ZONES) zonesCount = MAX_ZONES;
