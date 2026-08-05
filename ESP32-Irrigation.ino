@@ -33,6 +33,9 @@
 #include <SPI.h>
 #include <Adafruit_ST7789.h> // (Adafruit ST7735 and ST7789 Library)
 #include <Adafruit_NeoPixel.h>
+#include <Adafruit_AHTX0.h>
+#include <DHT.h>
+#include <new>
 #include <math.h>
 #include "driver/gpio.h"
 #include "esp_heap_caps.h"
@@ -71,6 +74,8 @@ TwoWire I2Cbus = TwoWire(0);
 PCF8574 pcfIn (&I2Cbus, 0x22, I2C_SDA_DEFAULT, I2C_SCL_DEFAULT);
 PCF8574 pcfOut(&I2Cbus, 0x24, I2C_SDA_DEFAULT, I2C_SCL_DEFAULT);
 Adafruit_NeoPixel statusPixel(STATUS_PIXEL_COUNT, STATUS_PIXEL_PIN, NEO_GRB + NEO_KHZ800);
+Adafruit_AHTX0 localAht;
+DHT* localDht = nullptr;
 bool statusPixelReady = false;
 uint32_t statusPixelLastColor = 0;
 extern uint32_t bootMillis;
@@ -276,6 +281,20 @@ float  meteoLat = -35.1076f;
 float  meteoLon = 138.5573f;
 String meteoLocation = "Adelaide"; // Open-Meteo display label (optional)
 String meteoModel = "best_match"; // Open-Meteo forecast model slug
+enum LocalClimateSource : uint8_t {
+  CLIMATE_OPEN_METEO = 0,
+  CLIMATE_AHT20_I2C = 2,
+  CLIMATE_DHT22_GPIO = 3
+};
+LocalClimateSource climateSource = CLIMATE_OPEN_METEO;
+int dhtSensorPin = -1;
+int localDhtActivePin = -1;
+bool localAhtReady = false;
+uint32_t localAhtLastAttemptMs = 0;
+uint32_t localClimateLastReadMs = 0;
+bool localClimateValid = false;
+float localTempC = NAN;
+float localHumidityPct = NAN;
 String cachedWeatherData;
 String lastWeatherError;
 String lastForecastError;
@@ -530,8 +549,6 @@ void rebuildRuntimeCountersFromEvents();
 void statusPixelSet(uint8_t r,uint8_t g,uint8_t b);
 uint8_t statusPixelPulseLevel(uint16_t periodMs, uint8_t low, uint8_t high);
 bool statusPixelWindowOn(uint16_t periodMs, uint16_t startMs, uint16_t widthMs);
-bool initTempSensor();
-bool readChipTempC(float& outC);
 bool physicalRainNowRaw();
 String rainDelayCauseText();
 static inline bool isRainDelayBlockingNow();
@@ -723,9 +740,6 @@ void mqttPublishStatus(){
   d["moisturePct"] = moisturePercent();
   d["moistureRaw"] = moistureRaw();
   d["moistureSkip"] = isSoilWetForSmartSkip();
-  float chipTemp = NAN;
-  if (readChipTempC(chipTemp)) d["chipTempC"] = chipTemp;
-  else                         d["chipTempC"] = nullptr;
   JsonArray arr = d["zones"].to<JsonArray>();
   for (int i=0;i<zonesCount;i++){
     JsonObject z = arr.add<JsonObject>();
@@ -1566,6 +1580,7 @@ static void sanitizePinConfig() {
   clampGpio(rainSensorPin);
   clampGpio(manualSelectPin);
   clampGpio(manualStartPin);
+  clampOutputGpio(dhtSensorPin);
 
   // ADC-only pins
   #if defined(CONFIG_IDF_TARGET_ESP32)
@@ -1595,6 +1610,15 @@ static void sanitizePinConfig() {
 }
 
 static void validatePinMap() {
+  warnPinConflict("DHT22", dhtSensorPin, "I2C_SDA", i2cSdaPin);
+  warnPinConflict("DHT22", dhtSensorPin, "I2C_SCL", i2cSclPin);
+  warnPinConflict("DHT22", dhtSensorPin, "RainSensor", rainSensorPin);
+  warnPinConflict("DHT22", dhtSensorPin, "TankLevel", tankLevelPin);
+  warnPinConflict("DHT22", dhtSensorPin, "Moisture", moisturePin);
+  warnPinConflict("DHT22", dhtSensorPin, "ManualSelect", manualSelectPin);
+  warnPinConflict("DHT22", dhtSensorPin, "ManualStart", manualStartPin);
+  warnPinConflict("DHT22", dhtSensorPin, "StatusPixel", STATUS_PIXEL_PIN);
+
   // I2C vs sensors
   warnPinConflict("I2C_SDA", i2cSdaPin, "RainSensor", rainSensorPin);
   warnPinConflict("I2C_SCL", i2cSclPin, "RainSensor", rainSensorPin);
@@ -1603,6 +1627,12 @@ static void validatePinMap() {
 
   // TFT vs board IO
   if (displayEnabled && displayUseTft) {
+    warnPinConflict("DHT22", dhtSensorPin, "TFT_SCLK", tftSclkPin);
+    warnPinConflict("DHT22", dhtSensorPin, "TFT_MOSI", tftMosiPin);
+    warnPinConflict("DHT22", dhtSensorPin, "TFT_CS", tftCsPin);
+    warnPinConflict("DHT22", dhtSensorPin, "TFT_DC", tftDcPin);
+    warnPinConflict("DHT22", dhtSensorPin, "TFT_RST", tftRstPin);
+    warnPinConflict("DHT22", dhtSensorPin, "TFT_BL", tftBlPin);
     warnPinConflict("TFT_CS",  tftCsPin,  "TankLevel", tankLevelPin);
     warnPinConflict("TFT_DC",  tftDcPin,  "LED",       LED_PIN);
     warnPinConflict("TFT_CS",  tftCsPin,  "LED",       LED_PIN);
@@ -1624,7 +1654,13 @@ static void validatePinMap() {
   }
   warnPinConflict("PowerSupply", powerSupplyPin, "CityRelay", mainsPin);
   warnPinConflict("PowerSupply", powerSupplyPin, "TankRelay", tankPin);
+  warnPinConflict("DHT22", dhtSensorPin, "PowerSupply", powerSupplyPin);
+  warnPinConflict("DHT22", dhtSensorPin, "CityRelay", mainsPin);
+  warnPinConflict("DHT22", dhtSensorPin, "TankRelay", tankPin);
   for (uint8_t i = 0; i < zonesCount && i < MAX_ZONES; ++i) {
+    if (dhtSensorPin >= 0 && dhtSensorPin == zonePins[i]) {
+      Serial.printf("[PIN] Conflict: DHT22 and Zone%u both on GPIO%d\n", i + 1, dhtSensorPin);
+    }
     char zoneName[8];
     snprintf(zoneName, sizeof(zoneName), "Zone%u", (unsigned)(i + 1));
     warnPinConflict("PowerSupply", powerSupplyPin, zoneName, zonePins[i]);
@@ -1670,60 +1706,114 @@ bool statusPixelWindowOn(uint16_t periodMs, uint16_t startMs, uint16_t widthMs) 
   #include "soc/soc_caps.h"
 #endif
 
-// SDK compatibility: some IDF/Arduino builds expose SOC_TEMP_SENSOR_SUPPORTED
-// instead of SOC_TEMPERATURE_SENSOR_SUPPORTED.
-#if !defined(SOC_TEMPERATURE_SENSOR_SUPPORTED) && defined(SOC_TEMP_SENSOR_SUPPORTED)
-  #define SOC_TEMPERATURE_SENSOR_SUPPORTED SOC_TEMP_SENSOR_SUPPORTED
-#endif
+static const char* climateSourceValue() {
+  switch (climateSource) {
+    case CLIMATE_AHT20_I2C: return "aht20";
+    case CLIMATE_DHT22_GPIO: return "dht22";
+    case CLIMATE_OPEN_METEO:
+    default: return "meteo";
+  }
+}
 
-#if defined(SOC_TEMPERATURE_SENSOR_SUPPORTED) && SOC_TEMPERATURE_SENSOR_SUPPORTED && __has_include("driver/temperature_sensor.h")
-  #include "driver/temperature_sensor.h"
+static const char* climateSourceLabel() {
+  switch (climateSource) {
+    case CLIMATE_AHT20_I2C: return "AHT20/AHT21 I2C";
+    case CLIMATE_DHT22_GPIO: return "DHT22/AM2302 GPIO";
+    case CLIMATE_OPEN_METEO:
+    default: return "Open-Meteo";
+  }
+}
 
-  static bool tempSensorReady = false;
-  static temperature_sensor_handle_t gTempHandle = nullptr;
+static LocalClimateSource parseClimateSource(const String& raw) {
+  String s = raw;
+  s.trim();
+  s.toLowerCase();
+  if (s == "2" || s == "aht" || s == "aht20" || s == "aht21") return CLIMATE_AHT20_I2C;
+  if (s == "3" || s == "dht" || s == "dht22" || s == "am2302") return CLIMATE_DHT22_GPIO;
+  return CLIMATE_OPEN_METEO;
+}
 
-  bool initTempSensor() {
-    if (tempSensorReady && gTempHandle) return true;
+static bool initLocalAhtSensor() {
+  if (localAhtReady) return true;
+  const uint32_t nowMs = millis();
+  if (localAhtLastAttemptMs && nowMs - localAhtLastAttemptMs < 30000UL) return false;
+  localAhtLastAttemptMs = nowMs;
+  localAhtReady = localAht.begin(&I2Cbus);
+  return localAhtReady;
+}
 
-    // Choose a realistic range the driver can operate in.
-    // This is *chip* temperature, not ambient.
-    temperature_sensor_config_t cfg = TEMPERATURE_SENSOR_CONFIG_DEFAULT(10, 60);
+static void resetLocalDhtSensor() {
+  delete localDht;
+  localDht = nullptr;
+  localDhtActivePin = -1;
+}
 
-    esp_err_t err = temperature_sensor_install(&cfg, &gTempHandle);
-    if (err != ESP_OK || !gTempHandle) {
-      tempSensorReady = false;
-      return false;
-    }
+static bool initLocalDhtSensor() {
+  if (!isValidOutputPin(dhtSensorPin)) return false;
+  if (localDht && localDhtActivePin == dhtSensorPin) return true;
 
-    err = temperature_sensor_enable(gTempHandle);
-    if (err != ESP_OK) {
-      tempSensorReady = false;
-      return false;
-    }
+  resetLocalDhtSensor();
+  localDht = new (std::nothrow) DHT((uint8_t)dhtSensorPin, DHT22);
+  if (!localDht) return false;
+  localDhtActivePin = dhtSensorPin;
+  localDht->begin();
+  return true;
+}
 
-    tempSensorReady = true;
-    return true;
+static bool readLocalClimate(float& outTempC, float& outHumidityPct) {
+  outTempC = NAN;
+  outHumidityPct = NAN;
+
+  if (climateSource == CLIMATE_AHT20_I2C) {
+    if (!initLocalAhtSensor()) return false;
+    sensors_event_t humidity;
+    sensors_event_t temp;
+    if (!localAht.getEvent(&humidity, &temp)) return false;
+    outTempC = temp.temperature;
+    outHumidityPct = humidity.relative_humidity;
+    return isfinite(outTempC) || isfinite(outHumidityPct);
   }
 
-  bool readChipTempC(float& outC) {
-    if (!tempSensorReady && !initTempSensor()) return false;
-
-    float c = NAN;
-    esp_err_t err = temperature_sensor_get_celsius(gTempHandle, &c);
-    if (err == ESP_OK) {
-      outC = c;
-      return true;
-    }
-    return false;
+  if (climateSource == CLIMATE_DHT22_GPIO) {
+    if (!initLocalDhtSensor()) return false;
+    outHumidityPct = localDht->readHumidity();
+    outTempC = localDht->readTemperature(false);
+    return isfinite(outTempC) || isfinite(outHumidityPct);
   }
 
-#else
-  // Boards/chips without supported internal temp sensor
-  static bool tempSensorReady = false;
+  return false;
+}
 
-  bool initTempSensor() { tempSensorReady = false; return false; }
-  bool readChipTempC(float& outC) { outC = NAN; return false; }
-#endif
+static void applyLocalClimateOverride(bool force = false) {
+  if (climateSource == CLIMATE_OPEN_METEO) {
+    localClimateValid = false;
+    localTempC = NAN;
+    localHumidityPct = NAN;
+    return;
+  }
+
+  const uint32_t nowMs = millis();
+  if (!force && localClimateLastReadMs && nowMs - localClimateLastReadMs < 5000UL) {
+    return;
+  }
+  localClimateLastReadMs = nowMs;
+
+  float t = NAN;
+  float h = NAN;
+  localClimateValid = readLocalClimate(t, h);
+  localTempC = t;
+  localHumidityPct = h;
+
+  if (localClimateValid && isfinite(t)) {
+    curTempC = t;
+    curFeelsC = t;
+    curWeatherValid = true;
+  }
+  if (localClimateValid && isfinite(h)) {
+    curHumidityPct = constrain((int)lroundf(h), 0, 100);
+    curWeatherValid = true;
+  }
+}
 
 // ---------- Next Water type + forward decl ----------
 struct NextWaterInfo {
@@ -1951,9 +2041,6 @@ void handleDiagnosticsJson() {
   doc["sdk"] = ESP.getSdkVersion();
   doc["chipModel"] = ESP.getChipModel();
   doc["chipRevision"] = ESP.getChipRevision();
-  float chipTemp = NAN;
-  if (readChipTempC(chipTemp)) doc["chipTempC"] = chipTemp;
-  else                         doc["chipTempC"] = nullptr;
   doc["cpuMHz"] = ESP.getCpuFreqMHz();
   doc["flashSize"] = ESP.getFlashChipSize();
   doc["sketchSize"] = ESP.getSketchSize();
@@ -1998,6 +2085,7 @@ void handleDiagnosticsJson() {
   JsonObject io = doc["io"].to<JsonObject>();
   io["i2cSda"] = i2cSdaPin;
   io["i2cScl"] = i2cSclPin;
+  io["dht22Pin"] = dhtSensorPin;
   io["gpioFallback"] = useGpioFallback;
   io["i2cFailCount"] = i2cFailCount;
   JsonArray devices = io["i2cDevices"].to<JsonArray>();
@@ -2088,6 +2176,14 @@ void handleDiagnosticsJson() {
   JsonObject weather = doc["weather"].to<JsonObject>();
   weather["location"] = meteoLocationLabel();
   weather["model"] = meteoModel;
+  weather["climateSource"] = climateSourceValue();
+  weather["climateSourceLabel"] = climateSourceLabel();
+  weather["dht22Pin"] = dhtSensorPin;
+  weather["localClimateValid"] = localClimateValid;
+  if (isfinite(localTempC)) weather["localTempC"] = localTempC;
+  else                      weather["localTempC"] = nullptr;
+  if (isfinite(localHumidityPct)) weather["localHumidity"] = localHumidityPct;
+  else                            weather["localHumidity"] = nullptr;
   weather["currentValid"] = curWeatherValid;
   weather["lastCurrentHttp"] = lastWeatherHttpCode;
   weather["lastForecastHttp"] = lastForecastHttpCode;
@@ -2156,12 +2252,12 @@ void handleDiagnosticsPage() {
   html += F("*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font-family:'Segoe UI',Arial,sans-serif;line-height:1.45;-webkit-font-smoothing:antialiased}.wrap{max-width:1180px;margin:0 auto;padding:20px}");
   html += F(".nav{display:flex;justify-content:space-between;gap:16px;align-items:center;flex-wrap:wrap;margin:-20px -20px 24px;padding:16px 20px;background:var(--brand-dark);color:#fff;box-shadow:0 6px 18px rgba(15,23,42,.18)}.brand{font-weight:800;font-size:1.3rem}.links{display:flex;gap:8px;flex-wrap:wrap}");
   html += F("a,.btn{display:inline-flex;align-items:center;justify-content:center;border:1px solid var(--line);border-radius:7px;padding:8px 12px;color:inherit;text-decoration:none;background:var(--panel);font-weight:700;transition:filter .15s,transform .08s}a:hover,.btn:hover{filter:brightness(1.08)}a:active,.btn:active{transform:translateY(1px)}.links a{border-color:rgba(255,255,255,.28);background:rgba(255,255,255,.1);color:#fff;font-size:.9rem}.links a:last-child{background:#fff;color:var(--brand-dark)}");
-  html += F(".grid{display:grid;gap:14px}.diag-grid{grid-template-columns:repeat(12,minmax(0,1fr));align-items:start}.card{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:16px;box-shadow:0 4px 14px rgba(15,23,42,.055)}.status-card{grid-column:span 4}.status-card-wide{grid-column:span 6}.pin-card{grid-column:span 6;overflow:hidden}.card-wide{grid-column:1/-1}");
-  html += F("h1,h2{margin:0}h1{font-size:1.55rem}h2{font-size:1rem}.card-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:-2px 0 5px;padding-bottom:10px;border-bottom:1px solid var(--line)}.card-tag{color:var(--muted);font-size:.7rem;font-weight:750;text-transform:uppercase;letter-spacing:.08em}.k{color:var(--muted);font-size:.76rem;text-transform:uppercase;letter-spacing:.09em;font-weight:750}.v{font-size:1.35rem;font-weight:800;overflow-wrap:anywhere}.card .k+.v{margin-top:4px}");
-  html += F("table{width:100%;border-collapse:collapse;font-size:.9rem}td,th{padding:9px 0;border-top:1px solid var(--line);vertical-align:top}tbody tr:first-child td{border-top:0}th{text-align:left;color:var(--muted);font-size:.68rem;text-transform:uppercase;letter-spacing:.08em}td:first-child{width:44%;color:var(--muted);padding-right:16px}td:last-child{text-align:right;font-weight:700;overflow-wrap:anywhere}.pin-table th:nth-child(2),.pin-table td:nth-child(2){width:104px;text-align:left}.pin-table th:nth-child(3),.pin-table td:nth-child(3){padding-left:16px}.pin-table td:first-child{width:auto;color:var(--ink);font-weight:700}.pin-table td:last-child{text-align:left;font-weight:500;color:var(--muted)}.pin-table td:nth-child(2){font-weight:800;white-space:nowrap}.ok{color:var(--ok)}.warn{color:var(--warn)}.bad{color:var(--bad)}code{display:inline-block;border:1px solid var(--line);border-radius:5px;padding:2px 6px;background:var(--bg);font-family:Consolas,monospace;font-size:.82rem;color:var(--ink)}");
-  html += F("@media(max-width:820px){.status-card,.status-card-wide{grid-column:span 6}.pin-card{grid-column:1/-1}}@media(max-width:640px){.wrap{padding:12px}.nav{margin:-12px -12px 16px;padding:14px 12px;align-items:flex-start}.links{width:100%;display:grid;grid-template-columns:repeat(4,1fr);gap:6px}.links a{padding:7px 5px;font-size:.8rem;white-space:nowrap}.diag-grid{grid-template-columns:1fr;gap:10px}.status-card,.status-card-wide,.pin-card,.card-wide{grid-column:1}.card{padding:14px}h1{font-size:1.35rem}.card-head{margin-top:0}.pin-table thead{display:none}.pin-table tr{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:2px 10px;padding:9px 0;border-top:1px solid var(--line)}.pin-table tbody tr:first-child{border-top:0}.pin-table td{display:block;width:auto!important;padding:0!important;border:0}.pin-table td:nth-child(2){text-align:right}.pin-table td:nth-child(3){grid-column:1/-1;font-size:.82rem}.pin-table td:last-child{text-align:left}td,th{padding:8px 0}}</style></head><body><main class='wrap'>");
+  html += F(".grid{display:grid;gap:14px}.diag-grid{grid-template-columns:repeat(12,minmax(0,1fr));align-items:stretch;grid-auto-flow:row dense}.card{min-width:0;background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:16px;box-shadow:0 4px 14px rgba(15,23,42,.055)}.status-card{grid-column:span 4}.weather-card{grid-column:span 8}.pin-card{grid-column:span 6;overflow:hidden}.card-wide{grid-column:1/-1}");
+  html += F("h1,h2{margin:0}h1{font-size:1.55rem}h2{font-size:1rem}.card-head{display:flex;align-items:center;justify-content:space-between;gap:12px;min-height:34px;margin:-2px 0 4px;padding-bottom:10px;border-bottom:1px solid var(--line)}.card-tag{flex:0 0 auto;color:var(--muted);font-size:.7rem;font-weight:750;text-transform:uppercase;letter-spacing:.08em}.k{color:var(--muted);font-size:.76rem;text-transform:uppercase;letter-spacing:.09em;font-weight:750}.v{font-size:1.35rem;font-weight:800;overflow-wrap:anywhere}.card .k+.v{margin-top:4px}");
+  html += F("table{width:100%;border-collapse:collapse;font-size:.88rem}.status-card table,.weather-card table{table-layout:fixed}td,th{padding:8px 0;border-top:1px solid var(--line);vertical-align:top}tbody tr:first-child td{border-top:0}th{text-align:left;color:var(--muted);font-size:.68rem;text-transform:uppercase;letter-spacing:.08em}td:first-child{width:44%;color:var(--muted);padding-right:14px}td:last-child{text-align:right;font-weight:700;overflow-wrap:anywhere}.pin-table th:nth-child(2),.pin-table td:nth-child(2){width:104px;text-align:left}.pin-table th:nth-child(3),.pin-table td:nth-child(3){padding-left:16px}.pin-table td:first-child{width:auto;color:var(--ink);font-weight:700}.pin-table td:last-child{text-align:left;font-weight:500;color:var(--muted)}.pin-table td:nth-child(2){font-weight:800;white-space:nowrap}.ok{color:var(--ok)}.warn{color:var(--warn)}.bad{color:var(--bad)}code{display:inline-block;max-width:100%;border:1px solid var(--line);border-radius:5px;padding:2px 6px;background:var(--bg);font-family:Consolas,monospace;font-size:.82rem;color:var(--ink);white-space:normal;overflow-wrap:anywhere}");
+  html += F("@media(max-width:820px){.status-card,.weather-card{grid-column:span 6}.hardware-card{grid-column:1/-1}.pin-card{grid-column:1/-1}}@media(max-width:640px){.wrap{padding:12px}.nav{margin:-12px -12px 16px;padding:14px 12px;align-items:flex-start}.links{width:100%;display:grid;grid-template-columns:repeat(4,1fr);gap:6px}.links a{padding:7px 5px;font-size:.8rem;white-space:nowrap}.diag-grid{grid-template-columns:1fr;gap:10px}.status-card,.weather-card,.pin-card,.card-wide,.hardware-card{grid-column:1}.card{padding:14px}h1{font-size:1.35rem}.card-head{margin-top:0}.pin-table thead{display:none}.pin-table tr{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:2px 10px;padding:9px 0;border-top:1px solid var(--line)}.pin-table tbody tr:first-child{border-top:0}.pin-table td{display:block;width:auto!important;padding:0!important;border:0}.pin-table td:nth-child(2){text-align:right}.pin-table td:nth-child(3){grid-column:1/-1;font-size:.82rem}.pin-table td:last-child{text-align:left}td,th{padding:8px 0}}</style></head><body><main class='wrap'>");
   html += F("<div class='nav'><div><div class='k'>Controller Health</div><h1>Diagnostics</h1></div><div class='links'><a href='/'>Home</a><a href='/setup'>Setup</a><a href='/events'>Events</a><a href='/diagnostics.json'>JSON</a></div></div>");
-  html += F("<style>.metric-grid{grid-template-columns:repeat(5,minmax(0,1fr))}.metric-card{min-height:108px;display:flex;flex-direction:column;justify-content:space-between;overflow:hidden}.metric-card .v{font-size:1.18rem}.metric-card .k{font-size:.68rem}.metric-card:before{content:'';display:block;width:42px;height:3px;border-radius:3px;background:var(--brand);margin:-3px 0 12px}.metric-card:nth-child(2):before{background:var(--warn)}.metric-card:nth-child(3):before{background:var(--ok)}.metric-card:nth-child(4):before{background:#7c3aed}.metric-card:nth-child(5):before{background:#0891b2}.section-title{grid-column:1/-1;display:flex;align-items:center;gap:12px;margin:14px 0 0;color:var(--ink);font-size:.82rem;text-transform:uppercase;letter-spacing:.1em;font-weight:800}.section-title:after{content:'';height:1px;flex:1;background:var(--line)}.status{display:inline-flex;align-items:center;gap:7px}.status:before{content:'';flex:0 0 auto;width:8px;height:8px;border-radius:50%;background:currentColor}.grid+.grid{margin-top:12px}@media(max-width:980px){.metric-grid{grid-template-columns:repeat(3,minmax(0,1fr))}}@media(max-width:640px){.metric-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.metric-grid .metric-card:first-child{grid-column:1/-1}.metric-card{min-height:98px}.metric-card .v{font-size:1.08rem}}</style>");
+  html += F("<style>.metric-grid{grid-template-columns:repeat(5,minmax(0,1fr));align-items:stretch}.metric-card{min-height:104px;display:flex;flex-direction:column;justify-content:space-between;overflow:hidden}.metric-card .v{font-size:1.14rem}.metric-card .k{font-size:.68rem}.metric-card:before{content:'';display:block;width:42px;height:3px;border-radius:3px;background:var(--brand);margin:-3px 0 12px}.metric-card:nth-child(2):before{background:var(--warn)}.metric-card:nth-child(3):before{background:var(--ok)}.metric-card:nth-child(4):before{background:#7c3aed}.metric-card:nth-child(5):before{background:#0891b2}.section-title{grid-column:1/-1;display:flex;align-items:center;gap:12px;margin:18px 0 0;color:var(--ink);font-size:.82rem;text-transform:uppercase;letter-spacing:.1em;font-weight:800}.section-title:after{content:'';height:1px;flex:1;background:var(--line)}.status{display:inline-flex;align-items:center;gap:7px}.status:before{content:'';flex:0 0 auto;width:8px;height:8px;border-radius:50%;background:currentColor}.grid+.grid{margin-top:14px}@media(max-width:980px){.metric-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.metric-grid .metric-card:first-child{grid-column:1/-1}}@media(max-width:480px){.metric-grid{grid-template-columns:1fr}.metric-grid .metric-card:first-child{grid-column:1}.metric-card{min-height:88px}.metric-card .v{font-size:1.08rem}}</style>");
 
   html += F("<section class='grid metric-grid'>");
   html += F("<div class='card metric-card'><div class='k'>Uptime</div><div class='v'>"); html += formatRuntimeClock(uptimeSec); html += F("</div></div>");
@@ -2196,21 +2292,27 @@ void handleDiagnosticsPage() {
   html += F("<tr><td>Base topic</td><td>"); html += mqttBase; html += F("</td></tr>");
   html += F("</table></div>");
 
-  html += F("<div class='card status-card'><div class='card-head'><h2>Hardware</h2><span class='card-tag'>Devices</span></div><table>");
+  html += F("<div class='card status-card hardware-card'><div class='card-head'><h2>Hardware</h2><span class='card-tag'>Devices</span></div><table>");
   html += F("<tr><td>I2C pins</td><td>"); html += String(i2cSdaPin); html += F(" / "); html += String(i2cSclPin); html += F("</td></tr>");
   html += F("<tr><td>I2C devices</td><td><code>"); html += i2cList; html += F("</code></td></tr>");
   html += F("<tr><td>GPIO fallback</td><td>"); html += (useGpioFallback ? "yes" : "no"); html += F("</td></tr>");
   html += F("<tr><td>Display</td><td>"); html += (!displayEnabled ? "Disabled" : (displayUseTft ? "TFT" : "OLED")); html += F("</td></tr>");
   html += F("</table></div>");
 
-  html += F("<div class='card status-card-wide'><div class='card-head'><h2>Irrigation</h2><span class='card-tag'>Live state</span></div><table>");
+  html += F("<div class='card status-card irrigation-card'><div class='card-head'><h2>Irrigation</h2><span class='card-tag'>Live state</span></div><table>");
   html += F("<tr><td>Zones</td><td>"); html += String(activeZones); html += F(" active / "); html += String(zonesCount); html += F("</td></tr>");
   html += F("<tr><td>Source</td><td>"); html += sourceModeText(); html += F("</td></tr>");
   html += F("<tr><td>Tank</td><td>"); html += String(tankPercent()); html += F("%</td></tr>");
   html += F("<tr><td>Delay</td><td>"); html += rainDelayCauseText(); html += F("</td></tr>");
   html += F("</table></div>");
 
-  html += F("<div class='card status-card-wide'><div class='card-head'><h2>Weather</h2><span class='card-tag'>Service</span></div><table>");
+  html += F("<div class='card weather-card'><div class='card-head'><h2>Weather</h2><span class='card-tag'>Service</span></div><table>");
+  html += F("<tr><td>Temp/Humidity Source</td><td>"); html += climateSourceLabel(); html += F("</td></tr>");
+  html += F("<tr><td>DHT22 GPIO</td><td>"); html += pinText(dhtSensorPin); html += F("</td></tr>");
+  html += F("<tr><td>Local Sensor</td><td>");
+  if (climateSource == CLIMATE_OPEN_METEO) html += F("not selected");
+  else html += (localClimateValid ? "ready" : "unavailable");
+  html += F("</td></tr>");
   html += F("<tr><td>Location</td><td>"); html += meteoLocationLabel(); html += F("</td></tr>");
   html += F("<tr><td>Model</td><td>"); html += meteoModel; html += F("</td></tr>");
   html += F("<tr><td>Current HTTP</td><td>"); html += String(lastWeatherHttpCode); html += F("</td></tr>");
@@ -2232,7 +2334,8 @@ void handleDiagnosticsPage() {
   appendPinRow(F("Status Pixel"), pinText(STATUS_PIXEL_PIN), statusPixelReady ? F("WS2812 status LED ready") : F("Not initialized"));
   html += F("</tbody></table></div>");
 
-  html += F("<div class='card pin-card'><div class='card-head'><h2>Sensors & Inputs</h2><span class='card-tag'>6 assignments</span></div><table class='pin-table'><thead><tr><th>Assignment</th><th>Pin</th><th>Notes</th></tr></thead><tbody>");
+  html += F("<div class='card pin-card'><div class='card-head'><h2>Sensors & Inputs</h2><span class='card-tag'>7 assignments</span></div><table class='pin-table'><thead><tr><th>Assignment</th><th>Pin</th><th>Notes</th></tr></thead><tbody>");
+  appendPinRow(F("DHT22 / AM2302"), pinText(dhtSensorPin), climateSource == CLIMATE_DHT22_GPIO ? F("selected climate source") : F("not selected"));
   appendPinRow(F("Tank Level ADC"), pinText(tankLevelPin), F("Tank percentage sensor"));
   appendPinRow(F("Rain Sensor"), pinText(rainSensorPin), String(rainSensorEnabled ? "enabled" : "disabled") + (rainSensorInvert ? F(", inverted") : F(", normal polarity")));
   appendPinRow(F("Moisture Probe ADC"), pinText(moisturePin), String(moistureProbeEnabled ? "enabled" : "disabled"));
@@ -2350,7 +2453,7 @@ void setup() {
     statusPixelLastColor = 0;
   }
 
-  initTempSensor(); // try to bring up the internal temp sensor (ESP32-S3)
+  applyLocalClimateOverride(true);
 
   // ---------- Display init ----------
   if (!displayEnabled) {
@@ -2522,9 +2625,6 @@ void setup() {
   doc["heapFree"]        = ESP.getFreeHeap();
   doc["heapMin"]         = ESP.getMinFreeHeap();
   doc["heapMaxAlloc"]    = ESP.getMaxAllocHeap();
-  float chipTemp = NAN;
-  if (readChipTempC(chipTemp)) doc["chipTempC"] = chipTemp;
-  else                         doc["chipTempC"] = nullptr;
   const int tftPct = (int)lroundf((float)g_tftBrightness * 100.0f / 255.0f);
   doc["tftBlPin"]         = tftBlPin;
   doc["tftPwm"]           = g_tftPwmReady;
@@ -2535,6 +2635,14 @@ void setup() {
   doc["tftHeight"]        = tftPanelHeight;
     doc["displayType"]      = !displayEnabled ? "none" : (displayUseTft ? "tft" : "oled");
     doc["tempUnit"]         = tempUseFahrenheit ? "F" : "C";
+    doc["climateSource"]    = climateSourceValue();
+    doc["climateSourceLabel"] = climateSourceLabel();
+    doc["dht22Pin"]          = dhtSensorPin;
+    doc["localClimateValid"] = localClimateValid;
+    if (isfinite(localTempC)) doc["localTempC"] = localTempC;
+    else                      doc["localTempC"] = nullptr;
+    if (isfinite(localHumidityPct)) doc["localHumidity"] = localHumidityPct;
+    else                           doc["localHumidity"] = nullptr;
 
     // Current rain (actuals)
     doc["rain1hNow"] = rain1hNow;
@@ -3699,6 +3807,7 @@ void updateCachedWeather() {
     refreshCurrentWeatherSnapshotFromCache();
     snapshotReady = true;
   }
+  applyLocalClimateOverride();
 
   // ---- Forecast fetch / parse ----
   if (haveCoord && (cachedForecastData == "" || (nowms - lastForecastUpdate >= forecastUpdateInterval))) {
@@ -4601,8 +4710,6 @@ void HomeScreen() {
   int   hum  = curHumidityPct;
   float windNow = curWindMs;
   int   pct  = tankPercent();
-  const float smartFactorHome = smartWateringFactor();
-  const int smartPctHome = smartWateringEnabled ? (int)lroundf(smartFactorHome * 100.0f) : -1;
   const int moisturePctHome = moisturePercent();
   const bool moistureSkipHome = isSoilWetForSmartSkip();
 
@@ -4633,45 +4740,31 @@ void HomeScreen() {
     static int lastTemp = -1000;
     static int lastHum = -2;
     static int lastPct = -1;
-    static int lastWindTenths = 10000;
-    static int lastWindDir = -1;
     static int lastCondCode = -999;
-    static int lastRunning = -1;
-    static int lastQueued = -1;
-    static int lastSystemStatus = -1;
     static int lastNextZone = -2;
     static time_t lastNextEpoch = 0;
-    static int lastRssi = 9999;
     static int lastRain1h = -1;
     static int lastRain24h = -1;
     static int lastGust = -1;
-    static int lastMqtt = -1;
+    static int lastFeels = -1000;
+    static int lastPressure = -1;
     static int lastCompassWindDir = -1;
     static int lastCompassWindTenths = 10000;
     static int lastCompassGust = -1;
-    static int lastSmartPct = -999;
-    static int lastMoisturePct = -999;
-    static int lastMoistureSkip = -1;
-
-    int running = 0;
-    int queued = 0;
-    for (int i = 0; i < (int)zonesCount; ++i) {
-      if (zoneActive[i]) running++;
-      if (pendingStart[i]) queued++;
-    }
     NextWaterInfo nw = computeNextWatering();
     int tempRounded = isnan(temp) ? -1000 : (int)lroundf(temp);
+    float feels = temperatureForDisplay(curFeelsC);
+    int feelsRounded = isnan(feels) ? -1000 : (int)lroundf(feels);
+    int pressureRounded = isfinite(curPressureHpa) ? (int)lroundf(curPressureHpa) : -1;
     int pctClamped = constrain(pct, 0, 100);
     int windTenths = isfinite(windNow) ? (int)lroundf(windNow * 10.0f) : 10000;
     int windDirRounded = isfinite(curWindDirDeg) ? (int)lroundf(normalizeDegrees360(curWindDirDeg)) : -1;
-    int rssi = WiFi.RSSI();
     bool fullRedraw = g_forceHomeReset || !modernInit || lastW != W || lastH != H;
 
     // Additional weather data
-    int rain1hVal = (int)(rain1hNow * 10); // tenths of mm
-    int rain24hVal = (int)(lastRainAmount * 10);
+    int rain1hVal = isfinite(rain1hNow) ? (int)lroundf(rain1hNow * 10.0f) : -1;
+    int rain24hVal = isfinite(rainNext24h_mm) ? (int)lroundf(rainNext24h_mm * 10.0f) : -1;
     int gustVal = isfinite(curGustMs) ? (int)lroundf(curGustMs * 10) : -1;
-    bool mqttUp = _mqtt.connected();
 
     // Header height for layout calculations (declared here for broader scope)
     int headerH = 24;
@@ -4686,25 +4779,17 @@ void HomeScreen() {
       lastTemp = -1000;
       lastHum = -2;
       lastPct = -1;
-      lastWindTenths = 10000;
-      lastWindDir = -1;
       lastCondCode = -999;
-      lastRunning = -1;
-      lastQueued = -1;
-      lastSystemStatus = -1;
       lastNextZone = -2;
       lastNextEpoch = 0;
-      lastRssi = 9999;
       lastRain1h = -1;
       lastRain24h = -1;
       lastGust = -1;
-      lastMqtt = -1;
+      lastFeels = -1000;
+      lastPressure = -1;
       lastCompassWindDir = -1;
       lastCompassWindTenths = 10000;
       lastCompassGust = -1;
-      lastSmartPct = -999;
-      lastMoisturePct = -999;
-      lastMoistureSkip = -1;
       g_forceHomeReset = false;
 
       // ========== MODERN HEADER ==========
@@ -4732,7 +4817,7 @@ void HomeScreen() {
       drawCard(centerX, cardY, centerW, weatherH, C_PANEL, C_EDGE);
       drawCard(centerX, tankCardY, centerW, tankCardH, C_PANEL, C_EDGE);
       
-      // Right - System Status
+      // Right - detailed weather
       int rightX = centerX + centerW + 10;
       int rightW = W - rightX - 6;
       drawCard(rightX, cardY, rightW, cardH, C_PANEL, C_EDGE);
@@ -4752,7 +4837,7 @@ void HomeScreen() {
       tft.print("TANK LEVEL");
       
       tft.setCursor(rightX + 6, cardY + 6);
-      tft.print("SYSTEM");
+      tft.print("WEATHER DETAILS");
     }
 
     int cardY = headerH + 6;
@@ -4772,7 +4857,7 @@ void HomeScreen() {
     int status = !systemMasterEnabled ? 3 : (isPausedNow() ? 2 : ((isRainDelayBlockingNow() || windActive) ? 1 : 0));
 
     // ========== STATUS PILL (top right) ==========
-    if (fullRedraw || curMinute != lastMinute || status != lastStatus || abs(rssi - lastRssi) >= 3) {
+    if (fullRedraw || curMinute != lastMinute || status != lastStatus) {
       tft.fillRect(0, 0, W, headerH, C_PANEL);
       tft.drawFastHLine(0, headerH, W, C_EDGE);
 
@@ -4799,16 +4884,7 @@ void HomeScreen() {
       tft.setTextColor(ST77XX_BLACK);
       tft.setCursor(pillX + 7, 8);
       tft.print(statusText);
-      tft.setTextColor((rssi > -60) ? C_GOOD : (rssi > -75 ? C_WARN : C_BAD));
-      char rssiBuf[14];
-      snprintf(rssiBuf, sizeof(rssiBuf), "%ddBm", rssi);
-      tft.getTextBounds(rssiBuf, 0, 0, &bx, &by, &bw, &bh);
-      if (pillX - (int)bw - 8 > 120) {
-        tft.setCursor(pillX - (int)bw - 8, 8);
-        tft.print(rssiBuf);
-      }
       lastStatus = status;
-      lastRssi = rssi;
     }
 
     // ========== TIME DISPLAY ==========
@@ -4872,9 +4948,7 @@ void HomeScreen() {
     }
 
     // ========== WEATHER CARD ==========
-    if (fullRedraw || tempRounded != lastTemp || hum != lastHum || curWeatherCode != lastCondCode ||
-        windTenths != lastWindTenths || windDirRounded != lastWindDir ||
-        rain1hVal != lastRain1h || gustVal != lastGust) {
+    if (fullRedraw || tempRounded != lastTemp || hum != lastHum || curWeatherCode != lastCondCode) {
       tft.fillRect(centerX + 4, cardY + 20, centerW - 8, max(20, weatherH - 24), C_PANEL);
       
       // Temperature and humidity
@@ -4899,10 +4973,6 @@ void HomeScreen() {
       lastTemp = tempRounded;
       lastHum = hum;
       lastCondCode = curWeatherCode;
-      lastWindTenths = windTenths;
-      lastWindDir = windDirRounded;
-      lastRain1h = rain1hVal;
-      lastGust = gustVal;
     }
 
     // ========== TANK CARD ==========
@@ -4940,102 +5010,68 @@ void HomeScreen() {
       lastPct = pctClamped;
     }
 
-    // ========== SYSTEM STATUS CARD ==========
-    if (fullRedraw || running != lastRunning || queued != lastQueued || status != lastSystemStatus ||
-        mqttUp != (bool)lastMqtt || windDirRounded != lastCompassWindDir ||
-        windTenths != lastCompassWindTenths || gustVal != lastCompassGust ||
-        smartPctHome != lastSmartPct || moisturePctHome != lastMoisturePct ||
-        (moistureSkipHome ? 1 : 0) != lastMoistureSkip) {
+    // ========== WEATHER DETAILS CARD ==========
+    if (fullRedraw || feelsRounded != lastFeels || pressureRounded != lastPressure ||
+        rain1hVal != lastRain1h || rain24hVal != lastRain24h ||
+        windDirRounded != lastCompassWindDir || windTenths != lastCompassWindTenths ||
+        gustVal != lastCompassGust) {
       tft.fillRect(rightX + 4, cardY + 20, rightW - 8, max(94, cardH - 24), C_PANEL);
 
-      // Master status
       tft.setTextSize(1);
       tft.setTextColor(C_MUTED);
       tft.setCursor(rightX + 8, cardY + 26);
-      tft.print("Master:");
-      tft.setTextColor(systemMasterEnabled ? C_GOOD : C_BAD);
-      tft.print(systemMasterEnabled ? " ON" : " OFF");
-      
-      // MQTT status
+      tft.print("Feels ");
+      tft.setTextColor(C_TEXT);
+      if (feelsRounded == -1000) tft.print("--");
+      else tft.print(feelsRounded);
+      tft.print(temperatureUnitChar());
+
       tft.setTextColor(C_MUTED);
       tft.setCursor(rightX + 8, cardY + 42);
-      tft.print("MQTT:");
-      tft.setTextColor(mqttUp ? C_GOOD : C_BAD);
-      tft.print(mqttUp ? " Up" : " Down");
-      
-      // WiFi RSSI
+      tft.print("Press ");
+      tft.setTextColor(C_TEXT);
+      if (pressureRounded < 0) tft.print("--");
+      else tft.print(pressureRounded);
+      tft.print("hPa");
+
       tft.setTextColor(C_MUTED);
       tft.setCursor(rightX + 8, cardY + 58);
-      tft.print("WiFi:");
-      tft.setTextColor((rssi > -60) ? C_GOOD : (rssi > -75 ? C_WARN : C_BAD));
-      tft.print(rssi);
-      tft.print("dBm");
+      tft.print("Rain 1h ");
+      tft.setTextColor(rain1hVal > 0 ? C_WARN : C_TEXT);
+      if (rain1hVal < 0) tft.print("--");
+      else tft.print(rain1hVal / 10.0f, 1);
+      tft.print(" mm");
 
       tft.setTextColor(C_MUTED);
       tft.setCursor(rightX + 8, cardY + 74);
-      tft.print("Queued:");
-      tft.setTextColor(queued > 0 ? C_WARN : C_MUTED);
-      tft.print(queued);
-
-      tft.setTextColor(C_MUTED);
-      tft.setCursor(rightX + 8, cardY + 90);
-      tft.print("Smart:");
-      if (!smartWateringEnabled) {
-        tft.setTextColor(C_MUTED);
-        tft.print(" Off");
-      } else {
-        tft.setTextColor(smartPctHome <= 0 ? C_WARN : C_ACCENT);
-        tft.print(" ");
-        tft.print(smartPctHome);
-        tft.print("%");
-      }
-
-      if (moistureProbeEnabled && cardH >= 126) {
-        tft.setTextColor(C_MUTED);
-        tft.setCursor(rightX + 8, cardY + 106);
-        tft.print("Soil:");
-        tft.setTextColor(moistureSkipHome ? C_WARN : C_TEXT);
-        if (moisturePctHome >= 0) {
-          tft.print(" ");
-          tft.print(moisturePctHome);
-          tft.print("%");
-        } else {
-          tft.print(" --");
-        }
-      }
-      
-      // Rain delay indicator
-      if ((isRainDelayBlockingNow() || windActive) && cardH >= 142) {
-        tft.setTextColor(C_WARN);
-        tft.setCursor(rightX + 8, cardY + 122);
-        tft.print(isCooldownActiveNow() ? "After-rain!" : "Rain delay!");
-      }
+      tft.print("Next 24h ");
+      tft.setTextColor(rain24hVal > 0 ? C_WARN : C_TEXT);
+      if (rain24hVal < 0) tft.print("--");
+      else tft.print(rain24hVal / 10.0f, 1);
+      tft.print(" mm");
 
       int compassX = rightX + rightW - 24;
       int compassY = cardY + cardH - 28;
       drawWindCompass(compassX, compassY, 14, curWindDirDeg, C_PANEL);
       tft.setTextSize(1);
       tft.setTextColor(C_MUTED);
-      tft.setCursor(rightX + 8, compassY - 5);
+      tft.setCursor(rightX + 8, compassY - 8);
+      tft.print("Wind ");
       if (isfinite(windNow)) tft.print(windNow, 1);
       else tft.print("--");
-      tft.print("m/s");
       if (gustVal >= 0) {
-        tft.setCursor(rightX + 8, compassY + 7);
-        tft.print("Gust:");
-        tft.print(gustVal / 10);
+        tft.setCursor(rightX + 8, compassY + 5);
+        tft.print("Gust ");
+        tft.print(gustVal / 10.0f, 1);
       }
-      
-      lastRunning = running;
-      lastQueued = queued;
-      lastSystemStatus = status;
-      lastMqtt = mqttUp ? 1 : 0;
+
+      lastFeels = feelsRounded;
+      lastPressure = pressureRounded;
+      lastRain1h = rain1hVal;
+      lastRain24h = rain24hVal;
       lastCompassWindDir = windDirRounded;
       lastCompassWindTenths = windTenths;
       lastCompassGust = gustVal;
-      lastSmartPct = smartPctHome;
-      lastMoisturePct = moisturePctHome;
-      lastMoistureSkip = moistureSkipHome ? 1 : 0;
     }
 
     return;
@@ -5055,21 +5091,23 @@ void HomeScreen() {
     static int lastCondCode = -999;
     static int lastNextZone = -2;
     static time_t lastNextEpoch = 0;
-    static int lastRunning = -1;
-    static int lastQueued = -1;
     static int lastSystemStatus = -1;
-    static int lastMqtt = -1;
     static int lastMoisturePct = -999;
     static int lastMoistureSkip = -1;
+    static int lastFeels = -1000;
+    static int lastPressure = -1;
+    static int lastRain1h = -1;
+    static int lastRain24h = -1;
+    static int lastGust = -1;
 
-    int running = 0;
-    int queued = 0;
-    for (int i = 0; i < (int)zonesCount; ++i) {
-      if (zoneActive[i]) running++;
-      if (pendingStart[i]) queued++;
-    }
     NextWaterInfo nw = computeNextWatering();
     int tempRounded = isnan(temp) ? -1000 : (int)lroundf(temp);
+    float feels = temperatureForDisplay(curFeelsC);
+    int feelsRounded = isnan(feels) ? -1000 : (int)lroundf(feels);
+    int pressureRounded = isfinite(curPressureHpa) ? (int)lroundf(curPressureHpa) : -1;
+    int rain1hVal = isfinite(rain1hNow) ? (int)lroundf(rain1hNow * 10.0f) : -1;
+    int rain24hVal = isfinite(rainNext24h_mm) ? (int)lroundf(rainNext24h_mm * 10.0f) : -1;
+    int gustVal = isfinite(curGustMs) ? (int)lroundf(curGustMs * 10.0f) : -1;
     int pctClamped = constrain(pct, 0, 100);
     int windTenths = isfinite(windNow) ? (int)lroundf(windNow * 10.0f) : 10000;
     int windDirRounded = isfinite(curWindDirDeg) ? (int)lroundf(normalizeDegrees360(curWindDirDeg)) : -1;
@@ -5078,12 +5116,12 @@ void HomeScreen() {
     const int side = 8;
     const int cardW = W - 2 * side;
     const int clockY = 8;
-    const int clockH = 82;
-    const int tankY = 98;
-    const int tankH = 92;
-    const int nextY = 198;
-    const int nextH = 50;
-    const int envY = 256;
+    const int clockH = 70;
+    const int tankY = 86;
+    const int tankH = 74;
+    const int nextY = 168;
+    const int nextH = 42;
+    const int envY = 218;
     const int envH = max(48, H - envY - 8);
 
     if (fullRedraw) {
@@ -5101,12 +5139,14 @@ void HomeScreen() {
       lastCondCode = -999;
       lastNextZone = -2;
       lastNextEpoch = 0;
-      lastRunning = -1;
-      lastQueued = -1;
       lastSystemStatus = -1;
-      lastMqtt = -1;
       lastMoisturePct = -999;
       lastMoistureSkip = -1;
+      lastFeels = -1000;
+      lastPressure = -1;
+      lastRain1h = -1;
+      lastRain24h = -1;
+      lastGust = -1;
       g_forceHomeReset = false;
 
       drawCard(side, clockY, cardW, clockH, C_PANEL, C_EDGE);
@@ -5118,7 +5158,7 @@ void HomeScreen() {
       tft.setCursor(16, nextY + 6);
       tft.print("NEXT WATER");
       tft.setCursor(16, envY + 6);
-      tft.print("ENVIRONMENT");
+      tft.print("LOCAL WEATHER");
     }
 
     char tbuf[8] = "--:--";
@@ -5137,7 +5177,7 @@ void HomeScreen() {
       tft.print(tbuf);
       tft.setTextSize(1);
       tft.setTextColor(C_TEXT);
-      tft.setCursor(18, clockY + 60);
+      tft.setCursor(18, clockY + 52);
       tft.print(dbuf);
       const char* statusText = (status == 3) ? "MASTER OFF" : (status == 2 ? "PAUSED" : (status == 1 ? "DELAY" : "READY"));
       uint16_t statusColor = (status == 0) ? C_GOOD : (status == 3 ? C_BAD : C_WARN);
@@ -5146,19 +5186,19 @@ void HomeScreen() {
       tft.getTextBounds(statusText, 0, 0, &bx, &by, &bw, &bh);
       int pillW = (int)bw + 14;
       int pillX = W - pillW - 16;
-      tft.fillRoundRect(pillX, clockY + 55, pillW, 18, 5, statusColor);
+      tft.fillRoundRect(pillX, clockY + 47, pillW, 18, 5, statusColor);
       tft.setTextColor(ST77XX_BLACK);
-      tft.setCursor(pillX + 7, clockY + 60);
+      tft.setCursor(pillX + 7, clockY + 52);
       tft.print(statusText);
       lastMinute = curMinute;
       lastStatus = status;
     }
 
     if (fullRedraw || nw.zone != lastNextZone || nw.epoch != lastNextEpoch) {
-      tft.fillRect(16, nextY + 18, W - 32, nextH - 22, C_PANEL);
-      tft.setTextSize(2);
+      tft.fillRect(16, nextY + 17, W - 32, nextH - 20, C_PANEL);
+      tft.setTextSize(1);
       tft.setTextColor(C_TEXT);
-      tft.setCursor(16, nextY + 22);
+      tft.setCursor(16, nextY + 21);
       if (nw.zone >= 0) {
         struct tm tnw;
         localtime_r(&nw.epoch, &tnw);
@@ -5183,13 +5223,6 @@ void HomeScreen() {
       chooseWaterSource(waterSrc, mainsOn, tankOn);
       const bool lowTank = pctClamped <= (int)tankLowThresholdPct;
       const uint16_t tankColor = lowTank ? C_BAD : (pctClamped < 35 ? C_WARN : C_GOOD);
-      const int gaugeX = 22;
-      const int gaugeY = tankY + 33;
-      const int gaugeW = 42;
-      const int gaugeH = 44;
-      const int innerH = gaugeH - 4;
-      const int fillH = (innerH * pctClamped) / 100;
-
       tft.fillRect(16, tankY + 5, W - 32, tankH - 11, C_PANEL);
       tft.setTextSize(1);
       tft.setTextColor(C_TEXT);
@@ -5197,7 +5230,7 @@ void HomeScreen() {
       tft.print("TANK LEVEL");
       if (moistureProbeEnabled) {
         tft.setTextColor(moistureSkipHome ? C_WARN : C_MUTED);
-        tft.setCursor(86, tankY + 20);
+        tft.setCursor(91, tankY + 7);
         tft.print("Soil ");
         if (moisturePctHome >= 0) {
           tft.print(moisturePctHome);
@@ -5206,44 +5239,46 @@ void HomeScreen() {
           tft.print("--");
         }
       }
-      tft.drawRoundRect(gaugeX, gaugeY, gaugeW, gaugeH, 6, C_EDGE);
-      tft.drawFastHLine(gaugeX + 10, gaugeY - 4, gaugeW - 20, C_EDGE);
-      tft.fillRect(gaugeX + 3, gaugeY + 3, gaugeW - 6, innerH, RGB(8, 12, 20));
-      if (fillH > 0) {
-        tft.fillRect(gaugeX + 3, gaugeY + 3 + innerH - fillH, gaugeW - 6, fillH, tankColor);
-      }
-      int thresholdY = gaugeY + 3 + innerH - ((innerH * tankLowThresholdPct) / 100);
-      tft.drawFastHLine(gaugeX + gaugeW - 7, thresholdY, 9, C_WARN);
+      const int barX = 18;
+      const int barY = tankY + 25;
+      const int barW = W - 36;
+      tft.drawRoundRect(barX, barY, barW, 12, 4, C_EDGE);
+      tft.fillRect(barX + 2, barY + 2, barW - 4, 8, RGB(8, 12, 20));
+      const int fillW = ((barW - 4) * pctClamped) / 100;
+      if (fillW > 0) tft.fillRect(barX + 2, barY + 2, fillW, 8, tankColor);
 
       char pctBuf[8];
       snprintf(pctBuf, sizeof(pctBuf), "%d", pctClamped);
-      tft.setTextSize(3);
-      tft.setTextColor(tankColor);
-      tft.setCursor(78, tankY + 34);
-      tft.print(pctBuf);
       tft.setTextSize(2);
+      tft.setTextColor(tankColor);
+      tft.setCursor(18, tankY + 44);
+      tft.print(pctBuf);
+      tft.setTextSize(1);
       tft.print("%");
 
       tft.setTextSize(1);
       tft.setTextColor(lowTank ? C_BAD : C_MUTED);
-      tft.setCursor(78, tankY + 64);
+      tft.setCursor(58, tankY + 47);
       if (!tankEnabled) tft.print("DISABLED");
       else if (lowTank) tft.print("LOW - MAINS");
       else if (pctClamped >= 80) tft.print("FULL");
       else tft.print("NORMAL");
 
       tft.setTextColor(C_MUTED);
-      tft.setCursor(78, tankY + 78);
+      tft.setCursor(58, tankY + 59);
       tft.print("Source ");
       tft.setTextColor(tankOn ? C_GOOD : (mainsOn ? C_WARN : C_TEXT));
       tft.print(waterSrc && waterSrc[0] ? waterSrc : "--");
+      lastPct = pctClamped;
+      lastSystemStatus = status;
       lastMoisturePct = moisturePctHome;
       lastMoistureSkip = moistureSkipHome ? 1 : 0;
     }
 
-    if (fullRedraw || tempRounded != lastTemp || hum != lastHum || pctClamped != lastPct ||
+    if (fullRedraw || tempRounded != lastTemp || hum != lastHum ||
         windTenths != lastWindTenths || windDirRounded != lastWindDir || curWeatherCode != lastCondCode ||
-        status != lastSystemStatus || (int)_mqtt.connected() != lastMqtt) {
+        feelsRounded != lastFeels || pressureRounded != lastPressure || rain1hVal != lastRain1h ||
+        rain24hVal != lastRain24h || gustVal != lastGust) {
       tft.fillRect(16, envY + 18, W - 32, envH - 24, C_PANEL);
       tft.setTextSize(2);
       tft.setTextColor(C_TEXT);
@@ -5258,38 +5293,45 @@ void HomeScreen() {
       tft.setTextColor(C_MUTED);
       tft.setCursor(16, envY + 42);
       tft.print((curWeatherCode >= 0) ? meteoCodeToMain(curWeatherCode) : "--");
-      if (H >= 320) {
-        const int compassX = W - 28;
-        const int compassY = envY + 52;
-        drawWindCompass(compassX, compassY, 12, curWindDirDeg, C_PANEL);
-        tft.setTextSize(1);
-        tft.setTextColor(C_WARN);
-        tft.setCursor(16, envY + 56);
-        tft.print(isfinite(curWindDirDeg) ? meteoWindDirectionToCompass(curWindDirDeg) : "--");
-        tft.setTextColor(C_MUTED);
-        tft.print(" ");
-        if (isfinite(windNow)) tft.print(windNow, 1);
-        else tft.print("--");
-        tft.print("m/s");
-        tft.setTextColor(C_MUTED);
-        tft.setCursor(16, envY + 68);
-        tft.print("Master ");
-        tft.setTextColor(systemMasterEnabled ? C_GOOD : C_BAD);
-        tft.print(systemMasterEnabled ? "On" : "Off");
-        tft.setTextColor(C_MUTED);
-        tft.setCursor(86, envY + 68);
-        tft.print("MQTT ");
-        tft.setTextColor(_mqtt.connected() ? C_GOOD : C_BAD);
-        tft.print(_mqtt.connected() ? "Up" : "Down");
-      }
+      tft.setTextSize(1);
+      tft.setTextColor(C_MUTED);
+      tft.setCursor(16, envY + 56);
+      tft.print("Wind ");
+      tft.setTextColor(C_TEXT);
+      tft.print(isfinite(curWindDirDeg) ? meteoWindDirectionToCompass(curWindDirDeg) : "--");
+      tft.print(" ");
+      if (isfinite(windNow)) tft.print(windNow, 1);
+      else tft.print("--");
+      if (gustVal >= 0) { tft.setTextColor(C_MUTED); tft.print(" G"); tft.print(gustVal / 10.0f, 1); }
+
+      tft.setTextColor(C_MUTED);
+      tft.setCursor(16, envY + 68);
+      tft.print("Feels ");
+      tft.setTextColor(C_TEXT);
+      if (feelsRounded == -1000) tft.print("--"); else tft.print(feelsRounded);
+      tft.print(temperatureUnitChar());
+      tft.setTextColor(C_MUTED);
+      tft.print("  ");
+      if (pressureRounded < 0) tft.print("-- hPa");
+      else { tft.print(pressureRounded); tft.print(" hPa"); }
+
+      tft.setTextColor(C_MUTED);
+      tft.setCursor(16, envY + 80);
+      tft.print("Rain ");
+      if (rain1hVal < 0) tft.print("--"); else tft.print(rain1hVal / 10.0f, 1);
+      tft.print(" | 24h ");
+      if (rain24hVal < 0) tft.print("--"); else tft.print(rain24hVal / 10.0f, 1);
+      tft.print("mm");
       lastTemp = tempRounded;
       lastHum = hum;
-      lastPct = pctClamped;
       lastWindTenths = windTenths;
       lastWindDir = windDirRounded;
       lastCondCode = curWeatherCode;
-      lastSystemStatus = status;
-      lastMqtt = _mqtt.connected() ? 1 : 0;
+      lastFeels = feelsRounded;
+      lastPressure = pressureRounded;
+      lastRain1h = rain1hVal;
+      lastRain24h = rain24hVal;
+      lastGust = gustVal;
     }
 
     return;
@@ -6032,7 +6074,7 @@ void handleRoot() {
   html += F("html[data-theme='dark'] .summary-link,html[data-theme='dark'] .metric-tile,html[data-theme='dark'] .hero-mini{background:#102126}");
   html += F("@media(max-width:720px){.wrap{padding:0 12px;margin:12px auto}.nav .meta{width:100%}.pill,#themeBtn{flex:1 1 auto;justify-content:center}.dash-nav{top:116px;border-radius:8px}.hero-shell{padding:16px}.section-head{margin-bottom:10px}.card{padding:16px}}");
   html += F("@media(max-width:720px){.nav{padding-top:8px}.chip{font-size:.88rem}.hero-shell{padding:18px}.hero-title{max-width:none;font-size:1.95rem}.hero-mini-grid{grid-template-columns:1fr}.zone-row{grid-template-columns:1fr}.zone-row-status,.zone-row-actions{justify-content:flex-start}.zone-row-actions .btn{flex:1 1 140px}.brand-title{letter-spacing:.55px}.summary-card{min-height:auto}.summary-link{min-height:0}.summary-metric-grid{grid-template-columns:1fr 1fr}.summary-metric-grid.metric-pair{grid-template-columns:1fr}.summary-meta.status-pills{grid-template-columns:1fr}.dash-nav{top:120px;overflow:auto;flex-wrap:nowrap;padding-bottom:8px}.dash-nav a{white-space:nowrap}.sched-top{padding:16px}.sched-body{padding:16px}.sched-tools .btn{flex:1 1 140px}}");
-  html += F(".nav{background:#1e3a8a;box-shadow:0 4px 14px rgba(15,23,42,.18)}.dot{box-shadow:none}.hero-shell{background:var(--card);border-left:4px solid var(--primary);box-shadow:0 8px 22px rgba(15,23,42,.08)}.hero-title{letter-spacing:-.02em}.hero-text{max-width:54ch}.hero-mini{background:var(--panel);box-shadow:none;border-color:var(--line)}.hero-mini.hero-mini-strong{background:var(--chip);border-color:var(--chip-brd)}.dash-nav{background:var(--card);border:1px solid var(--line);box-shadow:0 5px 14px rgba(15,23,42,.08)}.dash-nav a{border-radius:6px;background:transparent;border-color:transparent}.dash-nav a:hover{transform:none;box-shadow:none;background:rgba(37,99,235,.1)}.summary-shell{padding:0;background:transparent;border:0;box-shadow:none}.summary-card{border-top:3px solid var(--primary);background:var(--card);box-shadow:0 6px 18px rgba(15,23,42,.06)}.summary-card:nth-child(2){border-top-color:#7c3aed}.summary-card:nth-child(3){border-top-color:#0891b2}.summary-card:nth-child(4){border-top-color:#15803d}.summary-card:nth-child(5){border-top-color:#b45309}.zone-row{background:var(--card);border-radius:7px;box-shadow:0 2px 8px rgba(15,23,42,.05)}.zone-row.is-active{box-shadow:0 6px 16px rgba(22,163,74,.12)}.zone-dot{box-shadow:none}.section-head h2{letter-spacing:-.01em}.action-card{background:var(--card)}@media(max-width:720px){.nav .meta{gap:6px}.hero-shell{border-left:0;border-top:3px solid var(--primary)}.summary-shell{padding:0}.summary-grid{gap:10px}.zone-row-actions .btn{min-height:42px}}");
+  html += F(".nav{background:#1e3a8a;box-shadow:0 4px 14px rgba(15,23,42,.18)}.dot{box-shadow:none}.hero-shell{background:var(--card);border-left:4px solid var(--primary);box-shadow:0 8px 22px rgba(15,23,42,.08)}.hero-title{letter-spacing:-.02em}.hero-text{max-width:54ch}.hero-mini{background:var(--panel);box-shadow:none;border-color:var(--line)}.hero-mini.hero-mini-strong{background:var(--chip);border-color:var(--chip-brd)}.dash-nav{background:var(--card);border:1px solid var(--line);box-shadow:0 5px 14px rgba(15,23,42,.08)}.dash-nav a{border-radius:6px;background:transparent;border-color:transparent}.dash-nav a:hover{transform:none;box-shadow:none;background:rgba(37,99,235,.1)}.summary-shell{padding:0;background:transparent;border:0;box-shadow:none}.summary-card{border-top:3px solid var(--primary);background:var(--card);box-shadow:0 6px 18px rgba(15,23,42,.06)}.summary-card:nth-child(2){border-top-color:#7c3aed}.summary-card:nth-child(3){border-top-color:#0891b2}.summary-card:nth-child(4){border-top-color:#15803d}.summary-card:nth-child(5){border-top-color:var(--primary)}.zone-row{background:var(--card);border-radius:7px;box-shadow:0 2px 8px rgba(15,23,42,.05)}.zone-row.is-active{box-shadow:0 6px 16px rgba(22,163,74,.12)}.zone-dot{box-shadow:none}.section-head h2{letter-spacing:-.01em}.action-card{background:var(--card)}@media(max-width:720px){.nav .meta{gap:6px}.hero-shell{border-left:0;border-top:3px solid var(--primary)}.summary-shell{padding:0}.summary-grid{gap:10px}.zone-row-actions .btn{min-height:42px}}");
   html += F("</style></head><body>");
   flush();
 
@@ -6856,25 +6898,10 @@ void handleSetupPage() {
   html += F("<div class='setup-badge'><div class='setup-badge-k'>Forecast Site</div><div class='setup-badge-v'>"); html += setupWeatherLabel; html += F("</div></div>");
   html += F("<div class='setup-badge'><div class='setup-badge-k'>Forecast Model</div><div class='setup-badge-v'>"); html += setupModelLabel; html += F("</div></div>");
   html += F("</div></div>");
+  html += F("<style>#setupForm{display:flex;flex-direction:column}.setup-nav a{flex:0 0 112px;width:112px;height:48px;padding:8px;text-align:center;line-height:1.15;white-space:normal}#setupForm>.setup-nav{order:0}#setupForm>.setup-actions-top{order:1}#smart-card{order:10}#delays-card{order:20}#weather-card{order:30}#tank-card{order:40}#rain-card{order:50}#timezone-card{order:60}#pins-card{order:70}#i2c-card{order:80}#buttons-card{order:90}#display-card{order:100}#advanced-card{order:110}#mqtt-card{order:120}</style>");
   html += F("<form id='setupForm' action='/configure' method='POST' novalidate>");
-  html += F("<div class='setup-nav'><a href='#zones-card'>Zones</a><a href='#tank-card'>Water</a><a href='#delays-card'>Delays</a><a href='#smart-card'>Smart</a><a href='#rain-card'>Rain</a><a href='#weather-card'>Forecast</a><a href='#timezone-card'>Time</a><a href='#pins-card'>Relay Pins</a><a href='#display-card'>Display</a><a href='#i2c-card'>I2C</a><a href='#advanced-card'>TFT Pins</a><a href='#buttons-card'>Buttons</a><a href='#mqtt-card'>MQTT</a></div>");
+  html += F("<div class='setup-nav'><a href='#smart-card'>Smart Watering</a><a href='#delays-card'>Delays &amp; Pause</a><a href='#weather-card'>Forecast</a><a href='#tank-card'>Water &amp; Tank</a><a href='#rain-card'>Rain Inputs</a><a href='#timezone-card'>Timezone</a><a href='#pins-card'>GPIO</a><a href='#i2c-card'>I2C</a><a href='#buttons-card'>Buttons</a><a href='#display-card'>Display</a><a href='#advanced-card'>TFT Pins</a><a href='#mqtt-card'>MQTT</a></div>");
   html += F("<div class='setup-actions-top'><button class='btn' type='submit' id='btn-save-setup'>Save Changes</button><a class='btn-alt' href='/'>Home</a><button class='btn-alt' type='button' id='btn-clear-cooldown'>Clear After-Rain Delay</button><button class='btn btn-danger' type='button' onclick=\"if(confirm('Reboot controller now?'))fetch('/reboot',{method:'POST'})\">Reboot</button><span class='save-confirm' id='save-confirm'>Saved</span></div>");
-
-  // Zones
-  html += F("<div class='card narrow' id='zones-card'><details class='collapse'><summary>Zones & Run Mode</summary><div class='collapse-body'><p class='card-intro'>Set how many watering zones are available and whether they run one at a time or together.</p>");
-  html += F("<div class='row'><label>Zone Count</label><input class='in-xs' type='number' min='1' max='");
-  html += String(MAX_ZONES);
-  html += F("' name='zonesMode' value='");
-  html += String(zonesCount);
-  html += F("'><small>Tank/Mains works with any zone count. Up to ");
-  html += String(MAX_ZONES);
-  html += F(" zones supported.</small></div>");
-
-  // Run mode
-  html += F("<div class='row switchline'><label>Run Mode</label>");
-  html += F("<label><input type='checkbox' name='runConcurrent' "); html += (runZonesConcurrent ? "checked" : "");
-  html += F("> Run Zones Together</label><small>Unchecked = One at a time. If enabled, ensure your power supply can handle multiple valves running at once.</small></div>");
-  html += F("</div></details></div>");
 
   // Tank (available for all modes; water source switching works with any zone count)
   html += F("<div class='card narrow' id='tank-card'><details class='collapse'><summary>Water Source & Tank</summary><div class='collapse-body'><p class='card-intro'>Control how the controller chooses between tank and mains and where the tank sensor is connected.</p>");
@@ -7057,6 +7084,14 @@ void handleSetupPage() {
   html += F("<option value='icon_eu'");       html += (modelSel == "icon_eu" ? " selected" : ""); html += F(">ICON EU</option>");
   html += F("<option value='custom'");        html += (!modelIsKnown ? " selected" : ""); html += F(">custom</option>");
   html += F("</select><small>Open-Meteo forecast model</small></div>");
+  html += F("<div class='row'><label>Temp/Humidity Source</label><select class='in-med' name='climateSource'>");
+  html += F("<option value='meteo'"); html += (climateSource == CLIMATE_OPEN_METEO ? " selected" : ""); html += F(">Open-Meteo</option>");
+  html += F("<option value='aht20'"); html += (climateSource == CLIMATE_AHT20_I2C ? " selected" : ""); html += F(">AHT20/AHT21 on I2C</option>");
+  html += F("<option value='dht22'"); html += (climateSource == CLIMATE_DHT22_GPIO ? " selected" : ""); html += F(">DHT22/AM2302 on GPIO</option>");
+  html += F("</select><small>Local sensors replace dashboard and Smart Watering temperature/humidity; rain and wind still use Open-Meteo.</small></div>");
+  html += F("<div class='row'><label>DHT22 GPIO</label><input class='in-xs' type='number' min='-1' max='");
+  html += String(uiMaxGpio); html += F("' name='dhtSensorPin' value='"); html += String(dhtSensorPin);
+  html += F("'><small>Use -1 when disconnected. AM2302 uses the same DHT22 setting.</small></div>");
   html += F("<div class='row' id='meteoModelCustomRow' style='display:");
   html += (modelIsKnown ? "none" : "flex");
   html += F("'><label>Custom Model</label><input class='in-med' type='text' name='meteoModelCustom' value='");
@@ -7284,8 +7319,19 @@ void handleSetupPage() {
   html += F("<div class='row helptext'><label></label><small>Changing I2C pins requires reboot. Avoid strapping pins and SPI flash/PSRAM pins. KC868 boards commonly use SDA 4 and SCL 15.</small></div>");
   html += F("</div></details></div>");
 
-  // GPIO fallback pins
-  html += F("<div class='card narrow' id='pins-card'><details class='collapse'><summary>Relay GPIO Pins</summary><div class='collapse-body'><p class='card-intro'>Assign direct ESP32 GPIO outputs for zone, city-water, tank, and power-supply relays. Tick LOW = ON for active-low relay modules.</p><div class='grid'>");
+  // Zones, run mode, and GPIO fallback pins
+  html += F("<div class='card narrow' id='pins-card'><details class='collapse'><summary>Zones & Relay GPIO</summary><div class='collapse-body'><p class='card-intro'>Configure zone operation and assign direct ESP32 GPIO outputs for zone, city-water, tank, and power-supply relays.</p>");
+  html += F("<div class='row'><label>Zone Count</label><input class='in-xs' type='number' min='1' max='");
+  html += String(MAX_ZONES);
+  html += F("' name='zonesMode' value='");
+  html += String(zonesCount);
+  html += F("'><small>Tank/Mains works with any zone count. Up to ");
+  html += String(MAX_ZONES);
+  html += F(" zones supported.</small></div>");
+  html += F("<div class='row switchline'><label>Run Mode</label>");
+  html += F("<label><input type='checkbox' name='runConcurrent' "); html += (runZonesConcurrent ? "checked" : "");
+  html += F("> Run Zones Together</label><small>Unchecked = one at a time. Ensure the power supply can handle multiple valves before enabling concurrent operation.</small></div>");
+  html += F("<div class='grid'>");
   for (uint8_t i=0;i<MAX_ZONES;i++){
     html += F("<div class='row switchline'><label>Zone "); html += String(i+1);
     html += F(" GPIO</label><input class='in-xs' type='number' min='-1' max='"); html += String(uiMaxGpio); html += F("' name='zonePin"); html += String(i);
@@ -8134,6 +8180,13 @@ void loadConfig() {
     int v = s.toInt();
     if (v >= 0 && v <= 100) moistureSkipThresholdPct = v;
   }
+  // NEW: local temperature/humidity source (optional trailing line)
+  if (nextTail(s) && s.length()) climateSource = parseClimateSource(s);
+  // DHT22/AM2302 data GPIO (optional trailing line)
+  if (nextTail(s) && s.length()) {
+    int p = s.toInt();
+    dhtSensorPin = (p == -1 || isValidOutputPin(p)) ? p : -1;
+  }
 
   if (!(smartCoolTempC < smartHotTempC && smartHotTempC < smartVeryHotTempC)) {
     smartCoolTempC = 18.0f;
@@ -8280,6 +8333,9 @@ void saveConfig() {
   f.println(moistureDryRaw);
   f.println(moistureWetRaw);
   f.println(moistureSkipThresholdPct);
+  // NEW: local temperature/humidity source
+  f.println(climateSourceValue());
+  f.println(dhtSensorPin);
 
   f.close();
 }
@@ -8348,6 +8404,8 @@ void handleConfigure() {
   float  oldLon    = meteoLon;
   String oldLoc    = meteoLocation;
   String oldModel  = meteoModel;
+  LocalClimateSource oldClimateSource = climateSource;
+  int oldDhtSensorPin = dhtSensorPin;
   int oldTftSclk = tftSclkPin;
   int oldTftMosi = tftMosiPin;
   int oldTftCs   = tftCsPin;
@@ -8402,6 +8460,16 @@ void handleConfigure() {
     if (parseLatLon(server.arg("meteoLat"), la, lo)) {
       meteoLat = la;
       meteoLon = lo;
+    }
+  }
+  if (server.hasArg("climateSource")) {
+    climateSource = parseClimateSource(server.arg("climateSource"));
+  }
+  if (server.hasArg("dhtSensorPin")) {
+    int p = -1;
+    if (parseRequiredIntArg(server.arg("dhtSensorPin"), p, displayCfgErr, F("DHT22 GPIO"))) {
+      if (p == -1 || isValidOutputPin(p)) dhtSensorPin = p;
+      else displayCfgErr += "DHT22 GPIO invalid or not output-capable: " + String(p) + "\n";
     }
   }
 
@@ -8761,6 +8829,8 @@ void handleConfigure() {
   bool displayModeChanged = (oldDisplayEnabled != displayEnabled || oldDisplayUseTft != displayUseTft);
   bool clockFormatChanged = (oldClockUse24Hour != clockUse24Hour);
   bool tempUnitChanged = (oldTempUseFahrenheit != tempUseFahrenheit);
+  bool climateSourceChanged = (oldClimateSource != climateSource);
+  bool dhtPinChanged = (oldDhtSensorPin != dhtSensorPin);
   bool tftRotationChanged = (oldTftRotation != (int)tftRotation);
 
   // Persist and re-apply runtime things
@@ -8771,7 +8841,17 @@ void handleConfigure() {
   if (!displayModeChanged && !tftGeometryChanged && displayEnabled && displayUseTft && tftRotationChanged) {
     tft.setRotation(tftRotation);
   }
-  if (clockFormatChanged || tempUnitChanged) {
+  if (i2cPinsChanged || climateSourceChanged || dhtPinChanged) {
+    localAhtReady = false;
+    localAhtLastAttemptMs = 0;
+    resetLocalDhtSensor();
+    localClimateLastReadMs = 0;
+    localClimateValid = false;
+    localTempC = NAN;
+    localHumidityPct = NAN;
+  }
+  applyLocalClimateOverride(true);
+  if (clockFormatChanged || tempUnitChanged || climateSourceChanged || dhtPinChanged) {
     g_forceHomeReset = true;
     lastScreenRefresh = 0;
   }
@@ -8782,7 +8862,7 @@ void handleConfigure() {
     if (!isfinite(a) || !isfinite(b)) return true;
     return fabsf(a - b) > 0.0001f;
   };
-  if (coordChanged(oldLat, meteoLat) || coordChanged(oldLon, meteoLon) || (oldLoc != meteoLocation) || (oldModel != meteoModel)) {
+  if (coordChanged(oldLat, meteoLat) || coordChanged(oldLon, meteoLon) || (oldLoc != meteoLocation) || (oldModel != meteoModel) || climateSourceChanged || dhtPinChanged) {
     // Clear current / forecast caches and timers
     cachedWeatherData   = "";
     cachedForecastData  = "";
@@ -8817,6 +8897,7 @@ void handleConfigure() {
     rainIdx              = 0;
     lastRainHistHour     = 0;
     lastRainAmount       = 0.0f;
+    applyLocalClimateOverride(true);
   }
 
 
