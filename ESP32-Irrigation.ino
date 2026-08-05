@@ -5705,9 +5705,16 @@ void handleRoot() {
 
   time_t now = time(nullptr);
   struct tm* ti = localtime(&now);
-  char timeStr[9], dateStr[11];
-  strftime(timeStr, sizeof(timeStr), "%H:%M:%S", ti);
-  strftime(dateStr, sizeof(dateStr), "%d/%m/%Y", ti);
+  char timeStr[9], dateStr[11], heroDateStr[40];
+  if (ti) {
+    strftime(timeStr, sizeof(timeStr), "%H:%M:%S", ti);
+    strftime(dateStr, sizeof(dateStr), "%d/%m/%Y", ti);
+    strftime(heroDateStr, sizeof(heroDateStr), "%A, %d %B %Y", ti);
+  } else {
+    snprintf(timeStr, sizeof(timeStr), "--:--:--");
+    snprintf(dateStr, sizeof(dateStr), "--/--/----");
+    snprintf(heroDateStr, sizeof(heroDateStr), "Date unavailable");
+  }
 
   // Keep this - it respects the g_inHttp guard
   updateCachedWeather();
@@ -5841,6 +5848,7 @@ void handleRoot() {
   html += F(".hero-kicker{text-transform:uppercase;letter-spacing:.22em;font-size:.72rem;font-weight:800;color:var(--primary)}");
   html += F(".hero-title{margin:0;font-size:clamp(1.95rem,4vw,3.2rem);line-height:1.02;max-width:11ch}");
   html += F(".hero-text{margin:0;max-width:60ch;color:var(--muted);font-size:1rem}");
+  html += F(".hero-action-stack{display:grid;gap:8px}.hero-date{color:var(--muted);font-size:.9rem;font-weight:700;font-variant-numeric:tabular-nums}");
   html += F(".hero-actions{display:flex;gap:10px;flex-wrap:wrap}");
   html += F(".dash-nav{display:flex;gap:10px;flex-wrap:wrap;align-items:center;padding:10px 12px;margin:-2px 0 18px;position:sticky;top:74px;z-index:9}");
   html += F(".dash-nav a{display:inline-flex;align-items:center;justify-content:center;padding:9px 14px;border-radius:999px;border:1px solid var(--chip-brd);background:rgba(255,255,255,.34);font-size:.84rem;font-weight:800;letter-spacing:.04em;text-transform:uppercase;color:var(--ink);transition:transform .08s ease,background .12s ease,border-color .12s ease,box-shadow .12s ease}");
@@ -6101,7 +6109,9 @@ void handleRoot() {
   html += F("<div class='hero-copy'><div class='hero-kicker'>16-Zone irrigation</div>");
   html += F("<h1 class='hero-title'>ESP32 Irrigation Valve Control</h1>");
   html += F("<p class='hero-text'></p>");
-  html += F("<div class='hero-actions'><a class='btn' href='/setup'>Setup</a><a class='btn btn-secondary' href='/events'>Events</a><a class='btn btn-secondary' href='/diagnostics'>Diagnostics</a></div></div>");
+  html += F("<div class='hero-action-stack'><div class='hero-actions'><a class='btn' href='/setup'>Setup</a><a class='btn btn-secondary' href='/events'>Events</a><a class='btn btn-secondary' href='/diagnostics'>Diagnostics</a></div><div class='hero-date' id='heroDate'>");
+  html += heroDateStr;
+  html += F("</div></div></div>");
   html += F("<div class='hero-mini-grid'>");
   html += F("<div class='hero-mini hero-mini-strong'><span class='hero-mini-label'>System</span><span class='hero-mini-value' id='heroMasterState'>");
   html += heroSystemValue;
@@ -6436,6 +6446,7 @@ void handleRoot() {
   html += F(" const am=(h>=12)?'PM':'AM'; h=h%12; if(h===0) h=12;");
   html += F(" return pad(h)+':'+pad(m)+':'+pad(s)+' '+am;");
   html += F("} ");
+  html += F("function fmtDeviceDate(epoch,offsetMin){if(typeof epoch!=='number'||epoch<=0)return'Date unavailable';const t=new Date((epoch+(offsetMin||0)*60)*1000);const days=['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];const months=['January','February','March','April','May','June','July','August','September','October','November','December'];return days[t.getUTCDay()]+', '+pad(t.getUTCDate())+' '+months[t.getUTCMonth()]+' '+t.getUTCFullYear();}");
   html += F("let _busy=false; async function postJson(url,payload){const body=payload?JSON.stringify(payload):\"{}\";");
   html += F("return fetch(url,{method:'POST',headers:{'Content-Type':'application/json','Cache-Control':'no-cache'},body});}");
   html += F("async function postForm(url, body){const opts={method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'}};");
@@ -6496,6 +6507,7 @@ void handleRoot() {
   html += F("const heroTank=document.getElementById('heroTankValue'); const heroTankSub=document.getElementById('heroTankSub');");
   html += F("if(heroTank) heroTank.textContent=pct+'%'; if(heroTankSub) heroTankSub.textContent=st.sourceMode||'';");
   html += F("const up=document.getElementById('upChip'); if(up) up.textContent=fmtClock12(st.deviceEpoch, st.utcOffsetMin);");
+  html += F("const heroDate=document.getElementById('heroDate');if(heroDate)heroDate.textContent=fmtDeviceDate(st.deviceEpoch,st.utcOffsetMin);");
   html += F("function wifiQuality(v){if(typeof v!=='number')return'Disconnected';if(v>=-50)return'Excellent';if(v>=-60)return'Strong';if(v>=-67)return'Good';if(v>=-75)return'Fair';if(v>=-82)return'Weak';return'Very weak';}");
   html += F("const rssi=document.getElementById('rssiChip'); if(rssi) rssi.textContent=(st.rssi)+' dBm'; const rq=document.getElementById('rssiQuality'); if(rq) rq.textContent=wifiQuality(st.rssi);");
   // Location chip + Open-Meteo link
@@ -6898,7 +6910,7 @@ void handleSetupPage() {
   html += F("<div class='setup-badge'><div class='setup-badge-k'>Forecast Site</div><div class='setup-badge-v'>"); html += setupWeatherLabel; html += F("</div></div>");
   html += F("<div class='setup-badge'><div class='setup-badge-k'>Forecast Model</div><div class='setup-badge-v'>"); html += setupModelLabel; html += F("</div></div>");
   html += F("</div></div>");
-  html += F("<style>#setupForm{display:flex;flex-direction:column}.setup-nav a{flex:0 0 112px;width:112px;height:48px;padding:8px;text-align:center;line-height:1.15;white-space:normal}#setupForm>.setup-nav{order:0}#setupForm>.setup-actions-top{order:1}#smart-card{order:10}#delays-card{order:20}#weather-card{order:30}#tank-card{order:40}#rain-card{order:50}#timezone-card{order:60}#pins-card{order:70}#i2c-card{order:80}#buttons-card{order:90}#display-card{order:100}#advanced-card{order:110}#mqtt-card{order:120}</style>");
+  html += F("<style>#setupForm{display:flex;flex-direction:column}.card.narrow{width:100mm;max-width:100%;align-self:center}.card.narrow .cols2{grid-template-columns:1fr}.card.narrow label{min-width:140px}#setupForm>.setup-nav{order:0}#setupForm>.setup-actions-top{order:1}#smart-card{order:10}#delays-card{order:20}#weather-card{order:30}#tank-card{order:40}#rain-card{order:50}#timezone-card{order:60}#pins-card{order:70}#i2c-card{order:80}#buttons-card{order:90}#display-card{order:100}#advanced-card{order:110}#mqtt-card{order:120}</style>");
   html += F("<form id='setupForm' action='/configure' method='POST' novalidate>");
   html += F("<div class='setup-nav'><a href='#smart-card'>Smart Watering</a><a href='#delays-card'>Delays &amp; Pause</a><a href='#weather-card'>Forecast</a><a href='#tank-card'>Water &amp; Tank</a><a href='#rain-card'>Rain Inputs</a><a href='#timezone-card'>Timezone</a><a href='#pins-card'>GPIO</a><a href='#i2c-card'>I2C</a><a href='#buttons-card'>Buttons</a><a href='#display-card'>Display</a><a href='#advanced-card'>TFT Pins</a><a href='#mqtt-card'>MQTT</a></div>");
   html += F("<div class='setup-actions-top'><button class='btn' type='submit' id='btn-save-setup'>Save Changes</button><a class='btn-alt' href='/'>Home</a><button class='btn-alt' type='button' id='btn-clear-cooldown'>Clear After-Rain Delay</button><button class='btn btn-danger' type='button' onclick=\"if(confirm('Reboot controller now?'))fetch('/reboot',{method:'POST'})\">Reboot</button><span class='save-confirm' id='save-confirm'>Saved</span></div>");
