@@ -22,10 +22,6 @@ Built for real-world irrigation setups, from small home gardens to larger multi-
 
 <img width="1862" height="1014" alt="image" src="https://github.com/user-attachments/assets/df3b2d56-5021-43df-a429-55fd85ebc625" />
 
-**(If you controller is reseting when the relay turns off it will need a flyback diode 1n4007 across - and + of solenoid wiring.)**
-<img width="294" height="199" alt="image" src="https://github.com/user-attachments/assets/8ce21f2a-198a-449b-9082-7f07cec89855" />
-
-
 ### ESP32-S3 + 6 Zone/Relay + 24V AC
 
 <img width="484" height="457" alt="ESP32-S3 6 Zone 24V AC" src="https://github.com/user-attachments/assets/f9d2c234-1e8a-4ff2-8e8d-51a5bdf73905" />
@@ -192,6 +188,9 @@ The dashboard includes:
 ---
 
 ## 🔌 Hardware and I/O
+
+**(If you controller is reseting when the relay turns off it will need a flyback diode 1n4007 across - and + of solenoid wiring.)**
+<img width="294" height="199" alt="image" src="https://github.com/user-attachments/assets/8ce21f2a-198a-449b-9082-7f07cec89855" />
 
 ### KC868 Support
 
