@@ -1011,8 +1011,8 @@ static String meteoBaseUrl(const String& model, bool useForecastEndpoint) {
 }
 
 static String httpGetMeteo(const String& url, int& code, uint16_t timeoutMs) {
-  HTTPClient http;
-  WiFiClientSecure secure;
+  WiFiClientSecure secure;   // <-- This one should be created first
+  HTTPClient http;           // <-- This one second
   secure.setInsecure();
   http.setTimeout(timeoutMs);
   http.begin(secure, url);
@@ -6108,8 +6108,8 @@ void handleRoot() {
 
   // --- Hero ---
   html += F("<div class='wrap'><div class='hero-shell glass'><div class='hero-grid'>");
-  html += F("<div class='hero-copy'><div class='hero-kicker'>16-Zone irrigation</div>");
-  html += F("<h1 class='hero-title'>ESP32 Irrigation Valve Control</h1>");
+  html += F("<div class='hero-copy'><div class='hero-kicker'>1-16-Zone irrigation</div>");
+  html += F("<h1 class='hero-title'>Irrigation Valve Controller</h1>");
   html += F("<p class='hero-text'></p>");
   html += F("<div class='hero-action-stack'><div class='hero-actions'><a class='btn' href='/setup'>Setup</a><a class='btn btn-secondary' href='/events'>Events</a><a class='btn btn-secondary' href='/diagnostics'>Diagnostics</a></div><div class='hero-date' id='heroDate'>");
   html += heroDateStr;
