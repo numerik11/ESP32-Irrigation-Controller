@@ -113,7 +113,7 @@ static int16_t tftPanelWidth  = TFT_W_DEFAULT;
 static int16_t tftPanelHeight = TFT_H_DEFAULT;
 static uint8_t tftRotation = 0; // ST7789 rotation: 0..3
 
-Adafruit_ST7789 tft(&SPI, -1, -1, -1);
+Adafruit_ST7789 tft = Adafruit_ST7789(&SPI, -1, -1, -1);
 
 // ---------- OLED ----------
 #define SCREEN_ADDRESS 0x3C
@@ -1753,7 +1753,7 @@ static bool initLocalDhtSensor() {
   if (localDht && localDhtActivePin == dhtSensorPin) return true;
 
   resetLocalDhtSensor();
-  localDht = new (std::nothrow) DHT((uint8_t)dhtSensorPin, DHT22);
+  localDht = new DHT((uint8_t)dhtSensorPin, DHT22);
   if (!localDht) return false;
   localDhtActivePin = dhtSensorPin;
   localDht->begin();
@@ -2459,7 +2459,7 @@ void setup() {
   if (!displayEnabled) {
     Serial.println("[DISPLAY] disabled");
   } else if (displayUseTft) {
-    new (&tft) Adafruit_ST7789(&SPI, tftCsPin, tftDcPin, tftRstPin);
+    tft = Adafruit_ST7789(&SPI, tftCsPin, tftDcPin, tftRstPin);
     SPI.begin(tftSclkPin, -1, tftMosiPin, tftCsPin);
 
     tftInitBacklightPwm();
