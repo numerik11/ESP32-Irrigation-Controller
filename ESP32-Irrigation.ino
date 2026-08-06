@@ -286,6 +286,7 @@ enum LocalClimateSource : uint8_t {
   CLIMATE_AHT20_I2C = 2,
   CLIMATE_DHT22_GPIO = 3
 };
+static LocalClimateSource parseClimateSource(const String& raw);
 LocalClimateSource climateSource = CLIMATE_OPEN_METEO;
 int dhtSensorPin = -1;
 int localDhtActivePin = -1;
