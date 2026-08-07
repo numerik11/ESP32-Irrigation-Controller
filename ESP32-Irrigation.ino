@@ -141,6 +141,7 @@ static const uint16_t C_ACCENT = RGB(250, 210, 79);
 static const uint16_t C_GOOD   = RGB(70, 200, 140);
 static const uint16_t C_WARN   = RGB(255, 190, 70);
 static const uint16_t C_BAD    = RGB(255, 110, 90);
+static const uint16_t C_BLUE   = RGB(72, 170, 255);
 
 static void drawCard(int x,int y,int w,int h,uint16_t fill,uint16_t edge){
   tft.fillRect(x, y, w, h, fill);
@@ -152,11 +153,11 @@ static void drawCard(int x,int y,int w,int h,uint16_t fill,uint16_t edge){
 static void drawPressureTrendArrow(int x, int y, int trend, uint16_t bg) {
   tft.fillRect(x, y, 9, 9, bg);
   if (trend > 0) {
-    tft.fillTriangle(x + 4, y, x, y + 5, x + 8, y + 5, C_GOOD);
-    tft.drawFastVLine(x + 4, y + 5, 4, C_GOOD);
+    tft.fillTriangle(x + 4, y, x, y + 5, x + 8, y + 5, C_BAD);
+    tft.drawFastVLine(x + 4, y + 5, 4, C_BAD);
   } else if (trend < 0) {
-    tft.fillTriangle(x, y + 3, x + 8, y + 3, x + 4, y + 8, C_BAD);
-    tft.drawFastVLine(x + 4, y, 4, C_BAD);
+    tft.fillTriangle(x, y + 3, x + 8, y + 3, x + 4, y + 8, C_BLUE);
+    tft.drawFastVLine(x + 4, y, 4, C_BLUE);
   }
 }
 
