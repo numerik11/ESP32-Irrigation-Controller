@@ -149,6 +149,17 @@ static void drawCard(int x,int y,int w,int h,uint16_t fill,uint16_t edge){
   tft.drawPixel(x, y+h-1, fill); tft.drawPixel(x+w-1, y+h-1, fill);
 }
 
+static void drawPressureTrendArrow(int x, int y, int trend, uint16_t bg) {
+  tft.fillRect(x, y, 9, 9, bg);
+  if (trend > 0) {
+    tft.fillTriangle(x + 4, y, x, y + 5, x + 8, y + 5, C_GOOD);
+    tft.drawFastVLine(x + 4, y + 5, 4, C_GOOD);
+  } else if (trend < 0) {
+    tft.fillTriangle(x, y + 3, x + 8, y + 3, x + 4, y + 8, C_BAD);
+    tft.drawFastVLine(x + 4, y, 4, C_BAD);
+  }
+}
+
 static void drawTopBar(const char* title, const char* pill, uint16_t pillColor){
   const int W = tft.width();
   tft.fillRect(0, 0, W, 34, C_PANEL);
@@ -438,6 +449,8 @@ float rain3hNow = 0.0f;  // kept for compatibility
 float curTempC = NAN;
 float curFeelsC = NAN;
 float curPressureHpa = NAN;
+float prevPressureHpa = NAN;
+int   curPressureTrend = 0; // -1 falling, 0 steady/unknown, 1 rising
 float curWindMs = NAN;
 float curGustMs = NAN;
 float curWindDirDeg = NAN;
@@ -1170,6 +1183,92 @@ static void drawWindCompass(int cx, int cy, int r, float deg, uint16_t bg) {
   tft.getTextBounds(dir, 0, 0, &bx, &by, &bw, &bh);
   tft.setCursor(cx - (int)bw / 2, cy + r + 2);
   tft.print(dir);
+}
+
+static void drawWeatherCloud(int x, int y, int s, uint16_t color) {
+  const int cy = y + s * 3 / 5;
+  tft.fillCircle(x + s * 3 / 10, cy, max(2, s / 5), color);
+  tft.fillCircle(x + s / 2, y + s * 9 / 20, max(3, s / 4), color);
+  tft.fillCircle(x + s * 7 / 10, cy, max(2, s / 5), color);
+  tft.fillRoundRect(x + s / 5, cy - s / 7, s * 3 / 5, s / 3, max(2, s / 8), color);
+}
+
+static void drawWeatherRain(int x, int y, int s, uint16_t color, bool heavy) {
+  const int top = y + s * 7 / 10;
+  const int len = max(4, s / 5);
+  for (int i = 0; i < (heavy ? 4 : 3); ++i) {
+    int dx = x + s / 5 + i * s / 5;
+    tft.drawLine(dx, top + (i & 1), dx - s / 12, top + len + (i & 1), color);
+  }
+}
+
+static void drawWeatherSnow(int x, int y, int s, uint16_t color) {
+  const int top = y + s * 7 / 10;
+  for (int i = 0; i < 3; ++i) {
+    int cx = x + s / 4 + i * s / 4;
+    int cy = top + ((i & 1) ? s / 8 : 0);
+    tft.drawFastHLine(cx - 2, cy, 5, color);
+    tft.drawFastVLine(cx, cy - 2, 5, color);
+  }
+}
+
+static void drawWeatherIcon(int x, int y, int s, int code, uint16_t bg) {
+  if (s < 18) s = 18;
+  tft.fillRect(x, y, s, s, bg);
+
+  const uint16_t sun = C_ACCENT;
+  const uint16_t cloud = RGB(178, 194, 220);
+  const uint16_t rain = RGB(72, 170, 255);
+  const uint16_t snow = RGB(225, 245, 255);
+  const uint16_t fog = RGB(150, 165, 190);
+  const uint16_t storm = RGB(255, 215, 80);
+
+  if (code < 0) {
+    tft.drawCircle(x + s / 2, y + s / 2, s / 3, C_EDGE);
+    tft.setTextSize(1);
+    tft.setTextColor(C_MUTED);
+    tft.setCursor(x + s / 2 - 3, y + s / 2 - 3);
+    tft.print("?");
+    return;
+  }
+
+  if (code == 0) {
+    int cx = x + s / 2, cy = y + s / 2, r = s / 5;
+    tft.fillCircle(cx, cy, r, sun);
+    tft.drawFastHLine(x + 2, cy, s - 4, sun);
+    tft.drawFastVLine(cx, y + 2, s - 4, sun);
+    tft.drawLine(x + s / 5, y + s / 5, x + s * 4 / 5, y + s * 4 / 5, sun);
+    tft.drawLine(x + s * 4 / 5, y + s / 5, x + s / 5, y + s * 4 / 5, sun);
+  } else if (code == 1 || code == 2) {
+    tft.fillCircle(x + s / 3, y + s / 3, s / 5, sun);
+    drawWeatherCloud(x + s / 8, y + s / 5, s * 4 / 5, cloud);
+  } else if (code == 3) {
+    drawWeatherCloud(x + s / 10, y + s / 5, s * 4 / 5, cloud);
+    drawWeatherCloud(x + s / 5, y + s / 8, s * 7 / 10, RGB(135, 152, 180));
+  } else if (code == 45 || code == 48) {
+    drawWeatherCloud(x + s / 10, y + s / 8, s * 4 / 5, cloud);
+    for (int i = 0; i < 3; ++i) {
+      int yy = y + s * 13 / 20 + i * s / 8;
+      tft.drawFastHLine(x + s / 8, yy, s * 3 / 4, fog);
+    }
+  } else if ((code >= 51 && code <= 67) || (code >= 80 && code <= 82)) {
+    drawWeatherCloud(x + s / 10, y + s / 8, s * 4 / 5, cloud);
+    drawWeatherRain(x + s / 10, y + s / 8, s * 4 / 5, rain, code >= 63 || code >= 81);
+  } else if ((code >= 71 && code <= 77) || (code >= 85 && code <= 86)) {
+    drawWeatherCloud(x + s / 10, y + s / 8, s * 4 / 5, cloud);
+    drawWeatherSnow(x + s / 10, y + s / 8, s * 4 / 5, snow);
+  } else if (code >= 95) {
+    drawWeatherCloud(x + s / 10, y + s / 8, s * 4 / 5, cloud);
+    tft.fillTriangle(x + s / 2, y + s * 11 / 20,
+                     x + s * 2 / 5, y + s * 7 / 10,
+                     x + s * 3 / 5, y + s * 7 / 10, storm);
+    tft.fillTriangle(x + s * 3 / 5, y + s * 7 / 10,
+                     x + s * 9 / 20, y + s * 19 / 20,
+                     x + s * 7 / 10, y + s * 7 / 10, storm);
+  } else {
+    tft.drawCircle(x + s / 2, y + s / 2, s / 3, C_EDGE);
+    tft.drawFastHLine(x + s / 3, y + s / 2, s / 3, C_MUTED);
+  }
 }
 
 static time_t parseLocalIsoTime(const char* s) {
@@ -3735,9 +3834,11 @@ static float last24hActualRain() {
 }
 
 bool refreshCurrentWeatherSnapshotFromCache() {
+  const float oldPressure = curPressureHpa;
   curTempC = NAN;
   curFeelsC = NAN;
   curPressureHpa = NAN;
+  curPressureTrend = 0;
   curWindMs = NAN;
   curGustMs = NAN;
   curWindDirDeg = NAN;
@@ -3762,6 +3863,14 @@ bool refreshCurrentWeatherSnapshotFromCache() {
   float pmsl = cur["pressure_msl"] | NAN;
   float psfc = cur["surface_pressure"] | NAN;
   curPressureHpa = isfinite(pmsl) ? pmsl : psfc;
+  if (isfinite(curPressureHpa) && isfinite(oldPressure)) {
+    const float delta = curPressureHpa - oldPressure;
+    curPressureTrend = (delta > 0.2f) ? 1 : ((delta < -0.2f) ? -1 : 0);
+    prevPressureHpa = oldPressure;
+  } else {
+    curPressureTrend = 0;
+    prevPressureHpa = NAN;
+  }
   curWindMs = cur["wind_speed_10m"] | NAN;
   curGustMs = cur["wind_gusts_10m"] | NAN;
   curWindDirDeg = cur["wind_direction_10m"] | NAN;
@@ -4749,6 +4858,7 @@ void HomeScreen() {
     static int lastGust = -1;
     static int lastFeels = -1000;
     static int lastPressure = -1;
+    static int lastPressureTrend = 99;
     static int lastCompassWindDir = -1;
     static int lastCompassWindTenths = 10000;
     static int lastCompassGust = -1;
@@ -4788,6 +4898,7 @@ void HomeScreen() {
       lastGust = -1;
       lastFeels = -1000;
       lastPressure = -1;
+      lastPressureTrend = 99;
       lastCompassWindDir = -1;
       lastCompassWindTenths = 10000;
       lastCompassGust = -1;
@@ -4961,10 +5072,15 @@ void HomeScreen() {
       
       tft.setTextSize(1);
       tft.setTextColor(C_MUTED);
-      tft.setCursor(centerX + 58, cardY + 25);
+      tft.setCursor(centerX + 58, cardY + 11);
       if (hum >= 0) { tft.print(hum); tft.print("%"); }
       else tft.print("--%");
       
+      const int iconSize = min(28, max(20, weatherH - 28));
+      const int iconX = centerX + centerW - iconSize - 8;
+      const int iconY = cardY + max(22, weatherH - iconSize - 19);
+      drawWeatherIcon(iconX, iconY, iconSize, curWeatherCode, C_PANEL);
+
       // Condition
       tft.setCursor(centerX + 8, cardY + 42);
       const char* cond = (curWeatherCode >= 0) ? meteoCodeToMain(curWeatherCode) : "--";
@@ -5013,6 +5129,7 @@ void HomeScreen() {
 
     // ========== WEATHER DETAILS CARD ==========
     if (fullRedraw || feelsRounded != lastFeels || pressureRounded != lastPressure ||
+        curPressureTrend != lastPressureTrend ||
         rain1hVal != lastRain1h || rain24hVal != lastRain24h ||
         windDirRounded != lastCompassWindDir || windTenths != lastCompassWindTenths ||
         gustVal != lastCompassGust) {
@@ -5034,6 +5151,8 @@ void HomeScreen() {
       if (pressureRounded < 0) tft.print("--");
       else tft.print(pressureRounded);
       tft.print("hPa");
+      drawPressureTrendArrow(min(rightX + rightW - 16, rightX + 92), cardY + 40,
+                             pressureRounded < 0 ? 0 : curPressureTrend, C_PANEL);
 
       tft.setTextColor(C_MUTED);
       tft.setCursor(rightX + 8, cardY + 58);
@@ -5068,6 +5187,7 @@ void HomeScreen() {
 
       lastFeels = feelsRounded;
       lastPressure = pressureRounded;
+      lastPressureTrend = curPressureTrend;
       lastRain1h = rain1hVal;
       lastRain24h = rain24hVal;
       lastCompassWindDir = windDirRounded;
@@ -5097,6 +5217,7 @@ void HomeScreen() {
     static int lastMoistureSkip = -1;
     static int lastFeels = -1000;
     static int lastPressure = -1;
+    static int lastPressureTrend = 99;
     static int lastRain1h = -1;
     static int lastRain24h = -1;
     static int lastGust = -1;
@@ -5145,6 +5266,7 @@ void HomeScreen() {
       lastMoistureSkip = -1;
       lastFeels = -1000;
       lastPressure = -1;
+      lastPressureTrend = 99;
       lastRain1h = -1;
       lastRain24h = -1;
       lastGust = -1;
@@ -5278,9 +5400,13 @@ void HomeScreen() {
 
     if (fullRedraw || tempRounded != lastTemp || hum != lastHum ||
         windTenths != lastWindTenths || windDirRounded != lastWindDir || curWeatherCode != lastCondCode ||
-        feelsRounded != lastFeels || pressureRounded != lastPressure || rain1hVal != lastRain1h ||
+        feelsRounded != lastFeels || pressureRounded != lastPressure || curPressureTrend != lastPressureTrend ||
+        rain1hVal != lastRain1h ||
         rain24hVal != lastRain24h || gustVal != lastGust) {
       tft.fillRect(16, envY + 18, W - 32, envH - 24, C_PANEL);
+      const int iconSize = min(38, max(26, envH - 66));
+      drawWeatherIcon(W - iconSize - 18, envY + 8, iconSize, curWeatherCode, C_PANEL);
+
       tft.setTextSize(2);
       tft.setTextColor(C_TEXT);
       tft.setCursor(16, envY + 20);
@@ -5315,6 +5441,7 @@ void HomeScreen() {
       tft.print("  ");
       if (pressureRounded < 0) tft.print("-- hPa");
       else { tft.print(pressureRounded); tft.print(" hPa"); }
+      drawPressureTrendArrow(W - 28, envY + 66, pressureRounded < 0 ? 0 : curPressureTrend, C_PANEL);
 
       tft.setTextColor(C_MUTED);
       tft.setCursor(16, envY + 80);
@@ -5330,6 +5457,7 @@ void HomeScreen() {
       lastCondCode = curWeatherCode;
       lastFeels = feelsRounded;
       lastPressure = pressureRounded;
+      lastPressureTrend = curPressureTrend;
       lastRain1h = rain1hVal;
       lastRain24h = rain24hVal;
       lastGust = gustVal;
@@ -7104,6 +7232,9 @@ void handleSetupPage() {
   html += F("<option value='aht20'"); html += (climateSource == CLIMATE_AHT20_I2C ? " selected" : ""); html += F(">AHT20/AHT21 on I2C</option>");
   html += F("<option value='dht22'"); html += (climateSource == CLIMATE_DHT22_GPIO ? " selected" : ""); html += F(">DHT22/AM2302 on GPIO</option>");
   html += F("</select><small>Local sensors replace dashboard and Smart Watering temperature/humidity; rain and wind still use Open-Meteo.</small></div>");
+  html += F("<div class='row'><label>Temperature Unit</label><select class='in-sm' name='tempUnit' id='tempUnitSelect'>");
+  html += F("<option value='C'"); html += (!tempUseFahrenheit ? " selected" : ""); html += F(">Celsius (C)</option>");
+  html += F("<option value='F'"); html += (tempUseFahrenheit ? " selected" : ""); html += F(">Fahrenheit (F)</option></select><small>Dashboard, screen, and Smart Watering thresholds</small></div>");
   html += F("<div class='row'><label>DHT22 GPIO</label><input class='in-xs' type='number' min='-1' max='");
   html += String(uiMaxGpio); html += F("' name='dhtSensorPin' value='"); html += String(dhtSensorPin);
   html += F("'><small>Use -1 when disconnected. AM2302 uses the same DHT22 setting.</small></div>");
@@ -7228,9 +7359,6 @@ void handleSetupPage() {
   html += F("<option value='12'");
   html += (!clockUse24Hour ? " selected" : "");
   html += F(">12 hour</option></select><small>Controls the clock shown on the screen</small></div>");
-  html += F("<div class='row'><label>Temperature Unit</label><select class='in-sm' name='tempUnit' id='tempUnitSelect'>");
-  html += F("<option value='C'"); html += (!tempUseFahrenheit ? " selected" : ""); html += F(">Celsius (C)</option>");
-  html += F("<option value='F'"); html += (tempUseFahrenheit ? " selected" : ""); html += F(">Fahrenheit (F)</option></select><small>Homepage, screen, and Smart Watering thresholds</small></div>");
   html += F("<div class='row' data-tft-only><label>TFT Rotation</label><select class='in-sm' name='tftRotation'>");
   html += F("<option value='0'"); html += (tftRotation == 0 ? " selected" : ""); html += F(">0</option>");
   html += F("<option value='1'"); html += (tftRotation == 1 ? " selected" : ""); html += F(">1</option>");
@@ -8890,6 +9018,8 @@ void handleConfigure() {
     curTempC            = NAN;
     curFeelsC           = NAN;
     curPressureHpa      = NAN;
+    prevPressureHpa     = NAN;
+    curPressureTrend    = 0;
     curWindMs           = NAN;
     curGustMs           = NAN;
     curWindDirDeg       = NAN;
