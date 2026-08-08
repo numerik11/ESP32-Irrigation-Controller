@@ -1,6 +1,8 @@
-# ESP32 Irrigation Web Flasher (NOT READY)
+# ESP32 Irrigation Web Flasher 
 
 This folder contains a browser-based USB firmware installer for the ESP32 irrigation firmware.
+
+Goto: https://numerik11.github.io/ESP32-Irrigation-Controller/web-flasher/
 
 ## Boards
 
