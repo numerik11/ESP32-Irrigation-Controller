@@ -21,6 +21,7 @@ Built for real-world irrigation setups, from small home gardens to larger multi-
 ---
 Setup
 <img width="300" height="441" alt="image" src="https://github.com/user-attachments/assets/ebdb1294-a135-4ca0-a4f9-31c44ddc50de" />
+
 Events
 <img width="400" height="448" alt="image" src="https://github.com/user-attachments/assets/46bd8e74-fc39-48e6-be24-0bccc911c33f" />
 
