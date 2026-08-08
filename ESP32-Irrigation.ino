@@ -6630,7 +6630,7 @@ void handleRoot() {
   html += F("function setWindCompass(deg){const c=document.getElementById('windCompass');if(!c)return;const n=Number(deg);const ok=Number.isFinite(n);c.classList.toggle('is-empty',!ok);if(ok)c.style.setProperty('--dir',(((n%360)+360)%360)+'deg');}");
   html += F("function weatherIconClass(text){const t=String(text||'').toLowerCase();if(!t||t==='--')return'wi-unknown';if(t.includes('thunder'))return'wi-storm';if(t.includes('freez')||t.includes('ice')||t.includes('rime'))return'wi-freezing';if(t.includes('snow'))return'wi-snow';if(t.includes('shower'))return'wi-showers';if(t.includes('drizzle'))return'wi-drizzle';if(t.includes('rain'))return'wi-rain';if(t.includes('fog')||t.includes('mist')||t.includes('haze'))return'wi-fog';if(t.includes('overcast'))return'wi-overcast';if(t.includes('partly')||t.includes('mainly'))return'wi-partly';if(t.includes('cloud'))return'wi-cloud';if(t.includes('clear')||t.includes('sun'))return'wi-clear';return'wi-unknown';}");
   html += F("function setWeatherIcon(text){const el=document.getElementById('condIcon');if(!el)return;el.className='weather-icon '+weatherIconClass(text);el.title=text||'Unknown';}");
-  html += F("async function refreshStatus(){try{const r=await fetch('/status');const st=await r.json();");
+  html += F("async function refreshStatus(){try{const r=await fetch('/status',{cache:'no-store'});const st=await r.json();");
   html += F("if(typeof st.deviceEpoch==='number' && st.deviceEpoch>0 && _devEpoch===null){ startDeviceClock(st.deviceEpoch); }");
   html += F("const rb=document.getElementById('rainBadge');const wb=document.getElementById('windBadge');");
   html += F("if(rb){const rc=st.rainDelayCause||'Active';rb.className='badge '+(st.rainDelayActive?'b-bad':'b-ok');rb.innerHTML='Rain: <b>'+(st.rainDelayActive?rc:'Off')+'</b>';}");
@@ -6738,7 +6738,7 @@ void handleRoot() {
   html += F("if(hs) hs.textContent=masterOff?'Automation blocked':(epoch?(name+(dur>0?(' - '+fmtDur(dur)):'')):(st.rainDelayActive?'Waiting for rain delay to clear':'No queued run'));");
   html += F("})();");
 
-  html += F("}catch(e){} } setInterval(refreshStatus,2500); refreshStatus();");
+  html += F("}catch(e){} } setInterval(refreshStatus,1000); refreshStatus();");
 
   // expose zonesCount & Save All
   html += F("const ZC="); html += String(zonesCount); html += F(";");
