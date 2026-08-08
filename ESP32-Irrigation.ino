@@ -7488,14 +7488,14 @@ void handleSetupPage() {
     html += F("><span>LOW = ON</span></label><small>-1 = unused</small></div>");
   }
   html += F("<div class='row helptext'><label></label><small>Use output-capable GPIOs only. Avoid boot strapping pins, flash pins, and any pins already used by display, I2C, sensors, or buttons.</small></div>");
-  html += F("<div class='row switchline'><label>City Water Relay GPIO</label><input class='in-xs' type='number' min='0' max='"); html += String(uiMaxGpio); html += F("' name='mainsPin' value='");
+  html += F("<div class='row switchline'><label>City Water Relay GPIO</label><input class='in-xs' type='number' min='-1' max='"); html += String(uiMaxGpio); html += F("' name='mainsPin' value='");
   html += String(mainsPin); html += F("'><label class='chip'><input type='checkbox' name='mainsPinLow' ");
   html += (mainsGpioActiveLow ? "checked" : "");
-  html += F("><span>LOW = ON</span></label><small>City water relay. Use a check/backflow prevention device.</small></div>");
-  html += F("<div class='row switchline'><label>Tank Relay GPIO</label><input class='in-xs' type='number' min='0' max='"); html += String(uiMaxGpio); html += F("' name='tankPin' value='");
+  html += F("><span>LOW = ON</span></label><small>-1 disables. City water relay. Use a check/backflow prevention device.</small></div>");
+  html += F("<div class='row switchline'><label>Tank Relay GPIO</label><input class='in-xs' type='number' min='-1' max='"); html += String(uiMaxGpio); html += F("' name='tankPin' value='");
   html += String(tankPin); html += F("'><label class='chip'><input type='checkbox' name='tankPinLow' ");
   html += (tankGpioActiveLow ? "checked" : "");
-  html += F("><span>LOW = ON</span></label><small>Tank pump/source relay output.</small></div>");
+  html += F("><span>LOW = ON</span></label><small>-1 disables. Tank pump/source relay output.</small></div>");
   html += F("<div class='row switchline'><label>Power Supply Relay GPIO</label><input class='in-xs' type='number' min='-1' max='"); html += String(uiMaxGpio); html += F("' name='powerSupplyPin' value='");
   html += String(powerSupplyPin); html += F("'><label class='chip'><input type='checkbox' name='powerSupplyPinLow' ");
   html += (powerSupplyActiveLow ? "checked" : "");
@@ -8142,11 +8142,11 @@ void loadConfig() {
   }
   if ((s = _safeReadLine(f)).length()) {
     int p = s.toInt();
-    if (isValidOutputPin(p)) mainsPin = p;
+    if (p == -1 || isValidOutputPin(p)) mainsPin = p;
   }
   if ((s = _safeReadLine(f)).length()) {
     int p = s.toInt();
-    if (isValidOutputPin(p)) tankPin  = p;
+    if (p == -1 || isValidOutputPin(p)) tankPin  = p;
   }
   if (f.available()) {
     if ((s = _safeReadLine(f)).length()) {
@@ -8785,12 +8785,12 @@ void handleConfigure() {
   }
   if (server.hasArg("mainsPin")) {
     int p = server.arg("mainsPin").toInt();
-    if (isValidOutputPin(p)) mainsPin = p;
+    if (p == -1 || isValidOutputPin(p)) mainsPin = p;
   }
   mainsGpioActiveLow = server.hasArg("mainsPinLow");
   if (server.hasArg("tankPin")) {
     int p = server.arg("tankPin").toInt();
-    if (isValidOutputPin(p)) tankPin = p;
+    if (p == -1 || isValidOutputPin(p)) tankPin = p;
   }
   tankGpioActiveLow = server.hasArg("tankPinLow");
   if (server.hasArg("powerSupplyPin")) {
