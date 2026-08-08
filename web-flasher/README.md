@@ -1,4 +1,4 @@
-# ESP32 Irrigation Web Flasher(NOT READY)
+# ESP32 Irrigation Web Flasher (NOT READY)
 
 This folder contains a browser-based USB firmware installer for the ESP32 irrigation firmware.
 
@@ -9,13 +9,15 @@ This folder contains a browser-based USB firmware installer for the ESP32 irriga
 
 ## Use
 
-Open `https://numerik11.github.io/ESP32-Irrigation-Controller/web-flasher/` from a local web server or host this folder on HTTPS, then use Chrome or Edge.
+Use Chrome or Edge. ESP Web Tools needs Web Serial, so Firefox and Safari will not work.
 
-If GitHub Pages is enabled for this repository, the flasher should be available at:
+When GitHub Pages is enabled for this repository, open:
 
 ```text
 https://numerik11.github.io/ESP32-Irrigation-Controller/web-flasher/
 ```
+
+If that URL returns `404`, GitHub Pages has not been enabled or has not finished deploying yet.
 
 For local testing:
 
@@ -29,6 +31,8 @@ Then open:
 ```text
 http://localhost:8080
 ```
+
+Choose the correct board, click Install, and select the ESP serial port when the browser asks.
 
 ## Refresh Binaries
 
