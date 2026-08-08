@@ -6,7 +6,7 @@ Goto: https://numerik11.github.io/ESP32-Irrigation-Controller/web-flasher/
 
 ## Boards
 
-- Wemos D1 R32
+- ESP32 Dev Module
 - ESP32-S3 DevKitC-1
 
 ## Use

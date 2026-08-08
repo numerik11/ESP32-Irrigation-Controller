@@ -1,5 +1,5 @@
 {
-  "name": "ESP32 Irrigation Controller - Wemos D1 R32",
+  "name": "ESP32 Irrigation Controller - ESP32 Dev Module",
   "version": "1.0.0",
   "new_install_prompt_erase": true,
   "builds": [
