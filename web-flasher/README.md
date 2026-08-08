@@ -5,7 +5,6 @@ This folder contains a browser-based USB firmware installer for the ESP32 irriga
 ## Boards
 
 - Wemos D1 R32
-- ESP32-S2 Mini
 - ESP32-S3 DevKitC-1
 
 ## Use
