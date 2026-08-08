@@ -12,6 +12,7 @@ Built for real-world irrigation setups, from small home gardens to larger multi-
 
 Goto: https://numerik11.github.io/ESP32-Irrigation-Controller/web-flasher/ 
 To flash project via Internet
+
 ---
 
 ## 📸 Screenshots
