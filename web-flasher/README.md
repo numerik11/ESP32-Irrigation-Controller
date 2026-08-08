@@ -1,4 +1,4 @@
-# ESP32 Irrigation Web Flasher
+# ESP32 Irrigation Web Flasher(NOT READY)
 
 This folder contains a browser-based USB firmware installer for the ESP32 irrigation firmware.
 
