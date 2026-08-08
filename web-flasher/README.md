@@ -9,7 +9,7 @@ This folder contains a browser-based USB firmware installer for the ESP32 irriga
 
 ## Use
 
-Open `index.html` from a local web server or host this folder on HTTPS, then use Chrome or Edge.
+Open `https://numerik11.github.io/ESP32-Irrigation-Controller/web-flasher/` from a local web server or host this folder on HTTPS, then use Chrome or Edge.
 
 If GitHub Pages is enabled for this repository, the flasher should be available at:
 
