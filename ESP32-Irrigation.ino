@@ -2364,9 +2364,9 @@ void handleDiagnosticsPage() {
   html += F("<section class='grid metric-grid'>");
   html += F("<div class='card metric-card'><div class='k'>Uptime</div><div class='v'>"); html += formatRuntimeClock(uptimeSec); html += F("</div></div>");
   html += F("<div class='card metric-card'><div class='k'>Boot Count</div><div class='v'>"); html += String(bootCount); html += F("</div><div class='k'>Reset: "); html += resetReasonText(esp_reset_reason()); html += F("</div></div>");
-  html += F("<div class='card metric-card'><div class='k'>WiFi</div><div class='v status ");
+  html += F("<div class='card metric-card'><div class='k'>WiFi</div><div id='diagWifiIp' class='v status ");
   html += (WiFi.status() == WL_CONNECTED ? "ok" : "bad"); html += F("'>");
-  html += (WiFi.status() == WL_CONNECTED ? WiFi.localIP().toString() : String("Disconnected")); html += F("</div><div class='k'>RSSI ");
+  html += (WiFi.status() == WL_CONNECTED ? WiFi.localIP().toString() : String("Disconnected")); html += F("</div><div class='k' id='diagWifiRssi'>RSSI ");
   html += String(rssi); html += F(" dBm - "); html += rssiLabel; html += F("</div></div>");
   html += F("<div class='card metric-card'><div class='k'>Heap Free</div><div class='v'>"); html += String(ESP.getFreeHeap()); html += F(" B</div><div class='k'>Min ");
   html += String(ESP.getMinFreeHeap()); html += F(" B</div></div>");
@@ -2388,7 +2388,7 @@ void handleDiagnosticsPage() {
   html += F("<div class='card status-card'><div class='card-head'><h2>Network</h2><span class='card-tag'>Connectivity</span></div><table>");
   html += F("<tr><td>SSID</td><td>"); html += WiFi.SSID(); html += F("</td></tr>");
   html += F("<tr><td>Hostname</td><td>"); html += WiFi.getHostname(); html += F("</td></tr>");
-  html += F("<tr><td>WiFi signal</td><td>"); html += String(rssi); html += F(" dBm - "); html += rssiLabel; html += F("</td></tr>");
+  html += F("<tr><td>WiFi signal</td><td id='diagNetworkWifi'>"); html += String(rssi); html += F(" dBm - "); html += rssiLabel; html += F("</td></tr>");
   html += F("<tr><td>MQTT</td><td class='"); html += (_mqtt.connected() ? "ok" : (mqttEnabled ? "warn" : "")); html += F("'>");
   html += (mqttEnabled ? (_mqtt.connected() ? "connected" : "offline") : "disabled"); html += F("</td></tr>");
   html += F("<tr><td>Base topic</td><td>"); html += mqttBase; html += F("</td></tr>");
@@ -2468,7 +2468,11 @@ void handleDiagnosticsPage() {
     appendPinRow(name, pinText(zonePins[z]), notes);
   }
   html += F("</tbody></table></div>");
-  html += F("</section></main></body></html>");
+  html += F("</section></main><script>");
+  html += F("function wifiQuality(v,c){if(!c)return'Disconnected';if(typeof v!=='number')return'Connected';if(v>=-50)return'Excellent';if(v>=-60)return'Strong';if(v>=-67)return'Good';if(v>=-75)return'Fair';if(v>=-82)return'Weak';return'Very weak';}");
+  html += F("async function refreshWifiStatus(){try{const r=await fetch('/status',{cache:'no-store'});const s=await r.json();const connected=!!s.wifiConnected;const rssi=(typeof s.rssi==='number')?s.rssi:null;const quality=wifiQuality(rssi,connected);const signal=(rssi===null?'--':rssi)+' dBm - '+quality;const ip=document.getElementById('diagWifiIp');const rr=document.getElementById('diagWifiRssi');const nw=document.getElementById('diagNetworkWifi');if(ip){ip.textContent=connected?(s.wifiIp||'Connected'):'Disconnected';ip.className='v status '+(connected?'ok':'bad');}if(rr)rr.textContent='RSSI '+signal;if(nw)nw.textContent=signal;}catch(e){}}");
+  html += F("setInterval(refreshWifiStatus,60000);refreshWifiStatus();");
+  html += F("</script></body></html>");
 
   server.send(200, "text/html", html);
 }
@@ -2720,6 +2724,8 @@ void setup() {
   doc["tankEmptyRaw"]    = tankEmptyRaw;
   doc["tankFullRaw"]     = tankFullRaw;
   doc["sourceMode"]      = sourceModeText();
+  doc["wifiConnected"]   = (WiFi.status() == WL_CONNECTED);
+  doc["wifiIp"]          = WiFi.localIP().toString();
   doc["rssi"]            = WiFi.RSSI();
   doc["uptimeSec"]       = (millis() - bootMillis) / 1000;
   doc["totalScheduledRuntimeSec"] = totalScheduledRuntimeSec;
@@ -6568,7 +6574,7 @@ void handleRoot() {
   // --- JS ---
   html += F("<script>");
   html += F("function pad(n){return n<10?'0'+n:n;}");
-  html += F("let _devEpoch=null; let _tickTimer=null; let _lastTemp=null; let _lastTempTrend='\\u2192';");
+  html += F("let _devEpoch=null; let _tickTimer=null; let _lastTemp=null; let _lastTempTrend='\\u2192'; let _wifiSeeded=false;");
   html += F("function startDeviceClock(seedSec){_devEpoch=seedSec;if(_tickTimer)clearInterval(_tickTimer);");
   html += F("const draw=()=>{if(_devEpoch==null)return; const d=new Date(_devEpoch*1000);");
   html += F("const h=pad(d.getHours()),m=pad(d.getMinutes()),s=pad(d.getSeconds());");
@@ -6630,7 +6636,11 @@ void handleRoot() {
   html += F("function setWindCompass(deg){const c=document.getElementById('windCompass');if(!c)return;const n=Number(deg);const ok=Number.isFinite(n);c.classList.toggle('is-empty',!ok);if(ok)c.style.setProperty('--dir',(((n%360)+360)%360)+'deg');}");
   html += F("function weatherIconClass(text){const t=String(text||'').toLowerCase();if(!t||t==='--')return'wi-unknown';if(t.includes('thunder'))return'wi-storm';if(t.includes('freez')||t.includes('ice')||t.includes('rime'))return'wi-freezing';if(t.includes('snow'))return'wi-snow';if(t.includes('shower'))return'wi-showers';if(t.includes('drizzle'))return'wi-drizzle';if(t.includes('rain'))return'wi-rain';if(t.includes('fog')||t.includes('mist')||t.includes('haze'))return'wi-fog';if(t.includes('overcast'))return'wi-overcast';if(t.includes('partly')||t.includes('mainly'))return'wi-partly';if(t.includes('cloud'))return'wi-cloud';if(t.includes('clear')||t.includes('sun'))return'wi-clear';return'wi-unknown';}");
   html += F("function setWeatherIcon(text){const el=document.getElementById('condIcon');if(!el)return;el.className='weather-icon '+weatherIconClass(text);el.title=text||'Unknown';}");
+  html += F("function wifiQuality(v,c){if(c===false)return'Disconnected';if(typeof v!=='number')return'Connected';if(v>=-50)return'Excellent';if(v>=-60)return'Strong';if(v>=-67)return'Good';if(v>=-75)return'Fair';if(v>=-82)return'Weak';return'Very weak';}");
+  html += F("function updateWifiSummary(st){const rssi=document.getElementById('rssiChip');const rq=document.getElementById('rssiQuality');const connected=(typeof st.wifiConnected==='boolean')?st.wifiConnected:undefined;const v=(typeof st.rssi==='number')?st.rssi:null;if(rssi)rssi.textContent=(v===null?'--':v)+' dBm';if(rq)rq.textContent=wifiQuality(v,connected);}");
+  html += F("async function refreshWifiStatus(){try{const r=await fetch('/status',{cache:'no-store'});updateWifiSummary(await r.json());}catch(e){}}");
   html += F("async function refreshStatus(){try{const r=await fetch('/status',{cache:'no-store'});const st=await r.json();");
+  html += F("if(!_wifiSeeded){updateWifiSummary(st);_wifiSeeded=true;}");
   html += F("if(typeof st.deviceEpoch==='number' && st.deviceEpoch>0 && _devEpoch===null){ startDeviceClock(st.deviceEpoch); }");
   html += F("const rb=document.getElementById('rainBadge');const wb=document.getElementById('windBadge');");
   html += F("if(rb){const rc=st.rainDelayCause||'Active';rb.className='badge '+(st.rainDelayActive?'b-bad':'b-ok');rb.innerHTML='Rain: <b>'+(st.rainDelayActive?rc:'Off')+'</b>';}");
@@ -6643,8 +6653,6 @@ void handleRoot() {
   html += F("if(heroTank) heroTank.textContent=pct+'%'; if(heroTankSub) heroTankSub.textContent=st.sourceMode||'';");
   html += F("const up=document.getElementById('upChip'); if(up) up.textContent=fmtClock12(st.deviceEpoch, st.utcOffsetMin);");
   html += F("const heroDate=document.getElementById('heroDate');if(heroDate)heroDate.textContent=fmtDeviceDate(st.deviceEpoch,st.utcOffsetMin);");
-  html += F("function wifiQuality(v){if(typeof v!=='number')return'Disconnected';if(v>=-50)return'Excellent';if(v>=-60)return'Strong';if(v>=-67)return'Good';if(v>=-75)return'Fair';if(v>=-82)return'Weak';return'Very weak';}");
-  html += F("const rssi=document.getElementById('rssiChip'); if(rssi) rssi.textContent=(st.rssi)+' dBm'; const rq=document.getElementById('rssiQuality'); if(rq) rq.textContent=wifiQuality(st.rssi);");
   // Location chip + Open-Meteo link
   html += F("const cityEl=document.getElementById('cityName'); const cityLink=document.getElementById('meteoLink');");
   html += F("if(typeof st.cityName==='string' && st.cityName.length){");
@@ -6738,7 +6746,7 @@ void handleRoot() {
   html += F("if(hs) hs.textContent=masterOff?'Automation blocked':(epoch?(name+(dur>0?(' - '+fmtDur(dur)):'')):(st.rainDelayActive?'Waiting for rain delay to clear':'No queued run'));");
   html += F("})();");
 
-  html += F("}catch(e){} } setInterval(refreshStatus,1000); refreshStatus();");
+  html += F("}catch(e){} } setInterval(refreshStatus,1000); refreshStatus(); setInterval(refreshWifiStatus,60000);");
 
   // expose zonesCount & Save All
   html += F("const ZC="); html += String(zonesCount); html += F(";");
