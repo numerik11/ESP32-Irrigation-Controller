@@ -25,6 +25,8 @@ Setup
 <img width="400" height="448" alt="image" src="https://github.com/user-attachments/assets/46bd8e74-fc39-48e6-be24-0bccc911c33f" />
 Events
 
+---
+
 ### Diagram
 
 <img width="1862" height="1014" alt="image" src="https://github.com/user-attachments/assets/df3b2d56-5021-43df-a429-55fd85ebc625" />
