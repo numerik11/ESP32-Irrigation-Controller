@@ -1299,6 +1299,7 @@ static int readTankRaw() {
 }
 
 int tankPercent() {
+  if (tankLevelPin == -1) return 0;
   if (!isValidAdcPin(tankLevelPin)) {
     static bool warned = false;
     if (!warned) {
@@ -1685,9 +1686,9 @@ static void sanitizePinConfig() {
 
   // ADC-only pins
   #if defined(CONFIG_IDF_TARGET_ESP32)
-  if (!isValidAdcPin(tankLevelPin)) tankLevelPin = 34; // safe default on classic ESP32
+  if (tankLevelPin != -1 && !isValidAdcPin(tankLevelPin)) tankLevelPin = 34; // safe default on classic ESP32
   #else
-  if (!isValidAdcPin(tankLevelPin)) tankLevelPin = 1;  // safe default on ESP32-S3
+  if (tankLevelPin != -1 && !isValidAdcPin(tankLevelPin)) tankLevelPin = 1;  // safe default on ESP32-S3
   #endif
   if (moisturePin != -1 && !isValidAdcPin(moisturePin)) moisturePin = -1;
   if (!isValidPhotoPin(photoPin)) photoPin = -1;
@@ -7084,11 +7085,11 @@ void handleSetupPage() {
   html += F("'><small>Switch to city water if tank drops below this level</small></div>");
 
   #if defined(CONFIG_IDF_TARGET_ESP32)
-    html += F("<div class='row'><label>Tank Level Sensor GPIO</label><input class='in-xs' type='number' min='32' max='39' name='tankLevelPin' value='");
-    html += String(tankLevelPin); html += F("'><small>ADC1 pin (ESP32: GPIO32-39)</small></div>");
+    html += F("<div class='row'><label>Tank Level Sensor GPIO</label><input class='in-xs' type='number' min='-1' max='39' name='tankLevelPin' value='");
+    html += String(tankLevelPin); html += F("'><small>-1 disables. ADC1 pin (ESP32: GPIO32-39)</small></div>");
   #else
-    html += F("<div class='row'><label>Tank Level Sensor GPIO</label><input class='in-xs' type='number' min='1' max='20' name='tankLevelPin' value='");
-    html += String(tankLevelPin); html += F("'><small>ADC pin (ESP32-S3: GPIO1-20)</small></div>");
+    html += F("<div class='row'><label>Tank Level Sensor GPIO</label><input class='in-xs' type='number' min='-1' max='20' name='tankLevelPin' value='");
+    html += String(tankLevelPin); html += F("'><small>-1 disables. ADC pin (ESP32-S3: GPIO1-20)</small></div>");
   #endif
   html += F("<div class='row'><label></label><a class='btn-alt' href='/tank'>Calibrate Tank</a></div>");
   html += F("</div>"); // end tankCard
@@ -8241,7 +8242,7 @@ void loadConfig() {
   // NEW: tank level sensor pin (ADC)
   if (nextTail(s) && s.length()) {
     int p = s.toInt();
-    if (isValidAdcPin(p)) tankLevelPin = p;
+    if (p == -1 || isValidAdcPin(p)) tankLevelPin = p;
   }
 
   // NEW: photoresistor auto-backlight (optional trailing lines)
@@ -8800,7 +8801,7 @@ void handleConfigure() {
   powerSupplyActiveLow = server.hasArg("powerSupplyPinLow");
   if (server.hasArg("tankLevelPin")) {
     int p = server.arg("tankLevelPin").toInt();
-    if (isValidAdcPin(p)) tankLevelPin = p;
+    if (p == -1 || isValidAdcPin(p)) tankLevelPin = p;
   }
   // Photoresistor auto-backlight
   photoAutoEnabled = server.hasArg("photoAuto");
