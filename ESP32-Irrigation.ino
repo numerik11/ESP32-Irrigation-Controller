@@ -51,6 +51,8 @@ extern "C" {
 // ---------- Hardware ----------
 static const char kFirmwareSignature[] __attribute__((used)) =
   "Original author: Beau Kaczmarek - https://github.com/numerik11/ESP32-Irrigation-Controller";
+static const char kFirmwareVersion[] = "1.1.0";
+static const char kFirmwareBuildDate[] = __DATE__ " " __TIME__;
 static const uint8_t MAX_ZONES = 16;
 #if defined(CONFIG_IDF_TARGET_ESP32)
 static const int I2C_SDA_DEFAULT = 21;
@@ -2141,6 +2143,8 @@ void handleDiagnosticsJson() {
 
   doc["device"] = kHost;
   doc["signature"] = kFirmwareSignature;
+  doc["firmwareVersion"] = kFirmwareVersion;
+  doc["firmwareBuild"] = kFirmwareBuildDate;
   doc["uptimeSec"] = uptimeSec;
   doc["uptime"] = formatRuntimeClock(uptimeSec);
   doc["epoch"] = (uint32_t)nowEpoch;
@@ -2381,6 +2385,8 @@ void handleDiagnosticsPage() {
   html += F("<div class='section-title'>System Status</div>");
   html += F("<div class='card status-card'><div class='card-head'><h2>Runtime</h2><span class='card-tag'>Controller</span></div><table>");
   html += F("<tr><td>Device</td><td>"); html += kHost; html += F("</td></tr>");
+  html += F("<tr><td>Firmware</td><td>v"); html += kFirmwareVersion; html += F("</td></tr>");
+  html += F("<tr><td>Build</td><td>"); html += kFirmwareBuildDate; html += F("</td></tr>");
   html += F("<tr><td>Reset reason</td><td>"); html += resetReasonText(esp_reset_reason()); html += F("</td></tr>");
   html += F("<tr><td>Reset code</td><td>"); html += String((int)esp_reset_reason()); html += F("</td></tr>");
   html += F("<tr><td>Boot count</td><td>"); html += String(bootCount); html += F("</td></tr>");
@@ -2732,6 +2738,8 @@ void setup() {
   doc["wifiConnected"]   = (WiFi.status() == WL_CONNECTED);
   doc["wifiIp"]          = WiFi.localIP().toString();
   doc["rssi"]            = WiFi.RSSI();
+  doc["firmwareVersion"] = kFirmwareVersion;
+  doc["firmwareBuild"]   = kFirmwareBuildDate;
   doc["uptimeSec"]       = (millis() - bootMillis) / 1000;
   doc["totalScheduledRuntimeSec"] = totalScheduledRuntimeSec;
   doc["totalManualRuntimeSec"]    = totalManualRuntimeSec;
@@ -6310,6 +6318,7 @@ void handleRoot() {
   html += F("<span class='pill' id='clock'>"); html += timeStr; html += F("</span>");
   html += F("<span class='pill'>"); html += dateStr; html += F("</span>");
   html += F("<span class='pill'>"); html += ((ti && ti->tm_isdst>0) ? "DST" : "STD"); html += F("</span>");
+  html += F("<span class='pill' title='Firmware version'>FW v"); html += kFirmwareVersion; html += F("</span>");
   html += F("<span class='pill' title='IP ");
   html += WiFi.localIP().toString();
   html += F("'>espirrigation.local</span>");
@@ -7119,7 +7128,9 @@ void handleSetupPage() {
   html += F(":root{--setup-bg:#f3f7fc;--setup-panel:#ffffff;--setup-ink:#172033;--setup-muted:#68758a;--setup-line:#dbe4ef;--setup-blue:#2563eb}html[data-theme='dark']{--setup-bg:#0b1220;--setup-panel:#111c2e;--setup-ink:#e7eef9;--setup-muted:#9aa9bd;--setup-line:#293a54;--setup-blue:#60a5fa}.wrap{max-width:1180px;margin:0 auto;padding:0 20px}body{background:var(--setup-bg);color:var(--setup-ink)}.page-head{margin:0 -20px 16px;padding:16px 20px;border:0;border-bottom:1px solid var(--setup-line);border-radius:0;background:var(--setup-panel);box-shadow:0 4px 14px rgba(15,23,42,.06)}.page-kicker{color:var(--setup-blue)}.page-sub,.setup-hero-copy p,.card-intro,.row small{color:var(--setup-muted)}.setup-hero{display:block;margin:0 -20px 16px;padding:18px 20px;border-radius:0;background:var(--setup-panel);border:0;border-bottom:1px solid var(--setup-line);box-shadow:none}.setup-overview-title{color:var(--setup-blue);margin-bottom:10px}.setup-badges{grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}.setup-badge{border-radius:7px;padding:12px;background:var(--setup-bg);border:1px solid var(--setup-line)}.setup-badge-k{color:var(--setup-muted)}.setup-badge-v{color:var(--setup-ink)}.setup-nav{top:8px;margin:0 0 10px;padding:7px;border-radius:7px;background:var(--setup-panel);border:1px solid var(--setup-line);box-shadow:0 5px 14px rgba(15,23,42,.08)}.setup-nav a{border-radius:6px;background:transparent;color:var(--setup-muted);border-color:transparent;padding:8px 11px}.setup-nav a:hover{transform:none;background:rgba(37,99,235,.1);border-color:rgba(37,99,235,.22);color:var(--setup-blue);box-shadow:none}.setup-actions-top{top:61px;margin:0 0 16px;padding:8px;border-radius:7px;background:var(--setup-panel);border:1px solid var(--setup-line);box-shadow:0 5px 14px rgba(15,23,42,.08)}.card{border-radius:7px;background:var(--setup-panel);border:1px solid var(--setup-line);box-shadow:0 6px 18px rgba(15,23,42,.06)}.card::before{height:2px;background:var(--setup-blue)}.card h3{color:var(--setup-ink)}details.collapse summary{color:var(--setup-ink);padding:7px 0;font-size:1rem}details.collapse summary:after{border-radius:6px;border-color:var(--setup-line);background:var(--setup-bg)}.collapse-body{border-top:1px solid var(--setup-line);padding-top:12px}.row{border-top-color:var(--setup-line)}label{color:var(--setup-ink)}input[type=text],input[type=number],select{background:var(--setup-bg);color:var(--setup-ink);border-color:var(--setup-line);border-radius:6px}.chip{background:var(--setup-bg);border-color:var(--setup-line);color:var(--setup-ink);border-radius:6px}.btn,.btn-alt{border-radius:6px}.btn-alt{background:var(--setup-bg);color:var(--setup-ink);border-color:var(--setup-line)}.save-confirm{margin-left:auto}@media(max-width:760px){.wrap{padding:0 12px}.page-head,.setup-hero{margin-left:-12px;margin-right:-12px;padding-left:12px;padding-right:12px}.setup-badges{grid-template-columns:repeat(2,minmax(0,1fr))}.setup-nav{top:8px}.setup-actions-top{top:58px}.setup-actions-top .save-confirm{margin-left:0}.row{padding-top:10px}}@media(max-width:440px){.setup-badges{grid-template-columns:1fr}.setup-actions-top .btn,.setup-actions-top .btn-alt{flex:1 1 100%}}</style></head><body>"); 
   html += F("</style></head><body>");
 
-  html += F("<div class='wrap'><div class='page-head'><div class='page-head-copy'><div class='page-kicker'>Controller configuration</div><h1>System Setup</h1><div class='page-sub'>Start with zones and water source, then set weather, time, display, and hardware pins.</div></div>");
+  html += F("<div class='wrap'><div class='page-head'><div class='page-head-copy'><div class='page-kicker'>Controller configuration</div><h1>System Setup</h1><div class='page-sub'>Firmware v");
+  html += kFirmwareVersion;
+  html += F(" - Start with zones and water source, then set weather, time, display, and hardware pins.</div></div>");
   html += F("<div class='theme-switch'><span>Light</span><label class='switch'><input type='checkbox' id='themeToggle'><span class='slider'></span></label><span>Dark</span></div>");
   html += F("</div>");
   html += F("<div class='setup-hero badges-only'><div class='setup-overview-title'>Current Configuration</div><div class='setup-badges'>");
