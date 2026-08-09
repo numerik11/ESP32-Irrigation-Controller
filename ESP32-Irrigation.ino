@@ -442,6 +442,7 @@ uint32_t bootCount = 0;
 static float rainHist[24] = {0};   // last 24 hourly buckets (mm/hour)
 static int   rainIdx = 0;          // points to most recent bucket
 static time_t lastRainHistHour = 0;
+static const char* RAIN_HISTORY_STATE_PATH = "/rain_state.txt";
 static float last24hActualRain(); // forward
 float rain1hNow = 0.0f;  // mm from current precipitation (Open-Meteo)
 float rain3hNow = 0.0f;  // kept for compatibility
@@ -510,6 +511,9 @@ void loadSchedule();
 void saveSchedule();
 void updateCachedWeather();
 void tickWeather();                 // NEW
+static void loadRainHistoryState();
+static void saveRainHistoryState();
+static void clearRainHistoryState();
 void HomeScreen();
 void RainScreen();
 void updateLCDForZone(int zone);
@@ -2520,6 +2524,7 @@ void setup() {
 
   // Config + schedule
   loadConfig();
+  loadRainHistoryState();
   sanitizePinConfig();
   validatePinMap();
   if (!LittleFS.exists("/schedule.txt")) saveSchedule();
@@ -3790,6 +3795,71 @@ String fetchForecast(float lat, float lon) {
 // ---------- NEW helpers for rain history ----------
 // Rolling 24h rain history (ACTUAL ONLY, no forecast).
 // Record once per elapsed hour instead of relying on a narrow HH:00 window.
+static void loadRainHistoryState() {
+  if (!LittleFS.exists(RAIN_HISTORY_STATE_PATH)) return;
+
+  File f = LittleFS.open(RAIN_HISTORY_STATE_PATH, "r");
+  if (!f) return;
+
+  String magic = f.readStringUntil('\n');
+  magic.trim();
+  if (magic != "RAINHIST1") {
+    f.close();
+    clearRainHistoryState();
+    return;
+  }
+
+  int idx = f.readStringUntil('\n').toInt();
+  time_t hour = (time_t)strtoull(f.readStringUntil('\n').c_str(), nullptr, 10);
+  if (idx < 0 || idx >= 24 || hour < 0) {
+    f.close();
+    clearRainHistoryState();
+    return;
+  }
+
+  float loaded[24] = {0};
+  for (int i = 0; i < 24 && f.available(); ++i) {
+    loaded[i] = f.readStringUntil('\n').toFloat();
+    if (!isfinite(loaded[i]) || loaded[i] < 0.0f) loaded[i] = 0.0f;
+  }
+  f.close();
+
+  rainIdx = idx;
+  lastRainHistHour = hour;
+  for (int i = 0; i < 24; ++i) rainHist[i] = loaded[i];
+  lastRainAmount = last24hActualRain();
+}
+
+static void saveRainHistoryState() {
+  File f = LittleFS.open(RAIN_HISTORY_STATE_PATH, "w");
+  if (!f) {
+    Serial.println("[RAIN] Unable to persist rain history");
+    return;
+  }
+
+  f.println("RAINHIST1");
+  f.println(rainIdx);
+  char hourBuf[24];
+  snprintf(hourBuf, sizeof(hourBuf), "%llu", (unsigned long long)lastRainHistHour);
+  f.println(hourBuf);
+  for (int i = 0; i < 24; ++i) {
+    float v = rainHist[i];
+    if (!isfinite(v) || v < 0.0f) v = 0.0f;
+    f.println(v, 3);
+  }
+  f.close();
+}
+
+static void clearRainHistoryState() {
+  for (int i = 0; i < 24; ++i) rainHist[i] = 0.0f;
+  rainIdx = 0;
+  lastRainHistHour = 0;
+  lastRainAmount = 0.0f;
+  if (LittleFS.exists(RAIN_HISTORY_STATE_PATH)) {
+    LittleFS.remove(RAIN_HISTORY_STATE_PATH);
+  }
+}
+
 static void tickActualRainHistory() {
   time_t now = time(nullptr);
   if (now <= 0) return;
@@ -3808,10 +3878,15 @@ static void tickActualRainHistory() {
     rainIdx = (rainIdx + 1) % 24;
     rainHist[rainIdx] = v;
     lastRainHistHour = thisHour;
+    saveRainHistoryState();
     return;
   }
 
   if (thisHour <= lastRainHistHour) {
+    if (fabsf(rainHist[rainIdx] - v) >= 0.01f) {
+      rainHist[rainIdx] = v;
+      saveRainHistoryState();
+    }
     return;
   }
 
@@ -3827,6 +3902,7 @@ static void tickActualRainHistory() {
   }
 
   lastRainHistHour = thisHour;
+  saveRainHistoryState();
 }
 
 // Sum rolling 24h actual rainfall from the ring buffer
@@ -9049,12 +9125,7 @@ void handleConfigure() {
     todayMax_C          = NAN;
     todaySunrise        = 0;
     todaySunset         = 0;
-    for (int i = 0; i < 24; ++i) {
-      rainHist[i] = 0.0f;
-    }
-    rainIdx              = 0;
-    lastRainHistHour     = 0;
-    lastRainAmount       = 0.0f;
+    clearRainHistoryState();
     applyLocalClimateOverride(true);
   }
 
