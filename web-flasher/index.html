@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>ESP32 Irrigation Firmware Installer</title>
+  <title>ESP32 Irrigation Firmware Update</title>
   <script type="module" src="https://unpkg.com/esp-web-tools@latest/dist/web/install-button.js?module"></script>
   <style>
     :root {
@@ -34,6 +34,52 @@
       margin: 0 0 16px;
       font-size: 24px;
       line-height: 1.2;
+    }
+
+    .version-panel {
+      display: grid;
+      gap: 10px;
+      margin: 18px 0 0;
+      padding: 14px;
+      border: 1px solid #d8dee4;
+      border-radius: 8px;
+      background: #f8fafc;
+    }
+
+    .version-row {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      align-items: baseline;
+    }
+
+    .version-label {
+      color: #52606d;
+      font-size: 13px;
+      font-weight: 700;
+    }
+
+    .version-value {
+      font-weight: 800;
+      text-align: right;
+    }
+
+    .version-status {
+      padding-top: 10px;
+      border-top: 1px solid #d8dee4;
+      font-weight: 800;
+    }
+
+    .version-status.ok {
+      color: #15803d;
+    }
+
+    .version-status.update {
+      color: #b45309;
+    }
+
+    .version-status.unknown {
+      color: #52606d;
     }
 
     label {
@@ -80,6 +126,19 @@
         border-color: #4b5563;
       }
 
+      .version-panel {
+        background: #111827;
+        border-color: #374151;
+      }
+
+      .version-label {
+        color: #cbd5e1;
+      }
+
+      .version-status {
+        border-top-color: #374151;
+      }
+
       p {
         color: #cbd5e1;
       }
@@ -88,13 +147,25 @@
 </head>
 <body>
   <main>
-    <h1>ESP32 Irrigation Firmware Installer</h1>
+    <h1>ESP32 Irrigation Firmware Update</h1>
 
     <label for="board">Board</label>
     <select id="board">
       <option value="esp32-dev/manifest.json">ESP32 Dev Module</option>
       <option value="esp32-s3-devkitc-1/manifest.json">ESP32-S3 DevKitC-1</option>
     </select>
+
+    <section class="version-panel" aria-label="Firmware versions">
+      <div class="version-row">
+        <span class="version-label">Current installed</span>
+        <span class="version-value" id="currentVersion">Unknown</span>
+      </div>
+      <div class="version-row">
+        <span class="version-label">Available update</span>
+        <span class="version-value" id="availableVersion">Loading...</span>
+      </div>
+      <div class="version-status unknown" id="versionStatus">Open this page from the controller Setup page to compare versions.</div>
+    </section>
 
     <div class="installer">
       <esp-web-install-button id="installer"></esp-web-install-button>
@@ -106,9 +177,46 @@
   <script>
     const board = document.getElementById("board");
     const installer = document.getElementById("installer");
+    const currentVersion = document.getElementById("currentVersion");
+    const availableVersion = document.getElementById("availableVersion");
+    const versionStatus = document.getElementById("versionStatus");
+    const params = new URLSearchParams(window.location.search);
+    const current = params.get("current") || "";
 
-    function updateManifest() {
+    function normalizeVersion(value) {
+      return String(value || "").trim().replace(/^v/i, "");
+    }
+
+    function setStatus(nextVersion) {
+      const installed = normalizeVersion(current);
+      const available = normalizeVersion(nextVersion);
+
+      currentVersion.textContent = installed ? `v${installed}` : "Unknown";
+      availableVersion.textContent = available ? `v${available}` : "Unknown";
+
+      versionStatus.classList.remove("ok", "update", "unknown");
+      if (!installed || !available) {
+        versionStatus.textContent = "Open this page from the controller Setup page to compare versions.";
+        versionStatus.classList.add("unknown");
+      } else if (installed === available) {
+        versionStatus.textContent = "Up to date";
+        versionStatus.classList.add("ok");
+      } else {
+        versionStatus.textContent = "Update available";
+        versionStatus.classList.add("update");
+      }
+    }
+
+    async function updateManifest() {
       installer.setAttribute("manifest", board.value);
+      availableVersion.textContent = "Loading...";
+      try {
+        const response = await fetch(board.value, { cache: "no-store" });
+        const manifest = await response.json();
+        setStatus(manifest.version);
+      } catch (error) {
+        setStatus("");
+      }
     }
 
     board.addEventListener("change", updateManifest);
