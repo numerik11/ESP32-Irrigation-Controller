@@ -1,6 +1,6 @@
 {
   "name": "ESP32 Irrigation Controller - ESP32-S3 DevKitC-1",
-  "version": "1.1.1",
+  "version": "1.1.2",
   "new_install_prompt_erase": true,
   "builds": [
     {

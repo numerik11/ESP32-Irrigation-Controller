@@ -5,7 +5,7 @@
   #define ENABLE_DEBUG_ROUTES 0   // set to 1 when you need them
 #endif
 #ifndef ENABLE_OTA
-  #define ENABLE_OTA 0
+  #define ENABLE_OTA 1
 #endif
 #ifndef ENABLE_WIFI_LONG_RANGE
   #define ENABLE_WIFI_LONG_RANGE 0   // long-range mode improves weak links but slows HTTP browsing
@@ -51,7 +51,7 @@ extern "C" {
 // ---------- Hardware ----------
 static const char kFirmwareSignature[] __attribute__((used)) =
   "Original author: Beau Kaczmarek - https://github.com/numerik11/ESP32-Irrigation-Controller";
-static const char kFirmwareVersion[] = "1.1.1";
+static const char kFirmwareVersion[] = "1.1.2";
 static const char kFirmwareBuildDate[] = __DATE__ " " __TIME__;
 static const uint8_t MAX_ZONES = 16;
 #if defined(CONFIG_IDF_TARGET_ESP32)
@@ -4240,12 +4240,30 @@ void logEvent(int zone, const char* eventType, const char* source, bool rainDela
   char ts[32];
   sprintf(ts,"%04d-%02d-%02d %02d:%02d:%02d", t->tm_year+1900,t->tm_mon+1,t->tm_mday,t->tm_hour,t->tm_min,t->tm_sec);
 
-  String line; line.reserve(200);
+  String line; line.reserve(280);
   line += ts; line += ","; line += (zone>=0?zoneNames[zone]:String("n/a")); line += ",";
   line += eventType; line += ","; line += source; line += ",";
   line += (rainDelayed?"Active":"Off"); line += ",";
   line += String(temp,1); line += ","; line += String(hum); line += ",";
-  line += String(wind,1); line += ","; line += cond; line += ","; line += cname; line += "\n";
+  line += String(wind,1); line += ","; line += cond; line += ","; line += cname;
+  if (smartWateringEnabled) {
+    const int smartPct = (int)lroundf(smartWateringFactor() * 100.0f);
+    line += F("; Current Runtime Factor: ");
+    line += String(smartPct);
+    line += F("%");
+    line += F("; Ground Moisture: ");
+    if (!moistureProbeEnabled) {
+      line += F("Disabled");
+    } else {
+      const int moisturePct = moisturePercent();
+      if (moisturePct < 0) line += F("No valid reading");
+      else {
+        line += String(moisturePct);
+        line += F("% wet");
+      }
+    }
+  }
+  line += "\n";
 
   f.print(line); f.close();
 }
@@ -6071,6 +6089,7 @@ void handleRoot() {
   html += F(".hero-title{margin:0;font-size:clamp(1.95rem,4vw,3.2rem);line-height:1.02;max-width:11ch}");
   html += F(".hero-text{margin:0;max-width:60ch;color:var(--muted);font-size:1rem}");
   html += F(".hero-action-stack{display:grid;gap:8px}.hero-date{color:var(--muted);font-size:.9rem;font-weight:700;font-variant-numeric:tabular-nums}");
+  html += F(".hero-meta{display:flex;gap:8px;flex-wrap:wrap;align-items:center}.hero-meta-item{display:inline-flex;align-items:center;gap:6px;padding:7px 10px;border:1px solid var(--chip-brd);border-radius:7px;background:var(--chip);color:var(--ink);font-size:.84rem;font-weight:750}.hero-meta-k{color:var(--muted);font-size:.7rem;text-transform:uppercase;letter-spacing:.08em;font-weight:850}.hero-meta-v{font-variant-numeric:tabular-nums}");
   html += F(".hero-actions{display:flex;gap:10px;flex-wrap:wrap}");
   html += F(".dash-nav{display:flex;gap:10px;flex-wrap:wrap;align-items:center;padding:10px 12px;margin:-2px 0 18px;position:sticky;top:74px;z-index:9}");
   html += F(".dash-nav a{display:inline-flex;align-items:center;justify-content:center;padding:9px 14px;border-radius:999px;border:1px solid var(--chip-brd);background:rgba(255,255,255,.34);font-size:.84rem;font-weight:800;letter-spacing:.04em;text-transform:uppercase;color:var(--ink);transition:transform .08s ease,background .12s ease,border-color .12s ease,box-shadow .12s ease}");
@@ -6308,6 +6327,19 @@ void handleRoot() {
   html += F(".hero-grid{grid-template-columns:minmax(0,.9fr) minmax(440px,1.1fr);gap:24px}.hero-copy{padding:4px 6px}.hero-title{font-size:clamp(1.8rem,3vw,2.6rem);line-height:1.08}.hero-actions .btn{min-width:108px;text-align:center}.hero-date{padding-left:2px}.hero-mini-grid{gap:10px}.hero-mini{min-height:104px;padding:14px 15px;border-left:3px solid var(--line)}.hero-mini:nth-child(1){border-left-color:var(--primary)}.hero-mini:nth-child(2){border-left-color:#15803d}.hero-mini:nth-child(3){border-left-color:#7c3aed}.hero-mini:nth-child(4){border-left-color:#0891b2}.hero-mini-value{font-size:1.48rem}.hero-mini-sub{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.dash-nav{justify-content:center;margin-top:-4px}.dash-nav a{min-width:112px}.section-block{margin-top:26px}.section-head{align-items:center}.summary-grid{grid-template-columns:repeat(12,minmax(0,1fr));gap:14px}.summary-card{min-height:168px;grid-column:span 3}.summary-card.weather-card,.summary-card.next-card{grid-column:span 6;min-height:0}.summary-card h3{padding-bottom:9px}.summary-link{min-height:0;padding:0;border:0;background:transparent}.summary-link:hover .summary-value{color:var(--primary)}.summary-value{overflow-wrap:anywhere}.metric-tile{min-width:0}.weather-card .summary-metric-grid{grid-template-columns:repeat(4,minmax(0,1fr))}.weather-card .summary-metric-grid.metric-pair{grid-template-columns:repeat(2,minmax(0,1fr))}.next-card .summary-metric-grid{grid-template-columns:repeat(4,minmax(0,1fr))}.next-card .metric-wide{grid-column:span 2}.meter{height:14px;margin-top:auto}");
   html += F(".hero-action-stack{margin-top:20px;gap:14px}.hero-date{margin-top:12px;padding-left:0;font-size:clamp(1.28rem,2vw,1.72rem);line-height:1.12;font-weight:850;color:var(--ink)}");
   html += F("@media(max-width:1060px){.hero-grid{grid-template-columns:1fr}.hero-copy{padding:0}.summary-card{grid-column:span 6}.summary-card.weather-card,.summary-card.next-card{grid-column:span 12}}@media(max-width:720px){.nav{position:relative}.dash-nav{position:sticky;top:8px;justify-content:flex-start}.hero-shell{padding:16px}.hero-mini{min-height:96px}.hero-mini-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.hero-mini-value{font-size:1.3rem}.hero-mini-sub{font-size:.82rem}.summary-card{grid-column:span 12}.weather-card .summary-metric-grid,.next-card .summary-metric-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.section-block{margin-top:22px}}@media(max-width:440px){.hero-actions{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:7px}.hero-actions .btn{min-width:0;padding:10px 7px;font-size:.9rem}.hero-mini-grid{grid-template-columns:1fr}.weather-card .summary-metric-grid.metric-pair{grid-template-columns:1fr}.next-card .metric-wide{grid-column:span 2}.condition-wrap,.wind-compass-wrap{gap:8px}}");
+  html += F(":root{--gap:12px;--pad:14px;--pad-lg:16px;--radius:8px;--shadow:0 6px 18px rgba(15,23,42,.07)}");
+  html += F(":root[data-theme='light']{--bg:#f4f7fb;--bg2:#fbfdff;--glass:#ffffff;--glass-brd:#d9e3ef;--card:#ffffff;--panel:#ffffff;--line:#dbe4ef;--ink:#172033;--muted:#68758a;--chip:#f1f6ff;--chip-brd:#cdddf4}");
+  html += F(":root[data-theme='dark']{--bg:#0b1220;--bg2:#101827;--glass:#111c2e;--glass-brd:#293a54;--card:#111c2e;--panel:#111c2e;--line:#293a54;--ink:#e7eef9;--muted:#9aa9bd;--chip:#13233a;--chip-brd:#2f4668}");
+  html += F("body{background:var(--bg);font-family:'Segoe UI',Arial,sans-serif}.wrap{max-width:1180px;margin:12px auto;padding:0 14px}.nav{padding:9px 12px;background:#1e3a8a}.brand{gap:10px}.brand-title{font-size:.96rem}.brand-sub{font-size:.68rem}.dot{width:9px;height:9px;background:#22c55e}");
+  html += F(".nav .meta{gap:6px;font-size:.82rem}.pill,.btn-ghost{padding:6px 10px;border-radius:7px}.hero-shell{margin:12px 0;padding:16px;border-left:0;border-top:3px solid var(--primary);box-shadow:var(--shadow)}.hero-grid{grid-template-columns:minmax(0,.8fr) minmax(420px,1.2fr);gap:14px}");
+  html += F(".hero-kicker,.section-kicker,.summary-k,.metric-k{letter-spacing:.08em}.hero-title{font-size:clamp(1.55rem,2.4vw,2.15rem)}.hero-action-stack{margin-top:10px;gap:10px}.hero-date{margin-top:6px;font-size:1.08rem;font-weight:800}.hero-meta{margin-top:-2px}.hero-actions .btn{min-width:92px;padding:9px 12px}");
+  html += F(".hero-mini-grid{gap:8px}.hero-mini{min-height:86px;padding:11px 12px;border-left:0;border-top:2px solid var(--line)}.hero-mini-label{font-size:.66rem;letter-spacing:.1em}.hero-mini-value{font-size:1.24rem}.hero-mini-sub{font-size:.8rem}.dash-nav{top:53px;margin:0 0 12px;padding:7px;gap:6px;justify-content:flex-start}.dash-nav a{min-width:0;padding:8px 10px;font-size:.75rem;border-radius:6px}");
+  html += F(".section-block{margin-top:18px}.section-head{margin-bottom:9px}.section-head h2{font-size:1.12rem}.section-note{display:none}.summary-grid{gap:10px}.summary-card{min-height:132px;padding:13px;grid-column:span 3}.summary-card.weather-card,.summary-card.next-card{grid-column:span 6}.card h3{margin-bottom:8px;padding-bottom:7px;font-size:.98rem}");
+  html += F(".summary-value{font-size:clamp(1.25rem,2vw,1.7rem)}.summary-support,.hint,.sub{font-size:.82rem}.summary-meta.status-pills{gap:6px}.badge,.mini-chip,.chip{padding:6px 9px;font-size:.8rem}.summary-metric-grid{gap:8px}.metric-tile{min-height:72px;padding:9px 10px}.metric-v{font-size:.98rem}.metric-v.big-metric{font-size:1.22rem}");
+  html += F(".weather-icon{width:46px;height:46px;flex-basis:46px}.wind-compass{width:54px;height:54px;flex-basis:54px}.meter{height:10px}.summary-note{margin-top:8px;padding:10px 11px;border-radius:7px;font-size:.84rem}.sched-top,.sched-body{padding:13px}.sched-grid{gap:10px}.sched-card{padding:12px}.zone-list{gap:8px}.zone-row{padding:10px 12px}.action-grid{gap:10px}.action-card{min-height:132px}");
+  html += F("@media(max-width:1060px){.hero-grid{grid-template-columns:1fr}.summary-card{grid-column:span 6}.summary-card.weather-card,.summary-card.next-card{grid-column:span 12}}");
+  html += F("@media(max-width:720px){.wrap{padding:0 10px;margin:10px auto}.nav .meta{width:100%;display:grid;grid-template-columns:repeat(2,minmax(0,1fr))}.pill,#themeBtn{width:100%;min-width:0}.hero-shell{padding:13px}.hero-mini-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.dash-nav{top:8px;overflow:auto;flex-wrap:nowrap}.summary-card{grid-column:span 12}.weather-card .summary-metric-grid,.next-card .summary-metric-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.card{padding:13px}}");
+  html += F("@media(max-width:440px){.nav .meta{grid-template-columns:1fr}.hero-actions{grid-template-columns:1fr}.hero-mini-grid{grid-template-columns:1fr}.weather-card .summary-metric-grid,.next-card .summary-metric-grid{grid-template-columns:1fr}.next-card .metric-wide{grid-column:auto}.condition-wrap,.wind-compass-wrap{align-items:flex-start}.days-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}");
   html += F("</style></head><body>");
   flush();
 
@@ -6337,7 +6369,11 @@ void handleRoot() {
   html += F("<p class='hero-text'></p>");
   html += F("<div class='hero-action-stack'><div class='hero-actions'><a class='btn' href='/setup'>Setup</a><a class='btn btn-secondary' href='/events'>Events</a><a class='btn btn-secondary' href='/diagnostics'>Diagnostics</a></div><div class='hero-date' id='heroDate'>");
   html += heroDateStr;
-  html += F("</div></div></div>");
+  html += F("</div><div class='hero-meta'><span class='hero-meta-item'><span class='hero-meta-k'>Local Time</span><span class='hero-meta-v' id='upChip'>");
+  html += timeStr;
+  html += F("</span></span><a class='hero-meta-item' id='meteoLink' href='https://open-meteo.com/en/docs?latitude=-35.1076&longitude=138.5573' target='_blank' rel='noopener'><span class='hero-meta-k'>Location</span><span class='hero-meta-v' id='cityName'>");
+  html += cityName;
+  html += F("</span></a></div></div></div>");
   html += F("<div class='hero-mini-grid'>");
   html += F("<div class='hero-mini hero-mini-strong'><span class='hero-mini-label'>System</span><span class='hero-mini-value' id='heroMasterState'>");
   html += heroSystemValue;
@@ -6366,26 +6402,6 @@ void handleRoot() {
   html += F("<div class='wrap section-block' id='summary-section'><div class='section-head'><div><div class='section-kicker'>Overview</div><h2>Controller summary</h2></div>");
   html += F("<p class='section-note'></p></div>");
   html += F("<div class='glass section summary-shell'><div class='grid summary-grid'>");
-
-  // Location card with Open-Meteo link
-  html += F("<div class='card summary-card'><h3>Location</h3><a class='summary-link' id='meteoLink' href='https://open-meteo.com/en/docs?latitude=-35.1076&longitude=138.5573' target='_blank' rel='noopener'>");
-  html += F("<span class='summary-k'>Weather source</span><span class='summary-value' id='cityName'>");
-  html += cityName;
-  html += F("</span><span class='summary-support'>Click here to goto Open-Meteo site.</span></a></div>");
-
-  html += F("<div class='card summary-card'><h3>Local Time</h3><div class='summary-k'>Device clock</div><div id='upChip' class='summary-value'>--:--:--</div><div class='summary-support'>Controller timezone and DST-aware local time.</div></div>");
-
-  html += F("<div class='card summary-card'><h3>WiFi Signal</h3><div class='summary-k'>Wireless health</div><div id='rssiChip' class='summary-value'>");
-  html += String(rssi); html += F(" dBm</div><div id='rssiQuality' class='summary-support'>");
-  html += rssiLabel; html += F("</div></div>");
-
-  html += F("<div class='card summary-card'><h3>Tank Level</h3><div class='summary-row'><div><div class='summary-k'>Available reserve</div><div class='summary-value'><span id='tankPctLabel'>");
-  html += String(tankPct);
-  html += F("%</span></div></div><div id='srcChip' class='mini-chip'>");
-  html += sourceModeText();
-  html += F("</div></div><div class='meter'><div id='tankFill' class='fill' style='width:");
-  html += String(tankPct);
-  html += F("%'></div></div></div>");
 
   html += F("<div class='card summary-card weather-card'><h3>Current Weather</h3><div class='summary-metric-grid'>");
   html += F("<div class='metric-tile'><span class='metric-k'>Temperature</span><div class='metric-v big-metric'><span id='tempChip'>");
@@ -6568,6 +6584,7 @@ void handleRoot() {
   }
 
   html += F("</div>"); // .sched-grid
+  html += F("<div class='sched-tools' style='justify-content:flex-end;margin-top:14px'><button class='btn' id='btn-save-all-bottom' type='button' title='Save all zone schedules'>Save All</button></div>");
   html += F("</div></div></div>"); // #schedBody, .card.sched, .wrap
   flush();
 
@@ -6866,7 +6883,7 @@ void handleRoot() {
   html += F("  }");
   html += F("  try{ await fetch('/submit',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:fd.toString()}); location.reload(); }catch(e){ console.error(e); }");
   html += F("} ");
-  html += F("document.getElementById('btn-save-all')?.addEventListener('click', saveAll);");
+  html += F("document.getElementById('btn-save-all')?.addEventListener('click', saveAll);document.getElementById('btn-save-all-bottom')?.addEventListener('click', saveAll);");
   html += F("const schedBody=document.getElementById('schedBody'); const schedToggle=document.getElementById('schedToggle');");
   html += F("if(schedBody && schedToggle){ const syncSched=()=>{ const open=schedBody.style.display!=='none'; schedToggle.textContent=open?'Hide Schedules':'Show Schedules'; };");
   html += F("schedToggle.addEventListener('click',()=>{ const open=schedBody.style.display!=='none'; schedBody.style.display=open?'none':'block'; syncSched(); }); syncSched(); }");
