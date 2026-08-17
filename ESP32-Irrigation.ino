@@ -51,7 +51,7 @@ extern "C" {
 // ---------- Hardware ----------
 static const char kFirmwareSignature[] __attribute__((used)) =
   "Original author: Beau Kaczmarek - https://github.com/numerik11/ESP32-Irrigation-Controller";
-static const char kFirmwareVersion[] = "1.1.2";
+static const char kFirmwareVersion[] = "1.1.3";
 static const char kFirmwareBuildDate[] = __DATE__ " " __TIME__;
 static const uint8_t MAX_ZONES = 16;
 #if defined(CONFIG_IDF_TARGET_ESP32)
@@ -134,22 +134,40 @@ static inline uint16_t RGB(uint8_t r, uint8_t g, uint8_t b){
 }
 
 // Palette (RGB565)
-static const uint16_t C_BG     = ST77XX_BLACK;
-static const uint16_t C_PANEL  = RGB(16, 22, 36);
-static const uint16_t C_EDGE   = RGB(40, 55, 85);
-static const uint16_t C_TEXT   = RGB(235, 242, 255);
-static const uint16_t C_MUTED  = RGB(160, 175, 205);
-static const uint16_t C_ACCENT = RGB(250, 210, 79);
-static const uint16_t C_GOOD   = RGB(70, 200, 140);
-static const uint16_t C_WARN   = RGB(255, 190, 70);
-static const uint16_t C_BAD    = RGB(255, 110, 90);
-static const uint16_t C_BLUE   = RGB(72, 170, 255);
+static const uint16_t C_BG       = RGB(7, 10, 16);
+static const uint16_t C_PANEL    = RGB(17, 23, 33);
+static const uint16_t C_PANEL_2  = RGB(23, 32, 45);
+static const uint16_t C_EDGE     = RGB(58, 73, 92);
+static const uint16_t C_SHADOW   = RGB(3, 5, 8);
+static const uint16_t C_HILITE   = RGB(83, 101, 124);
+static const uint16_t C_TEXT     = RGB(235, 242, 250);
+static const uint16_t C_MUTED    = RGB(150, 165, 182);
+static const uint16_t C_ACCENT   = RGB(249, 196, 65);
+static const uint16_t C_GOOD     = RGB(69, 196, 138);
+static const uint16_t C_WARN     = RGB(246, 166, 67);
+static const uint16_t C_BAD      = RGB(238, 96, 86);
+static const uint16_t C_BLUE     = RGB(77, 164, 222);
+
+static int cardRadiusFor(int w, int h) {
+  int r = min(5, min(w, h) / 6);
+  return max(1, r);
+}
 
 static void drawCard(int x,int y,int w,int h,uint16_t fill,uint16_t edge){
-  tft.fillRect(x, y, w, h, fill);
-  tft.drawRect(x, y, w, h, edge);
-  tft.drawPixel(x, y, fill); tft.drawPixel(x+w-1, y, fill);
-  tft.drawPixel(x, y+h-1, fill); tft.drawPixel(x+w-1, y+h-1, fill);
+  if (w <= 2 || h <= 2) return;
+  const int r = cardRadiusFor(w, h);
+  tft.fillRoundRect(x, y, w, h, r, fill);
+  tft.drawRoundRect(x, y, w, h, r, edge);
+  tft.drawFastHLine(x + r, y + 1, max(0, w - 2 * r), C_HILITE);
+  tft.drawFastHLine(x + r, y + h - 2, max(0, w - 2 * r), C_SHADOW);
+}
+
+static void drawMetricBox(int x, int y, int w, int h) {
+  if (w <= 2 || h <= 2) return;
+  const int r = cardRadiusFor(w, h);
+  tft.fillRoundRect(x, y, w, h, r, C_PANEL_2);
+  tft.drawRoundRect(x, y, w, h, r, C_EDGE);
+  tft.drawFastHLine(x + r, y + 1, max(0, w - 2 * r), C_HILITE);
 }
 
 static void drawPressureTrendArrow(int x, int y, int trend, uint16_t bg) {
@@ -165,19 +183,22 @@ static void drawPressureTrendArrow(int x, int y, int trend, uint16_t bg) {
 
 static void drawTopBar(const char* title, const char* pill, uint16_t pillColor){
   const int W = tft.width();
-  tft.fillRect(0, 0, W, 34, C_PANEL);
+  tft.setTextWrap(false);
+  tft.fillRect(0, 0, W, 34, C_PANEL_2);
+  tft.fillRect(0, 0, 4, 34, C_ACCENT);
   tft.drawFastHLine(0, 34, W, C_EDGE);
+  tft.drawFastHLine(4, 1, max(0, W - 4), C_HILITE);
 
   tft.setTextSize(2);
-  tft.setTextColor(C_TEXT);
-  tft.setCursor(8, 8);
+  tft.setTextColor(C_TEXT, C_PANEL_2);
+  tft.setCursor(10, 8);
   tft.print(title);
 
   int pillW = 8 + (int)strlen(pill) * 12; // rough for textSize(2)
   int x = W - pillW - 8;
-  tft.fillRect(x, 7, pillW, 20, pillColor);
-  tft.drawRect(x, 7, pillW, 20, C_EDGE);
-  tft.setTextColor(ST77XX_BLACK);
+  tft.fillRoundRect(x, 7, pillW, 20, 5, pillColor);
+  tft.drawRoundRect(x, 7, pillW, 20, 5, C_EDGE);
+  tft.setTextColor(ST77XX_BLACK, pillColor);
   tft.setCursor(x + 6, 9);
   tft.print(pill);
 }
@@ -2141,6 +2162,82 @@ static void tftSetBrightness(uint8_t pct){ // pct: 0-100
   }
 }
 
+static void markTftScreensDirty() {
+  g_forceHomeReset = true;
+  g_forceRainReset = true;
+  g_forceManualReset = true;
+  g_forceRunReset = true;
+  lastScreenRefresh = 0;
+}
+
+static void tftTextMode(uint8_t size, uint16_t fg, uint16_t bg = C_BG) {
+  tft.setTextWrap(false);
+  tft.setTextSize(size);
+  tft.setTextColor(fg, bg);
+}
+
+static void tftPrintCentered(const String& text, int y, uint8_t size, uint16_t color) {
+  int16_t x1, y1;
+  uint16_t w, h;
+  tftTextMode(size, color);
+  tft.getTextBounds(text.c_str(), 0, 0, &x1, &y1, &w, &h);
+  int x = (tft.width() - (int)w) / 2;
+  if (x < 0) x = 0;
+  tft.setCursor(x, y);
+  tft.print(text);
+}
+
+static bool initTftDisplay() {
+  if (!displayEnabled || !displayUseTft) return false;
+
+  if (!isValidTftSignalPin(tftSclkPin) ||
+      !isValidTftSignalPin(tftMosiPin) ||
+      !isValidTftSignalPin(tftCsPin) ||
+      !isValidTftSignalPin(tftDcPin) ||
+      !isValidOptionalTftPin(tftRstPin) ||
+      !isValidOptionalTftPin(tftBlPin) ||
+      !isValidTftDimension(tftPanelWidth) ||
+      !isValidTftDimension(tftPanelHeight)) {
+    Serial.println("[TFT] Invalid TFT configuration; display disabled.");
+    displayEnabled = false;
+    displayUseTft = false;
+    return false;
+  }
+
+  tft = Adafruit_ST7789(&SPI, tftCsPin, tftDcPin, tftRstPin);
+  SPI.begin(tftSclkPin, -1, tftMosiPin, tftCsPin);
+  tftInitBacklightPwm();
+  tft.init(tftPanelWidth, tftPanelHeight);
+  tft.setRotation(tftRotation);
+  tft.setTextWrap(false);
+  tft.fillScreen(C_BG);
+  tftBacklight(true);
+  markTftScreensDirty();
+  return true;
+}
+
+static void showTftBootSplash() {
+  if (!displayEnabled || !displayUseTft) return;
+  const int H = tft.height();
+  const int titleSize = (tft.width() >= 300) ? 3 : 2;
+  tft.fillScreen(C_BG);
+  tftPrintCentered("Irrigation", max(8, H / 8), titleSize, C_ACCENT);
+  tftPrintCentered("AP: ESPIrrigationAP", max(44, H / 3), 1, C_TEXT);
+  tftPrintCentered("http://192.168.4.1", max(62, H / 3 + 18), 1, C_MUTED);
+}
+
+static void showTftConnectedScreen() {
+  if (!displayEnabled || !displayUseTft) return;
+  const int H = tft.height();
+  tft.fillScreen(C_BG);
+  tftPrintCentered("Connected", max(8, H / 10), (tft.width() >= 300) ? 3 : 2, C_ACCENT);
+  tftPrintCentered("IP " + WiFi.localIP().toString(), max(42, H / 3), 1, C_TEXT);
+  tftPrintCentered("espirrigation.local", max(60, H / 3 + 18), 1, C_MUTED);
+  String signal = "RSSI " + String(WiFi.RSSI()) + " dBm";
+  tftPrintCentered(signal, max(78, H / 3 + 36), 1, C_MUTED);
+  markTftScreensDirty();
+}
+
 static void tickAutoBacklight(){
   if (!displayEnabled) return;
   if (!displayUseTft) return;
@@ -2648,33 +2745,9 @@ void setup() {
   if (!displayEnabled) {
     Serial.println("[DISPLAY] disabled");
   } else if (displayUseTft) {
-    tft = Adafruit_ST7789(&SPI, tftCsPin, tftDcPin, tftRstPin);
-    SPI.begin(tftSclkPin, -1, tftMosiPin, tftCsPin);
-
-    tftInitBacklightPwm();
-
-    tft.init(tftPanelWidth, tftPanelHeight);
-    tft.setRotation(tftRotation);
-    tft.fillScreen(ST77XX_BLACK);
-    tft.setTextWrap(true);
-    tft.setTextColor(ST77XX_WHITE);
-    tftBacklight(true);
-
-    // Boot splash
-    tft.setCursor(10, 20);
-    tft.setTextSize(3);
-    tft.print("Irrigation");
-
-    tft.setTextSize(2);
-    tft.setCursor(10, 70);
-    tft.print("AP:");
-    tft.setCursor(10, 95);
-    tft.setTextSize(2);
-    tft.print("ESPIrrigationAP");
-
-    tft.setTextSize(2);
-    tft.setCursor(10, 140);
-    tft.print("http://192.168.4.1");
+    if (initTftDisplay()) {
+      showTftBootSplash();
+    }
   } else {
     if (!display.begin(SSD1306_SWITCHCAPVCC, SCREEN_ADDRESS)) {
       Serial.println("SSD1306 init failed");
@@ -2713,35 +2786,7 @@ void setup() {
   if (!displayEnabled) {
     // Headless mode: web UI and controller logic stay active.
   } else if (displayUseTft) {
-    tft.fillScreen(ST77XX_BLACK);
-
-    // Connected screen (cleaner layout)
-    tft.setTextColor(C_ACCENT);
-    tft.setTextSize(3);
-    tft.setCursor(10, 16);
-    tft.print("Connected");
-
-    tft.setTextColor(C_TEXT);
-    tft.setTextSize(2);
-    tft.setCursor(10, 58);
-    tft.print("IP:");
-    tft.setCursor(10, 80);
-    tft.print(WiFi.localIP().toString());
-
-    tft.setTextColor(C_MUTED);
-    tft.setCursor(10, 112);
-    tft.print("mDNS:");
-    tft.setTextColor(C_TEXT);
-    tft.setCursor(10, 134);
-    tft.print("espirrigation.local");
-
-    tft.setTextSize(1);
-    tft.setTextColor(C_MUTED);
-    tft.setCursor(10, 160);
-    tft.print("RSSI ");
-    tft.print(WiFi.RSSI());
-    tft.print(" dBm");
-
+    showTftConnectedScreen();
     delay(TFT_CONNECTED_SCREEN_MS);
   } else {
     display.clearDisplay();
@@ -3142,7 +3187,7 @@ void setup() {
     } else {
       tftDisplay(oldDisp);
     }
-    g_forceHomeReset = true;
+    markTftScreensDirty();
 
     msg = "TFT self-test OK\n";
     msg += "PWM: "; msg += (g_tftPwmReady ? "yes" : "no");
@@ -4535,14 +4580,16 @@ void updateLCDForZone(int zone) {
     lastRunPct = -1;
     lastRunBarFill = -1;
 
-    tft.fillRect(0, 0, W, headerH, C_PANEL);
+    tft.fillRect(0, 0, W, headerH, C_PANEL_2);
+    tft.fillRect(0, 0, 4, headerH, C_ACCENT);
     tft.drawFastHLine(0, headerH, W, C_EDGE);
+    tft.drawFastHLine(4, 1, max(0, W - 4), C_HILITE);
     tft.setTextSize(1);
-    tft.setTextColor(C_MUTED);
-    tft.setCursor(pad, 6);
+    tft.setTextColor(C_MUTED, C_PANEL_2);
+    tft.setCursor(pad + 2, 6);
     tft.print("IRRIGATION");
     tft.setTextColor(C_GOOD);
-    tft.setCursor(pad, 18);
+    tft.setCursor(pad + 2, 18);
     tft.print("RUNNING");
 
     char zonePill[10];
@@ -4551,7 +4598,8 @@ void updateLCDForZone(int zone) {
     int pillW = (int)bw + 14;
     int pillX = W - pillW - pad;
     tft.fillRoundRect(pillX, 8, pillW, 18, 5, C_GOOD);
-    tft.setTextColor(ST77XX_BLACK);
+    tft.drawRoundRect(pillX, 8, pillW, 18, 5, C_EDGE);
+    tft.setTextColor(ST77XX_BLACK, C_GOOD);
     tft.setCursor(pillX + 7, 13);
     tft.print(zonePill);
 
@@ -4625,13 +4673,12 @@ void updateLCDForZone(int zone) {
     int boxH = min(42, metaH);
     int boxX = cardX + 12;
     auto drawMini = [&](int x, const char* label, const char* value, uint16_t valueColor) {
-      tft.fillRect(x, metaY, boxW, boxH, RGB(11, 16, 28));
-      tft.drawRect(x, metaY, boxW, boxH, C_EDGE);
+      drawMetricBox(x, metaY, boxW, boxH);
       tft.setTextSize(1);
-      tft.setTextColor(C_MUTED);
+      tft.setTextColor(C_MUTED, C_PANEL_2);
       tft.setCursor(x + 5, metaY + 5);
       tft.print(label);
-      tft.setTextColor(valueColor);
+      tft.setTextColor(valueColor, C_PANEL_2);
       tft.setCursor(x + 5, metaY + 20);
       tft.print(value);
     };
@@ -4645,7 +4692,7 @@ void updateLCDForZone(int zone) {
     drawMini(boxX + (boxW + boxGap) * 2, "ACTIVE", activeBuf, C_GOOD);
   }
 
-  tft.setTextWrap(true);
+  tft.setTextWrap(false);
   runInit = true;
   lastModeTft = true;
   lastRunZone = zone;
@@ -5113,8 +5160,10 @@ void HomeScreen() {
       g_forceHomeReset = false;
 
       // ========== MODERN HEADER ==========
-      tft.fillRect(0, 0, W, headerH + 1, C_PANEL);
+      tft.fillRect(0, 0, W, headerH + 1, C_PANEL_2);
+      tft.fillRect(0, 0, 4, headerH, C_ACCENT);
       tft.drawFastHLine(0, headerH, W, C_EDGE);
+      tft.drawFastHLine(4, 1, max(0, W - 4), C_HILITE);
 
       // ========== MODERN CARD LAYOUT ==========
       int cardY = headerH + 6;
@@ -5178,14 +5227,16 @@ void HomeScreen() {
 
     // ========== STATUS PILL (top right) ==========
     if (fullRedraw || curMinute != lastMinute || status != lastStatus) {
-      tft.fillRect(0, 0, W, headerH, C_PANEL);
+      tft.fillRect(0, 0, W, headerH, C_PANEL_2);
+      tft.fillRect(0, 0, 4, headerH, C_ACCENT);
       tft.drawFastHLine(0, headerH, W, C_EDGE);
+      tft.drawFastHLine(4, 1, max(0, W - 4), C_HILITE);
 
       tft.setTextSize(1);
-      tft.setTextColor(C_TEXT);
+      tft.setTextColor(C_TEXT, C_PANEL_2);
       tft.setCursor(8, 8);
       tft.print("IRRIGATION");
-      tft.setTextColor(C_MUTED);
+      tft.setTextColor(C_MUTED, C_PANEL_2);
       tft.print(" ");
       tft.print(zonesCount);
       tft.print(" Zone");
@@ -5201,7 +5252,8 @@ void HomeScreen() {
       int pillW = (int)bw + 14;
       int pillX = W - pillW - 8;
       tft.fillRoundRect(pillX, 3, pillW, 18, 5, statusColor);
-      tft.setTextColor(ST77XX_BLACK);
+      tft.drawRoundRect(pillX, 3, pillW, 18, 5, C_EDGE);
+      tft.setTextColor(ST77XX_BLACK, statusColor);
       tft.setCursor(pillX + 7, 8);
       tft.print(statusText);
       lastStatus = status;
