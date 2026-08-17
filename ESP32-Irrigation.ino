@@ -7904,6 +7904,47 @@ void handleSubmit() {
   server.sendHeader("Location","/",true); server.send(302,"text/plain","");
 }
 
+static String htmlEscape(const String& s) {
+  String out;
+  out.reserve(s.length());
+  for (size_t i = 0; i < s.length(); i++) {
+    char c = s[i];
+    if (c == '&') out += F("&amp;");
+    else if (c == '<') out += F("&lt;");
+    else if (c == '>') out += F("&gt;");
+    else if (c == '"') out += F("&quot;");
+    else if (c == '\'') out += F("&#39;");
+    else out += c;
+  }
+  return out;
+}
+
+static const char* eventLabel(const String& ev, const String& src) {
+  if (ev == "START") return "Start";
+  if (ev == "STOPPED") return "Stopped";
+  if (ev == "CANCELLED") {
+    if (src == "RAIN") return "Rain Delay";
+    if (src == "SMART") return "Smart Skip";
+    if (src == "NO_PIN") return "No Pin";
+    if (src == "BLOCKED") return "Blocked";
+    return "Cancelled";
+  }
+  if (ev == "QUEUED") {
+    if (src == "WIND") return "Wind Delay";
+    if (src == "ACTIVE RUN") return "Queued";
+    return "Queued";
+  }
+  return "Event";
+}
+
+static const char* eventChipClass(const String& ev) {
+  if (ev == "START") return "start";
+  if (ev == "STOPPED") return "stopped";
+  if (ev == "CANCELLED") return "cancelled";
+  if (ev == "QUEUED") return "queued";
+  return "queued";
+}
+
 // ---------- Event Log Page ----------
 void handleLogPage() {
     // Prepare runtime display strings
@@ -7911,10 +7952,7 @@ void handleLogPage() {
     String manualRuntime = formatRuntimeClock(totalManualRuntimeSec);
   HttpScope _scope;
   File f = LittleFS.open("/events.csv","r");
-  if (!f) {
-    server.send(404,"text/plain","No event log");
-    return;
-  }
+  const bool hasEventLog = (bool)f;
 
   String html; html.reserve(18000);
   html += F("<!doctype html><html lang='en' data-theme='light'><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'>");
@@ -8042,22 +8080,19 @@ void handleLogPage() {
   String eventRows;
   eventRows.reserve(9000);
 
-  while (f.available()) {
+  while (f && f.available()) {
     String line=f.readStringUntil('\n');
     if (line.length()<5) continue;
+    line.trim();
 
     int i1=line.indexOf(','), i2=line.indexOf(',',i1+1), i3=line.indexOf(',',i2+1), i4=line.indexOf(',',i3+1);
     int i5=line.indexOf(',',i4+1), i6=line.indexOf(',',i5+1), i7=line.indexOf(',',i6+1), i8=line.indexOf(',',i7+1), i9=line.indexOf(',',i8+1);
+    if (i1 < 0 || i2 < 0 || i3 < 0 || i4 < 0 || i5 < 0) continue;
 
     String ts   = line.substring(0,i1);
     String zone = line.substring(i1+1,i2);
     String ev   = line.substring(i2+1,i3);
     String src  = line.substring(i3+1,i4);
-    const bool showEvent =
-      (ev == "START" || ev == "STOPPED" ||
-       (ev == "CANCELLED" && src == "RAIN") ||
-       (ev == "QUEUED" && src == "WIND"));
-    if (!showEvent) continue;
     String rd   = line.substring(i4+1,i5);
 
     String temp =(i6>i5)?line.substring(i5+1,i6):"";
@@ -8080,27 +8115,28 @@ void handleLogPage() {
     row.reserve(320);
     const bool isManualRunEvent = (src == "MANUAL" && (ev == "START" || ev == "STOPPED"));
     row += F("<tr data-manual='"); row += (isManualRunEvent ? "1" : "0");
-    row += F("'><td>"); row += ts;
-    row += F("</td><td>"); row += zone;
+    row += F("'><td>"); row += htmlEscape(ts);
+    row += F("</td><td>"); row += htmlEscape(zone);
     row += F("</td><td><span class='event-chip ");
-    if (ev == "START") row += F("start'>Start");
-    else if (ev == "STOPPED") row += F("stopped'>Stopped");
-    else if (ev == "CANCELLED") row += F("cancelled'>Rain Delay");
-    else row += F("queued'>Wind Delay");
+    row += eventChipClass(ev);
+    row += F("'>");
+    row += eventLabel(ev, src);
     row += F("</span>");
-    row += F("</td><td>"); row += src;
-    row += F("</td><td>"); row += rd;
-    row += F("</td><td>"); row += details; row += F("</td></tr>");
+    row += F("</td><td>"); row += htmlEscape(src);
+    row += F("</td><td>"); row += htmlEscape(rd);
+    row += F("</td><td>"); row += htmlEscape(details); row += F("</td></tr>");
 
     // Keep newest events at the top of the table.
     eventRows = row + eventRows;
   }
-  f.close();
+  if (f) f.close();
   html += F("<nav class='nav'><div class='in'><div class='brand'><span class='dot'></span><div class='brand-copy'><span class='brand-title'>ESP32 Irrigation</span><span class='brand-sub'>Event History</span></div></div><div class='meta'><span id='eventCountBadge' class='pill'>");
   html += String(eventCount);
   html += F(" filtered events</span><button id='themeBtn' class='btn-ghost' title='Toggle theme'>Theme</button></div></div></nav>");
   html += F("<div class='wrap'>");
-  html += F("<section class='glass hero-shell'><div class='hero-grid'><div class='hero-copy'><div class='hero-kicker'>System History</div><h1 class='hero-title'>Irrigation event log</h1><p class='hero-text'>Review run starts, stops, and scheduled weather delays when rain or wind prevents a zone from starting on time.</p><div class='hero-actions'><a class='btn' href='/'>Home</a><a class='btn btn-secondary' href='/setup'>Setup</a><a class='btn btn-secondary' href='/download/events.csv'>Download CSV</a></div></div>");
+  html += F("<section class='glass hero-shell'><div class='hero-grid'><div class='hero-copy'><div class='hero-kicker'>System History</div><h1 class='hero-title'>Irrigation event log</h1><p class='hero-text'>Review run starts, stops, queued starts, cancellations, and scheduled weather delays.</p><div class='hero-actions'><a class='btn' href='/'>Home</a><a class='btn btn-secondary' href='/setup'>Setup</a>");
+  if (hasEventLog) html += F("<a class='btn btn-secondary' href='/download/events.csv'>Download CSV</a>");
+  html += F("</div></div>");
   html += F("<div class='hero-mini-grid'>");
   html += F("<div class='hero-mini hero-mini-strong'><div class='hero-mini-label'>Latest Event</div><div id='latestEventValue' class='hero-mini-value'>");
   html += latestTs;
@@ -8119,12 +8155,12 @@ void handleLogPage() {
   html += F("<div class='hero-mini'><div class='hero-mini-label'>Total Manual Runtime</div><div class='hero-mini-value'>");
   html += manualRuntime; html += F("</div><div class='hero-mini-sub'>Total Irrigation Runtime (Manual)</div></div>");
   html += F("</div></div></section>");
-  html += F("<div class='section-head'><div><div class='section-kicker'>Audit Trail</div><h2>Recent events</h2></div><p class='section-note'>Newest entries stay at the top, including scheduled rain and wind delay events alongside run starts and stops.</p></div>");
+  html += F("<div class='section-head'><div><div class='section-kicker'>Audit Trail</div><h2>Recent events</h2></div><p class='section-note'>Newest entries stay at the top, including run starts, stops, queued starts, and cancellations.</p></div>");
   html += F("<section class='card'><div class='toolbar'><form method='POST' action='/clearevents'><button class='btn btn-danger' type='submit'>Clear Events</button></form><form method='POST' action='/stopall'><button class='btn btn-warn' type='submit'>Stop All</button></form><label class='filter-toggle'><input id='hideManualRuns' type='checkbox'><span>Hide Manual Starts/Stops<small>Filter manual run entries from this view</small></span></label></div><div class='table-wrap'><table><thead><tr>");
   html += F("<th>Time</th><th>Zone</th><th>Event</th><th>Source</th><th>Rain Delay</th><th>Details</th></tr></thead><tbody>");
   html += eventRows;
   html += F("<tr id='events-empty-row'"); html += (eventCount == 0 ? "" : " hidden");
-  html += F("><td colspan='6' class='empty-state'>No run or weather-delay entries are available in the current event log.</td></tr>");
+  html += F("><td colspan='6' class='empty-state'>No event log entries are available yet. Start, stop, queued, and cancelled runs will appear here after the controller records them.</td></tr>");
   html += F("</tbody></table></div></section></div>");
   html += F("<script>");
   html += F("function applyTheme(t){document.documentElement.setAttribute('data-theme',t==='dark'?'dark':'light');}");
