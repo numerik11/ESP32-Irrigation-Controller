@@ -6437,6 +6437,7 @@ void handleRoot() {
   html += F("@media(max-width:1060px){.hero-grid{grid-template-columns:1fr}.summary-card{grid-column:span 6}.summary-card.weather-card,.summary-card.next-card{grid-column:span 12}}");
   html += F("@media(max-width:720px){.wrap{padding:0 10px;margin:10px auto}.nav .meta{width:100%;display:grid;grid-template-columns:repeat(2,minmax(0,1fr))}.pill,#themeBtn{width:100%;min-width:0}.hero-shell{padding:13px}.hero-mini-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.dash-nav{top:8px;overflow:auto;flex-wrap:nowrap}.summary-card{grid-column:span 12}.weather-card .summary-metric-grid,.next-card .summary-metric-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.card{padding:13px}}");
   html += F("@media(max-width:440px){.nav .meta{grid-template-columns:1fr}.hero-actions{grid-template-columns:1fr}.hero-mini-grid{grid-template-columns:1fr}.weather-card .summary-metric-grid,.next-card .summary-metric-grid{grid-template-columns:1fr}.next-card .metric-wide{grid-column:auto}.condition-wrap,.wind-compass-wrap{align-items:flex-start}.days-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}");
+  html += F(".dash-head{margin:12px 0;padding:14px;border-top:3px solid var(--primary);box-shadow:var(--shadow)}.dash-head-top{display:flex;align-items:center;justify-content:space-between;gap:14px}.dash-head-copy{min-width:0}.dash-head-title{margin:2px 0 5px;font-size:1.35rem;line-height:1.15;letter-spacing:0}.dash-head-context{display:flex;align-items:center;gap:7px;flex-wrap:wrap;color:var(--muted);font-size:.82rem;font-weight:700}.dash-head-context a{color:var(--ink)}.dash-head-actions{display:flex;gap:7px;flex:0 0 auto}.dash-head-actions .btn{padding:8px 11px;min-width:0}.dash-metrics{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));margin-top:12px;border:1px solid var(--line);border-radius:7px;overflow:hidden}.dash-metric{min-width:0;padding:9px 11px;background:var(--panel);border-left:1px solid var(--line)}.dash-metric:first-child{border-left:0}.dash-metric-k{display:block;color:var(--muted);font-size:.65rem;font-weight:800;letter-spacing:.08em;text-transform:uppercase}.dash-metric-v{display:block;margin-top:3px;font-size:1.03rem;font-weight:800;line-height:1.12;overflow-wrap:anywhere}.dash-metric-sub{display:block;margin-top:3px;color:var(--muted);font-size:.74rem;line-height:1.2;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.dash-metric-weather{display:flex;align-items:center;gap:6px}.dash-head+.dash-nav{margin-top:0}@media(max-width:760px){.dash-head-top{align-items:flex-start;flex-direction:column}.dash-head-actions{width:100%}.dash-head-actions .btn{flex:1;text-align:center}.dash-metrics{grid-template-columns:repeat(2,minmax(0,1fr))}.dash-metric:nth-child(3){border-left:0;border-top:1px solid var(--line)}.dash-metric:nth-child(4){border-top:1px solid var(--line)}}@media(max-width:440px){.dash-head-title{font-size:1.2rem}.dash-head-context{align-items:flex-start;flex-direction:column;gap:3px}.dash-head-actions .btn{padding:8px 6px;font-size:.82rem}.dash-metric{padding:8px}.dash-metric-v{font-size:.94rem}}");
   html += F("</style></head><body>");
   flush();
 
@@ -6459,40 +6460,35 @@ void handleRoot() {
   html += F("<button id='themeBtn' class='btn-ghost' title='Toggle theme'>Theme</button>");
   html += F("</div></div></div>");
 
-  // --- Hero ---
-  html += F("<div class='wrap'><div class='hero-shell glass'><div class='hero-grid'>");
-  html += F("<div class='hero-copy'><div class='hero-kicker'>1-16-Zone irrigation</div>");
-  html += F("<h1 class='hero-title'>Irrigation Valve Controller</h1>");
-  html += F("<p class='hero-text'></p>");
-  html += F("<div class='hero-action-stack'><div class='hero-actions'><a class='btn' href='/setup'>Setup</a><a class='btn btn-secondary' href='/events'>Events</a><a class='btn btn-secondary' href='/diagnostics'>Diagnostics</a></div><div class='hero-date' id='heroDate'>");
+  // --- Compact dashboard header ---
+  html += F("<div class='wrap'><section class='card dash-head'><div class='dash-head-top'><div class='dash-head-copy'><div class='section-kicker'>1-16-Zone irrigation</div><h1 class='dash-head-title'>Irrigation Valve Controller</h1><div class='dash-head-context'><span id='heroDate'>");
   html += heroDateStr;
-  html += F("</div><div class='hero-meta'><span class='hero-meta-item'><span class='hero-meta-k'>Local Time</span><span class='hero-meta-v' id='upChip'>");
+  html += F("</span><span>Local time <strong id='upChip'>");
   html += timeStr;
-  html += F("</span></span><a class='hero-meta-item' id='meteoLink' href='https://open-meteo.com/en/docs?latitude=-35.1076&longitude=138.5573' target='_blank' rel='noopener'><span class='hero-meta-k'>Location</span><span class='hero-meta-v' id='cityName'>");
+  html += F("</strong></span><a id='meteoLink' href='https://open-meteo.com/en/docs?latitude=-35.1076&longitude=138.5573' target='_blank' rel='noopener'>Location <strong id='cityName'>");
   html += cityName;
-  html += F("</span></a></div></div></div>");
-  html += F("<div class='hero-mini-grid'>");
-  html += F("<div class='hero-mini hero-mini-strong'><span class='hero-mini-label'>System</span><span class='hero-mini-value' id='heroMasterState'>");
+  html += F("</strong></a></div></div><div class='dash-head-actions'><a class='btn' href='/setup'>Setup</a><a class='btn btn-secondary' href='/events'>Events</a><a class='btn btn-secondary' href='/diagnostics'>Diagnostics</a></div></div><div class='dash-metrics'>");
+  html += F("<div class='dash-metric'><span class='dash-metric-k'>System</span><span class='dash-metric-v' id='heroMasterState'>");
   html += heroSystemValue;
-  html += F("</span><span class='hero-mini-sub' id='heroMasterSub'>");
+  html += F("</span><span class='dash-metric-sub' id='heroMasterSub'>");
   html += heroSystemSub;
   html += F("</span></div>");
-  html += F("<div class='hero-mini'><span class='hero-mini-label'>Tank Reserve</span><span class='hero-mini-value' id='heroTankValue'>");
+  html += F("<div class='dash-metric'><span class='dash-metric-k'>Tank Reserve</span><span class='dash-metric-v' id='heroTankValue'>");
   html += String(tankPct);
-  html += F("%</span><span class='hero-mini-sub' id='heroTankSub'>");
+  html += F("%</span><span class='dash-metric-sub' id='heroTankSub'>");
   html += sourceModeText();
   html += F("</span></div>");
-  html += F("<div class='hero-mini'><span class='hero-mini-label'>Next Start</span><span class='hero-mini-value' id='heroNextValue'>");
+  html += F("<div class='dash-metric'><span class='dash-metric-k'>Next Start</span><span class='dash-metric-v' id='heroNextValue'>");
   html += nextWaterLabel;
-  html += F("</span><span class='hero-mini-sub' id='heroNextSub'>");
+  html += F("</span><span class='dash-metric-sub' id='heroNextSub'>");
   html += nextWaterSub;
   html += F("</span></div>");
-  html += F("<div class='hero-mini'><span class='hero-mini-label'>Weather</span><span class='hero-mini-value weather-value'><span id='heroWeatherValue'>");
+  html += F("<div class='dash-metric'><span class='dash-metric-k'>Weather</span><span class='dash-metric-v dash-metric-weather'><span id='heroWeatherValue'>");
   html += heroWeatherValue;
-  html += F("</span><span id='heroWeatherTrend' style='font-weight:900;'>&rarr;</span></span><span class='hero-mini-sub' id='heroWeatherSub'>");
+  html += F("</span><span id='heroWeatherTrend' style='font-weight:900;'>&rarr;</span></span><span class='dash-metric-sub' id='heroWeatherSub'>");
   html += cond;
   html += F("</span></div>");
-  html += F("</div></div></div></div>");
+  html += F("</div></section></div>");
   html += F("<div class='wrap'><div class='dash-nav glass'><a href='#summary-section'>Summary</a><a href='#schedules-section'>Schedules</a><a href='#zones-section'>Zones</a><a href='#controls-section'>Controls</a></div></div>");
 
   // --- Summary cards ---
