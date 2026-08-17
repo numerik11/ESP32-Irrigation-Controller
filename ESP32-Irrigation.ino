@@ -51,7 +51,7 @@ extern "C" {
 // ---------- Hardware ----------
 static const char kFirmwareSignature[] __attribute__((used)) =
   "Original author: Beau Kaczmarek - https://github.com/numerik11/ESP32-Irrigation-Controller";
-static const char kFirmwareVersion[] = "1.1.3";
+static const char kFirmwareVersion[] = "1.1.4";
 static const char kFirmwareBuildDate[] = __DATE__ " " __TIME__;
 static const uint8_t MAX_ZONES = 16;
 #if defined(CONFIG_IDF_TARGET_ESP32)
@@ -171,13 +171,13 @@ static void drawMetricBox(int x, int y, int w, int h) {
 }
 
 static void drawPressureTrendArrow(int x, int y, int trend, uint16_t bg) {
-  tft.fillRect(x, y, 9, 9, bg);
+  tft.fillRect(x, y, 13, 13, bg);
   if (trend > 0) {
-    tft.fillTriangle(x + 4, y, x, y + 5, x + 8, y + 5, C_BAD);
-    tft.drawFastVLine(x + 4, y + 5, 4, C_BAD);
+    tft.fillTriangle(x + 6, y, x + 1, y + 6, x + 11, y + 6, C_BAD);
+    tft.fillRect(x + 5, y + 6, 3, 7, C_BAD);
   } else if (trend < 0) {
-    tft.fillTriangle(x, y + 3, x + 8, y + 3, x + 4, y + 8, C_BLUE);
-    tft.drawFastVLine(x + 4, y, 4, C_BLUE);
+    tft.fillRect(x + 5, y, 3, 7, C_BLUE);
+    tft.fillTriangle(x + 1, y + 6, x + 11, y + 6, x + 6, y + 12, C_BLUE);
   }
 }
 
@@ -6300,6 +6300,7 @@ void handleRoot() {
   html += F(".metric-v{font-size:1.08rem;font-weight:800;color:var(--ink)}");
   html += F(".metric-v.big-metric{font-size:1.45rem;line-height:1.05;font-variant-numeric:tabular-nums}");
   html += F(".metric-v .metric-unit{font-size:.88rem;font-weight:700;color:var(--muted);margin-left:4px}");
+  html += F(".pressure-value{display:inline-flex;align-items:center;gap:5px}.pressure-trend{display:none;min-width:1ch;font-size:1.12em;font-weight:950;line-height:1}.pressure-trend.up,.pressure-trend.down{display:inline-block}.pressure-trend.up{color:var(--bad)}.pressure-trend.down{color:var(--primary-2)}");
   html += F(".condition-tile{gap:10px}.condition-wrap{display:flex;align-items:center;gap:12px;min-width:0}.condition-wrap .metric-v{min-width:0;overflow-wrap:anywhere}.weather-icon{position:relative;flex:0 0 54px;width:54px;height:54px;border-radius:8px;border:1px solid var(--chip-brd);background:linear-gradient(180deg,var(--panel),var(--chip));overflow:hidden}");
   html += F(".weather-icon .wi-main,.weather-icon .wi-extra{position:absolute;display:block}.wi-clear .wi-main{left:17px;top:17px;width:20px;height:20px;border-radius:50%;background:#f7c948;box-shadow:0 0 0 5px rgba(247,201,72,.22),0 0 18px rgba(247,201,72,.45)}.wi-clear .wi-extra{left:26px;top:5px;width:2px;height:44px;background:#f7c948;transform:rotate(45deg)}.wi-clear .wi-extra::before{content:'';position:absolute;left:0;top:0;width:2px;height:44px;background:#f7c948;transform:rotate(90deg)}");
   html += F(".wi-cloud .wi-main,.wi-partly .wi-main,.wi-overcast .wi-main,.wi-drizzle .wi-main,.wi-showers .wi-main,.wi-rain .wi-main,.wi-freezing .wi-main,.wi-snow .wi-main,.wi-storm .wi-main{left:12px;top:24px;width:31px;height:15px;border-radius:999px;background:#9aa7b5;box-shadow:-5px 2px 0 #9aa7b5,7px -6px 0 3px #9aa7b5,-8px -4px 0 2px #9aa7b5}.wi-partly .wi-extra{left:8px;top:9px;width:19px;height:19px;border-radius:50%;background:#f7c948;box-shadow:0 0 0 4px rgba(247,201,72,.2);z-index:0}.wi-overcast .wi-extra{left:7px;top:17px;width:28px;height:14px;border-radius:999px;background:#7b8794;box-shadow:13px 2px 0 #7b8794}.wi-drizzle .wi-extra{left:17px;top:41px;width:2px;height:5px;border-radius:999px;background:#38bdf8;box-shadow:7px 0 #38bdf8,14px 0 #38bdf8,21px 0 #38bdf8}.wi-showers .wi-extra{left:15px;top:39px;width:4px;height:12px;border-radius:999px;background:#2563eb;box-shadow:10px 2px #2563eb,20px 0 #2563eb;transform:skewX(-18deg)}");
@@ -6577,7 +6578,7 @@ void handleRoot() {
   html += F("<div class='metric-split-item'><div class='metric-v'><span id='tmin'>---</span><span class='metric-unit'>"); html += temperatureUnitChar(); html += F("</span></div></div>");
   html += F("<div class='metric-split-item'><div class='metric-v'><span id='tmax'>---</span><span class='metric-unit'>"); html += temperatureUnitChar(); html += F("</span></div></div>");
   html += F("</div></div>");
-  html += F("<div class='metric-tile'><span class='metric-k'>Pressure</span><div class='metric-v'><span id='press'>--</span><span class='metric-unit'>hPa</span> <span id='pressTrend' style='font-weight:900;display:inline-block;min-width:1ch'></span></div></div>");
+  html += F("<div class='metric-tile'><span class='metric-k'>Pressure</span><div class='metric-v pressure-value'><span><span id='press'>--</span><span class='metric-unit'>hPa</span></span><span id='pressTrend' class='pressure-trend' aria-label='Pressure trend'></span></div></div>");
   html += F("<div class='metric-tile'><span class='metric-k'>Sunrise</span><div class='metric-v' id='sunr'>--:--</div></div>");
   html += F("<div class='metric-tile'><span class='metric-k'>Sunset</span><div class='metric-v' id='suns'>--:--</div></div></div></div>");
 
@@ -6940,7 +6941,7 @@ void handleRoot() {
   html += F("if(sunr) sunr.textContent = st.sunriseLocal || '--:--';");
   html += F("if(suns) suns.textContent = st.sunsetLocal  || '--:--';");
   html += F("if(press){ const p=st.pressure; press.textContent=(typeof p==='number' && p>0)?p.toFixed(0):'--'; }");
-  html += F("if(pressTrend){ const pt=(typeof st.pressureTrend==='number')?st.pressureTrend:0; pressTrend.textContent=pt>0?'\\u2191':(pt<0?'\\u2193':''); pressTrend.style.color=pt>0?'#dc2626':(pt<0?'#2563eb':'inherit'); }");
+  html += F("if(pressTrend){ const pt=(typeof st.pressureTrend==='number')?st.pressureTrend:0; pressTrend.textContent=pt>0?'\\u2191':(pt<0?'\\u2193':''); pressTrend.className='pressure-trend '+(pt>0?'up':(pt<0?'down':'')); pressTrend.title=pt>0?'Pressure rising':(pt<0?'Pressure falling':''); }");
   html += F("const tempEl=document.getElementById('tempChip'); const trendEl=document.getElementById('tempTrend');");
   html += F("const heroWeather=document.getElementById('heroWeatherValue'); const heroWeatherTrend=document.getElementById('heroWeatherTrend'); const heroWeatherSub=document.getElementById('heroWeatherSub');");
   html += F("if(tempEl){ const v=st.temp;");
