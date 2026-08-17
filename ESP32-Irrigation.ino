@@ -8165,8 +8165,7 @@ void handleLogPage() {
   int eventCount = 0;
   int startCount = 0;
   int stopCount = 0;
-  int manualRunCount = 0;
-  int scheduledRunCount = 0;
+  int weatherDelayCount = 0;
   String latestTs = "-";
   bool logTruncatedForPage = false;
   size_t logBytesShown = 0;
@@ -8200,9 +8199,6 @@ void handleLogPage() {
     String ev   = line.substring(i2+1,i3);
     String src  = line.substring(i3+1,i4);
     String rd   = line.substring(i4+1,i5);
-    const bool isRunEvent = (ev == "START" || ev == "STOPPED");
-    if (!isRunEvent) continue;
-    const bool isManualRunEvent = (src == "MANUAL");
 
     String temp =(i6>i5)?line.substring(i5+1,i6):"";
     String hum  =(i7>i6)?line.substring(i6+1,i7):"";
@@ -8217,12 +8213,12 @@ void handleLogPage() {
     eventCount++;
     latestTs = ts;
     if (ev == "START") startCount++;
-    if (ev == "STOPPED") stopCount++;
-    if (isManualRunEvent) manualRunCount++;
-    else scheduledRunCount++;
+    else if (ev == "STOPPED") stopCount++;
+    else weatherDelayCount++;
 
     String row;
     row.reserve(320);
+    const bool isManualRunEvent = (src == "MANUAL" && (ev == "START" || ev == "STOPPED"));
     row += F("<tr data-manual='"); row += (isManualRunEvent ? "1" : "0");
     row += F("'><td>"); row += htmlEscape(ts);
     row += F("</td><td>"); row += htmlEscape(zone);
@@ -8243,7 +8239,7 @@ void handleLogPage() {
   html += String(eventCount);
   html += F(" filtered events</span><button id='themeBtn' class='btn-ghost' title='Toggle theme'>Theme</button></div></div></nav>");
   html += F("<div class='wrap'>");
-  html += F("<section class='glass hero-shell'><div class='hero-grid'><div class='hero-copy'><div class='hero-kicker'>System History</div><h1 class='hero-title'>Irrigation run log</h1><p class='hero-text'>Review manual and scheduled run starts and stops. The CSV download still includes the complete event log.</p><div class='hero-actions'><a class='btn' href='/'>Home</a><a class='btn btn-secondary' href='/setup'>Setup</a>");
+  html += F("<section class='glass hero-shell'><div class='hero-grid'><div class='hero-copy'><div class='hero-kicker'>System History</div><h1 class='hero-title'>Irrigation event log</h1><p class='hero-text'>Review run starts, stops, queued starts, cancellations, and scheduled weather delays.</p><div class='hero-actions'><a class='btn' href='/'>Home</a><a class='btn btn-secondary' href='/setup'>Setup</a>");
   if (hasEventLog) html += F("<a class='btn btn-secondary' href='/download/events.csv'>Download CSV</a>");
   html += F("</div></div>");
   html += F("<div class='hero-mini-grid'>");
@@ -8256,18 +8252,15 @@ void handleLogPage() {
   html += F("<div class='hero-mini'><div class='hero-mini-label'>Stopped Events</div><div id='stopCountValue' class='hero-mini-value'>");
   html += String(stopCount);
   html += F("</div><div class='hero-mini-sub'>Completed or interrupted watering runs</div></div>");
-  html += F("<div class='hero-mini'><div class='hero-mini-label'>Manual Run Events</div><div class='hero-mini-value'>");
-  html += String(manualRunCount);
-  html += F("</div><div class='hero-mini-sub'>Manual starts and stops in this view</div></div>");
-  html += F("<div class='hero-mini'><div class='hero-mini-label'>Scheduled Run Events</div><div class='hero-mini-value'>");
-  html += String(scheduledRunCount);
-  html += F("</div><div class='hero-mini-sub'>Scheduled starts and stops in this view</div></div>");
+  html += F("<div class='hero-mini'><div class='hero-mini-label'>Weather Delays</div><div class='hero-mini-value'>");
+  html += String(weatherDelayCount);
+  html += F("</div><div class='hero-mini-sub'>Scheduled starts blocked by rain or queued by wind</div></div>");
   html += F("<div class='hero-mini'><div class='hero-mini-label'>Total Scheduled Runtime</div><div class='hero-mini-value'>");
   html += schedRuntime; html += F("</div><div class='hero-mini-sub'>Total Irrigation Runtime (Scheduled)</div></div>");
   html += F("<div class='hero-mini'><div class='hero-mini-label'>Total Manual Runtime</div><div class='hero-mini-value'>");
   html += manualRuntime; html += F("</div><div class='hero-mini-sub'>Total Irrigation Runtime (Manual)</div></div>");
   html += F("</div></div></section>");
-  html += F("<div class='section-head'><div><div class='section-kicker'>Audit Trail</div><h2>Recent runs</h2></div><p class='section-note'>Newest manual and scheduled starts and stops stay at the top.</p></div>");
+  html += F("<div class='section-head'><div><div class='section-kicker'>Audit Trail</div><h2>Recent events</h2></div><p class='section-note'>Newest entries stay at the top, including run starts, stops, queued starts, and cancellations.</p></div>");
   if (logTruncatedForPage) {
     html += F("<section class='card'><p class='section-note'>Showing the most recent ");
     html += String(logBytesShown / 1024);
@@ -8277,7 +8270,7 @@ void handleLogPage() {
   html += F("<th>Time</th><th>Zone</th><th>Event</th><th>Source</th><th>Rain Delay</th><th>Details</th></tr></thead><tbody>");
   html += eventRows;
   html += F("<tr id='events-empty-row'"); html += (eventCount == 0 ? "" : " hidden");
-  html += F("><td colspan='6' class='empty-state'>No manual or scheduled run entries are available yet. Starts and stops will appear here after the controller records them.</td></tr>");
+  html += F("><td colspan='6' class='empty-state'>No event log entries are available yet. Start, stop, queued, and cancelled runs will appear here after the controller records them.</td></tr>");
   html += F("</tbody></table></div></section></div>");
   html += F("<script>");
   html += F("function applyTheme(t){document.documentElement.setAttribute('data-theme',t==='dark'?'dark':'light');}");
