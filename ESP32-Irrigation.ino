@@ -1335,6 +1335,19 @@ int tankPercent() {
   return constrain(pct, 0, 100);
 }
 
+static int tankPercentFromRaw(int raw) {
+  if (raw < 0) return 0;
+  int pct = map(raw, tankEmptyRaw, tankFullRaw, 0, 100);
+  return constrain(pct, 0, 100);
+}
+
+static String sourceModeTextForTankPct(int tankPct) {
+  if (!tankEnabled) return "Tank Disabled";
+  if (justUseTank)  return "Force: Tank";
+  if (justUseMains) return "Force: Mains";
+  return (tankPct <= tankLowThresholdPct) ? "Auto: Mains" : "Auto: Tank";
+}
+
 bool isTankLow() {
   if (!tankEnabled) return true; // tank disabled => treat as low to force mains
   return tankPercent() <= tankLowThresholdPct;
@@ -2795,6 +2808,14 @@ void setup() {
 
   const bool cooldownActiveNow = isCooldownActiveNow();
   const bool rainDelayBlockingNow = (rainActive || cooldownActiveNow);
+  const int statusTankRaw = readTankRaw();
+  const int statusTankPct = tankPercentFromRaw(statusTankRaw);
+  const int statusMoistureRaw = moistureRaw();
+  int statusMoisturePct = -1;
+  if (statusMoistureRaw >= 0 && moistureDryRaw != moistureWetRaw) {
+    statusMoisturePct = constrain(map(statusMoistureRaw, moistureDryRaw, moistureWetRaw, 0, 100), 0, 100);
+  }
+  const bool statusMoistureSkip = moistureProbeEnabled && statusMoisturePct >= moistureSkipThresholdPct;
 
   doc["rainDelayActive"] = rainDelayBlockingNow;
   doc["rainActive"]      = rainActive;
@@ -2802,11 +2823,11 @@ void setup() {
   doc["windDelayActive"] = windActive;
   doc["rainDelayCause"]  = rainDelayCauseText();
   doc["zonesCount"]      = zonesCount;
-  doc["tankPct"]         = tankPercent();
-  doc["tankRaw"]         = readTankRaw();
+  doc["tankPct"]         = statusTankPct;
+  doc["tankRaw"]         = statusTankRaw;
   doc["tankEmptyRaw"]    = tankEmptyRaw;
   doc["tankFullRaw"]     = tankFullRaw;
-  doc["sourceMode"]      = sourceModeText();
+  doc["sourceMode"]      = sourceModeTextForTankPct(statusTankPct);
   doc["wifiConnected"]   = (WiFi.status() == WL_CONNECTED);
   doc["wifiIp"]          = WiFi.localIP().toString();
   doc["rssi"]            = WiFi.RSSI();
@@ -2897,9 +2918,9 @@ void setup() {
     doc["smartWatering"] = smartWateringEnabled;
     doc["smartFactor"] = smartWateringFactor();
     doc["moistureEnabled"] = moistureProbeEnabled;
-    doc["moisturePct"] = moisturePercent();
-    doc["moistureRaw"] = moistureRaw();
-    doc["moistureSkip"] = isSoilWetForSmartSkip();
+    doc["moisturePct"] = statusMoisturePct;
+    doc["moistureRaw"] = statusMoistureRaw;
+    doc["moistureSkip"] = statusMoistureSkip;
 
     // Zones snapshot
     JsonArray zones = doc["zones"].to<JsonArray>();
@@ -6945,7 +6966,7 @@ void handleRoot() {
   html += F("if(hs) hs.textContent=masterOff?'Automation blocked':(epoch?(name+(dur>0?(' - '+fmtDur(dur)):'')):(st.rainDelayActive?'Waiting for rain delay to clear':'No queued run'));");
   html += F("})();");
 
-  html += F("}catch(e){} } setInterval(refreshStatus,1000); refreshStatus(); setInterval(refreshWifiStatus,60000);");
+  html += F("}catch(e){} } setInterval(refreshStatus,3000); refreshStatus(); setInterval(refreshWifiStatus,60000);");
 
   // expose zonesCount & Save All
   html += F("const ZC="); html += String(zonesCount); html += F(";");
