@@ -1046,6 +1046,7 @@ static String httpGetMeteo(const String& url, int& code, uint16_t timeoutMs) {
   WiFiClientSecure secure;   // <-- This one should be created first
   HTTPClient http;           // <-- This one second
   secure.setInsecure();
+  http.setConnectTimeout(timeoutMs);
   http.setTimeout(timeoutMs);
   http.begin(secure, url);
   code = http.GET();
@@ -1056,7 +1057,7 @@ static String httpGetMeteo(const String& url, int& code, uint16_t timeoutMs) {
 
 static uint16_t meteoHttpTimeoutMs() {
   const int rssi = WiFi.RSSI();
-  return (WiFi.status() == WL_CONNECTED && rssi >= -75) ? 6000 : 3000;
+  return (WiFi.status() == WL_CONNECTED && rssi >= -75) ? 2500 : 1200;
 }
 
 static inline bool isValidLatLon(float lat, float lon) {
@@ -3782,7 +3783,8 @@ String fetchWeather() {
     return url;
   };
 
-  for (int pass = 0; pass < 2; ++pass) {
+  const int maxPasses = (model == "best_match") ? 1 : 2;
+  for (int pass = 0; pass < maxPasses; ++pass) {
     bool useSelectedModel = (pass == 0);
     String url = buildUrl(useSelectedModel);
     int code = 0;
@@ -3806,10 +3808,12 @@ String fetchWeather() {
     String out;
     if (buildCurrentFromHourlyPayload(hourlyPayload, out)) return out;
   }
-  String hourlyPayloadForecast = fetchWeatherHourlyForCurrent(model, meteoLat, meteoLon, false);
-  if (hourlyPayloadForecast.length()) {
-    String out;
-    if (buildCurrentFromHourlyPayload(hourlyPayloadForecast, out)) return out;
+  if (model != "best_match") {
+    String hourlyPayloadForecast = fetchWeatherHourlyForCurrent(model, meteoLat, meteoLon, false);
+    if (hourlyPayloadForecast.length()) {
+      String out;
+      if (buildCurrentFromHourlyPayload(hourlyPayloadForecast, out)) return out;
+    }
   }
   return "";
 }
@@ -3895,7 +3899,8 @@ String fetchForecast(float lat, float lon) {
     return url;
   };
 
-  for (int pass = 0; pass < 2; ++pass) {
+  const int maxPasses = (model == "best_match") ? 1 : 2;
+  for (int pass = 0; pass < maxPasses; ++pass) {
     bool useSelectedModel = (pass == 0);
     String url = buildUrl(useSelectedModel);
     int code = 0;
@@ -4109,11 +4114,17 @@ void updateCachedWeather() {
 
   if (needCur) {
     String fresh = fetchWeather();
+    lastWeatherUpdate = nowms;
     if (fresh.length() > 0) {
       weatherChanged = (fresh != cachedWeatherData);
       cachedWeatherData = fresh;
-      lastWeatherUpdate = nowms;
     }
+    if (weatherChanged || !curWeatherValid) {
+      refreshCurrentWeatherSnapshotFromCache();
+    }
+    applyLocalClimateOverride();
+    tickActualRainHistory();
+    return;
   }
 
   // Decode once when weather payload changes (or first run).
@@ -4127,9 +4138,9 @@ void updateCachedWeather() {
   // ---- Forecast fetch / parse ----
   if (haveCoord && (cachedForecastData == "" || (nowms - lastForecastUpdate >= forecastUpdateInterval))) {
     String freshFc = fetchForecast(meteoLat, meteoLon);
+    lastForecastUpdate = nowms;
     if (freshFc.length() > 0) {
       cachedForecastData = freshFc;
-      lastForecastUpdate = nowms;
 
       rainNext12h_mm = 0; 
       rainNext24h_mm = 0; 
