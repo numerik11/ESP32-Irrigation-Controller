@@ -259,7 +259,14 @@ int tankPin  = 40;
 int tankLevelPin = 19; // ADC input (ESP32-S3: GPIO1..20 are ADC)
 #endif
 
-const int LED_PIN  = -1;
+#ifndef STATUS_LED_PIN
+  #define STATUS_LED_PIN -1
+#endif
+#ifndef STATUS_LED_ACTIVE_LOW
+  #define STATUS_LED_ACTIVE_LOW 0
+#endif
+const int LED_PIN = STATUS_LED_PIN;
+static const bool STATUS_LED_IS_ACTIVE_LOW = (STATUS_LED_ACTIVE_LOW != 0);
 
 // Physical rain sensor
 bool rainSensorEnabled = false;
@@ -426,6 +433,7 @@ uint8_t i2cFailCount = 0;
 
 // Timing
 static const uint32_t LOOP_SLEEP_MS    = 20;
+static const uint32_t WIFI_CHECK_MS    = 10000;
 static const uint32_t I2C_CHECK_MS     = 1000;
 static const uint32_t TIME_QUERY_MS    = 1000;
 static const uint32_t SCHEDULE_TICK_MS = 1000;
@@ -562,6 +570,8 @@ bool isValidAdcPin(int pin);
 bool isValidGpioPin(int pin);
 bool isValidPhotoPin(int pin);
 void updateStatusPixel();
+void initStatusLedPwm();
+void updateStatusLedPwm();
 static inline unsigned long durationForSlot(int z, int slot);
 static float smartWateringFactor();
 static unsigned long smartWateringDurationForSlot(int z, int slot);
@@ -570,6 +580,7 @@ void rebuildRuntimeCountersFromEvents();
 void statusPixelSet(uint8_t r,uint8_t g,uint8_t b);
 uint8_t statusPixelPulseLevel(uint16_t periodMs, uint8_t low, uint8_t high);
 bool statusPixelWindowOn(uint16_t periodMs, uint16_t startMs, uint16_t widthMs);
+uint8_t statusLedDutyLevel();
 bool physicalRainNowRaw();
 String rainDelayCauseText();
 static inline bool isRainDelayBlockingNow();
@@ -1810,6 +1821,34 @@ bool statusPixelWindowOn(uint16_t periodMs, uint16_t startMs, uint16_t widthMs) 
   return phase >= startMs || phase < (endMs - periodMs);
 }
 
+uint8_t statusLedDutyLevel() {
+  uint8_t duty = statusPixelPulseLevel(1800, 10, 42);
+
+  bool anyZoneOn = false;
+  for (int i = 0; i < (int)zonesCount; i++) {
+    if (zoneActive[i]) { anyZoneOn = true; break; }
+  }
+
+  const uint32_t sinceBootMs = millis() - bootMillis;
+  if (sinceBootMs < 3000U) {
+    duty = statusPixelPulseLevel(1200, 14, 80);
+  } else if (WiFi.status() != WL_CONNECTED) {
+    const bool on = statusPixelWindowOn(1100, 0, 120) || statusPixelWindowOn(1100, 180, 120);
+    duty = on ? 220 : 0;
+  } else if (anyZoneOn) {
+    duty = 255;
+  } else if (!systemMasterEnabled || isPausedNow()) {
+    duty = statusPixelPulseLevel(1400, 6, 170);
+  } else if (rainActive || windActive || isBlockedNow()) {
+    const bool on = statusPixelWindowOn(1300, 0, 110) || statusPixelWindowOn(1300, 170, 110);
+    duty = on ? 230 : 8;
+  } else if (useGpioFallback) {
+    duty = statusPixelPulseLevel(1500, 12, 95);
+  }
+
+  return duty;
+}
+
 #if __has_include("soc/soc_caps.h")
   #include "soc/soc_caps.h"
 #endif
@@ -1952,6 +1991,9 @@ static bool g_tftDisplayOn = true;
 static bool g_tftPwmReady = false;
 static uint8_t g_tftBrightness = 125; // 0-255 duty when ON
 static const int TFT_PWM_CH = 7;      // LEDC channel for TFT BL
+static bool g_statusLedPwmReady = false;
+static uint8_t g_statusLedLastDuty = 255;
+static const int STATUS_LED_PWM_CH = 6;
 static bool g_forceHomeReset = false; // force full HomeScreen repaint
 static bool g_forceRainReset = false; // force full RainScreen repaint
 static bool g_forceManualReset = false; // force full Manual screen repaint
@@ -1967,23 +2009,55 @@ static bool anyZoneActive() {
 
 // ---------- LEDC PWM compatibility (ESP32 Arduino core 2.x vs 3.x) ----------
 #if defined(ESP_ARDUINO_VERSION_MAJOR) && (ESP_ARDUINO_VERSION_MAJOR >= 3)
-static bool ledcAttachCompat(int pin, uint32_t freq, uint8_t resBits) {
+static bool ledcAttachCompat(int pin, uint32_t freq, uint8_t resBits, int /*channel*/) {
   return ledcAttach(pin, freq, resBits);
 }
-static void ledcWriteCompat(int pin, uint32_t duty) {
+static void ledcWriteCompat(int pin, uint32_t duty, int /*channel*/) {
   ledcWrite(pin, duty);
 }
 #else
-static bool ledcAttachCompat(int pin, uint32_t freq, uint8_t resBits) {
-  double actual = ledcSetup(TFT_PWM_CH, freq, resBits);
+static bool ledcAttachCompat(int pin, uint32_t freq, uint8_t resBits, int channel) {
+  double actual = ledcSetup(channel, freq, resBits);
   if (actual <= 0) return false;
-  ledcAttachPin(pin, TFT_PWM_CH);
+  ledcAttachPin(pin, channel);
   return true;
 }
-static void ledcWriteCompat(int /*pin*/, uint32_t duty) {
-  ledcWrite(TFT_PWM_CH, duty);
+static void ledcWriteCompat(int /*pin*/, uint32_t duty, int channel) {
+  ledcWrite(channel, duty);
 }
 #endif
+
+static inline uint8_t statusLedPhysicalDuty(uint8_t logicalDuty) {
+  return STATUS_LED_IS_ACTIVE_LOW ? (uint8_t)(255U - logicalDuty) : logicalDuty;
+}
+
+void initStatusLedPwm() {
+  g_statusLedPwmReady = false;
+  g_statusLedLastDuty = 255;
+  if (LED_PIN < 0) return;
+  if (!isValidGpioPin(LED_PIN)) {
+    Serial.printf("[LED] Invalid LED_PIN=%d; PWM status LED disabled.\n", LED_PIN);
+    return;
+  }
+  const uint32_t freq = 5000;
+  const uint8_t resBits = 8;
+  if (!ledcAttachCompat(LED_PIN, freq, resBits, STATUS_LED_PWM_CH)) {
+    Serial.println("[LED] LEDC setup failed; PWM status LED disabled.");
+    pinMode(LED_PIN, OUTPUT);
+    digitalWrite(LED_PIN, STATUS_LED_IS_ACTIVE_LOW ? HIGH : LOW);
+    return;
+  }
+  g_statusLedPwmReady = true;
+  ledcWriteCompat(LED_PIN, statusLedPhysicalDuty(0), STATUS_LED_PWM_CH);
+}
+
+void updateStatusLedPwm() {
+  if (!g_statusLedPwmReady) return;
+  const uint8_t logicalDuty = statusLedDutyLevel();
+  if (logicalDuty == g_statusLedLastDuty) return;
+  g_statusLedLastDuty = logicalDuty;
+  ledcWriteCompat(LED_PIN, statusLedPhysicalDuty(logicalDuty), STATUS_LED_PWM_CH);
+}
 
 static void tftInitBacklightPwm() {
   if (!displayEnabled) return;
@@ -1997,12 +2071,12 @@ static void tftInitBacklightPwm() {
   }
   const uint32_t freq = 5000;
   const uint8_t resBits = 8;
-  if (!ledcAttachCompat(tftBlPin, freq, resBits)) {
+  if (!ledcAttachCompat(tftBlPin, freq, resBits, TFT_PWM_CH)) {
     Serial.println("[TFT] LEDC setup failed; PWM backlight disabled.");
     return;
   }
   g_tftPwmReady = true;
-  ledcWriteCompat(tftBlPin, g_tftBlOn ? g_tftBrightness : 0);
+  ledcWriteCompat(tftBlPin, g_tftBlOn ? g_tftBrightness : 0, TFT_PWM_CH);
 }
 
 static inline void tftDisplay(bool on){
@@ -2040,7 +2114,7 @@ static inline void tftBacklight(bool on){
     }
     if (tftBlPin >= 0) {
       if (g_tftPwmReady) {
-        ledcWriteCompat(tftBlPin, on ? g_tftBrightness : 0);
+        ledcWriteCompat(tftBlPin, on ? g_tftBrightness : 0, TFT_PWM_CH);
       } else {
         pinMode(tftBlPin, OUTPUT);
         digitalWrite(tftBlPin, on ? HIGH : LOW);   // most modules: HIGH = on
@@ -2059,7 +2133,7 @@ static void tftSetBrightness(uint8_t pct){ // pct: 0-100
   g_tftBrightness = duty;
   if (tftBlPin >= 0) {
     if (g_tftPwmReady) {
-      ledcWriteCompat(tftBlPin, g_tftBlOn ? duty : 0);
+      ledcWriteCompat(tftBlPin, g_tftBlOn ? duty : 0, TFT_PWM_CH);
     } else {
       // if no PWM, fall back to on/off at threshold
       digitalWrite(tftBlPin, (pct > 0) ? HIGH : LOW);
@@ -2552,9 +2626,7 @@ void setup() {
   }
   initGpioPinsForZones();
 
-  if (LED_PIN >= 0 && isValidGpioPin(LED_PIN)) {
-    pinMode(LED_PIN, OUTPUT);
-  }
+  initStatusLedPwm();
 
   // Status pixel (WS2812)
   if (STATUS_PIXEL_PIN >= 0) {
@@ -3148,17 +3220,26 @@ void setup() {
 // ---------- Loop ----------
 void loop() {
   static bool firstLoopLogged = false;
+  static uint32_t lastWifiCheck = 0;
+
   if (!firstLoopLogged) {
     firstLoopLogged = true;
     Serial.println("[BOOT] first loop");
   }
-  const uint32_t now = millis();
+
+  uint32_t now = millis();
   #if ENABLE_OTA
   ArduinoOTA.handle();
   #endif
 
   server.handleClient();  // serve UI first to keep it responsive
-  wifiCheck();
+
+  if (WiFi.status() != WL_CONNECTED && now - lastWifiCheck >= WIFI_CHECK_MS) {
+    lastWifiCheck = now;
+    wifiCheck();
+    now = millis();
+  }
+
   checkWindRain();
   mqttEnsureConnected();
   if (mqttEnabled) _mqtt.loop();
@@ -3255,11 +3336,16 @@ void loop() {
     lastI2cCheck = now; checkI2CHealth();
   }
 
-  // WS2812 status pixel (non-blocking, light refresh)
+  // Status LEDs (non-blocking, light refresh)
   static uint32_t lastPixelUpdate = 0;
   if (statusPixelReady && now - lastPixelUpdate >= 100) {
     lastPixelUpdate = now;
     updateStatusPixel();
+  }
+  static uint32_t lastStatusLedUpdate = 0;
+  if (g_statusLedPwmReady && now - lastStatusLedUpdate >= 50) {
+    lastStatusLedUpdate = now;
+    updateStatusLedPwm();
   }
 
   bool anyActive=false;
@@ -3271,6 +3357,11 @@ void loop() {
 
     for (int z=0; z<(int)zonesCount; z++) {
       if (zoneActive[z] && hasDurationCompleted(z)) turnOffZone(z);
+    }
+
+    anyActive = false;
+    for (int z=0; z<(int)zonesCount; z++) {
+      if (zoneActive[z]) { anyActive = true; break; }
     }
 
     if (!isBlockedNow()) {
@@ -8076,6 +8167,20 @@ void handleLogPage() {
   int stopCount = 0;
   int weatherDelayCount = 0;
   String latestTs = "-";
+  bool logTruncatedForPage = false;
+  size_t logBytesShown = 0;
+
+  if (f) {
+    const size_t maxLogPageBytes = 32768;
+    const size_t fileSize = f.size();
+    logBytesShown = fileSize;
+    if (fileSize > maxLogPageBytes) {
+      logTruncatedForPage = true;
+      logBytesShown = maxLogPageBytes;
+      f.seek(fileSize - maxLogPageBytes);
+      if (f.position() > 0) f.readStringUntil('\n');
+    }
+  }
 
   String eventRows;
   eventRows.reserve(9000);
@@ -8127,7 +8232,7 @@ void handleLogPage() {
     row += F("</td><td>"); row += htmlEscape(details); row += F("</td></tr>");
 
     // Keep newest events at the top of the table.
-    eventRows = row + eventRows;
+    if (eventRows.length() < 12000) eventRows = row + eventRows;
   }
   if (f) f.close();
   html += F("<nav class='nav'><div class='in'><div class='brand'><span class='dot'></span><div class='brand-copy'><span class='brand-title'>ESP32 Irrigation</span><span class='brand-sub'>Event History</span></div></div><div class='meta'><span id='eventCountBadge' class='pill'>");
@@ -8156,6 +8261,11 @@ void handleLogPage() {
   html += manualRuntime; html += F("</div><div class='hero-mini-sub'>Total Irrigation Runtime (Manual)</div></div>");
   html += F("</div></div></section>");
   html += F("<div class='section-head'><div><div class='section-kicker'>Audit Trail</div><h2>Recent events</h2></div><p class='section-note'>Newest entries stay at the top, including run starts, stops, queued starts, and cancellations.</p></div>");
+  if (logTruncatedForPage) {
+    html += F("<section class='card'><p class='section-note'>Showing the most recent ");
+    html += String(logBytesShown / 1024);
+    html += F(" KB of the event log to keep the page responsive. Use Download CSV for the complete log.</p></section>");
+  }
   html += F("<section class='card'><div class='toolbar'><form method='POST' action='/clearevents'><button class='btn btn-danger' type='submit'>Clear Events</button></form><form method='POST' action='/stopall'><button class='btn btn-warn' type='submit'>Stop All</button></form><label class='filter-toggle'><input id='hideManualRuns' type='checkbox'><span>Hide Manual Starts/Stops<small>Filter manual run entries from this view</small></span></label></div><div class='table-wrap'><table><thead><tr>");
   html += F("<th>Time</th><th>Zone</th><th>Event</th><th>Source</th><th>Rain Delay</th><th>Details</th></tr></thead><tbody>");
   html += eventRows;
