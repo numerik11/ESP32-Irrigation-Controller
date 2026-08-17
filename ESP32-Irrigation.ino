@@ -4345,10 +4345,10 @@ void logEvent(int zone, const char* eventType, const char* source, bool rainDela
   line += String(wind,1); line += ","; line += cond; line += ","; line += cname;
   if (smartWateringEnabled) {
     const int smartPct = (int)lroundf(smartWateringFactor() * 100.0f);
-    line += F("; Factor ");
+    line += F("; Current Runtime Factor: ");
     line += String(smartPct);
     line += F("%");
-    line += F("; Moisture ");
+    line += F("; Ground Moisture: ");
     if (!moistureProbeEnabled) {
       line += F("Disabled");
     } else {
@@ -8016,24 +8016,6 @@ static String htmlEscape(const String& s) {
   return out;
 }
 
-static String compactRunDetailText(const String& temp, const String& hum, const String& wind, const String& cond, String city) {
-  city.replace(F("; Current Runtime Factor: "), F("; Factor "));
-  city.replace(F("; Ground Moisture: "), F("; Moisture "));
-  city.replace(F("No valid reading"), F("No reading"));
-
-  String details;
-  details.reserve(96 + city.length());
-  details += temp; details += F("C, ");
-  details += hum; details += F("%, ");
-  details += wind; details += F("m/s, ");
-  details += cond;
-  if (city.length()) {
-    details += F(" @ ");
-    details += city;
-  }
-  return details;
-}
-
 static const char* eventLabel(const String& ev, const String& src) {
   if (ev == "START") return "Start";
   if (ev == "STOPPED") return "Stopped";
@@ -8233,7 +8215,9 @@ void handleLogPage() {
     String cond =(i9>i8)?line.substring(i8+1,i9):"";
     String city =(i9>=0)?line.substring(i9+1):"";
 
-    String details = temp.length() ? compactRunDetailText(temp, hum, wind, cond, city) : "n/a";
+    String details = (temp.length()
+                      ? ("T="+temp+"C, H="+hum+"%, W="+wind+"m/s, "+cond+" @ "+city)
+                      : "n/a");
 
     eventCount++;
     latestTs = ts;
