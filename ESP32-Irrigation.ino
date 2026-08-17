@@ -4304,24 +4304,18 @@ bool checkWindRain() {
 }
 
 // ---------- Event log ----------
-static bool isRunLogEvent(const char* eventType) {
-  return eventType && (strcmp(eventType, "START") == 0 || strcmp(eventType, "STOPPED") == 0);
-}
-
 void logEvent(int zone, const char* eventType, const char* source, bool rainDelayed) {
-  if (!isRunLogEvent(eventType)) return;
-
-  // Track runtime for scheduled/manual runs on STOPPED events.
-  if (strcmp(eventType, "STOPPED") == 0) {
-    bool isManual = false;
-    if (zone >= 0 && zone < MAX_ZONES) {
-      isManual = zoneStartedManual[zone];
+    // Track runtime for scheduled/manual runs on STOPPED events
+    if (eventType && strcmp(eventType, "STOPPED") == 0) {
+      // Determine if this was a manual or scheduled run
+      bool isManual = false;
+      if (zone >= 0 && zone < MAX_ZONES) {
+        isManual = zoneStartedManual[zone];
+      }
+      unsigned long dur = elapsedRunSec(zone);
+      if (isManual) totalManualRuntimeSec += dur;
+      else totalScheduledRuntimeSec += dur;
     }
-    unsigned long dur = elapsedRunSec(zone);
-    if (isManual) totalManualRuntimeSec += dur;
-    else totalScheduledRuntimeSec += dur;
-  }
-
   updateCachedWeather(); // safe early-out if g_inHttp==true, keeps details recent enough
   float temp = curTempC;
   float wind = curWindMs;
@@ -8206,7 +8200,8 @@ void handleLogPage() {
     String ev   = line.substring(i2+1,i3);
     String src  = line.substring(i3+1,i4);
     String rd   = line.substring(i4+1,i5);
-    if (!isRunLogEvent(ev.c_str())) continue;
+    const bool isRunEvent = (ev == "START" || ev == "STOPPED");
+    if (!isRunEvent) continue;
     const bool isManualRunEvent = (src == "MANUAL");
 
     String temp =(i6>i5)?line.substring(i5+1,i6):"";
