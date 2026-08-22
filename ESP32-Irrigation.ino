@@ -7077,7 +7077,17 @@ void handleSetupPage() {
   HttpScope _scope;
   loadConfig();
   sanitizePinConfig();
-  String html; html.reserve(26000);
+  // Stream this large page in sections. A classic ESP32 cannot reliably grow
+  // one contiguous String large enough for the complete setup form.
+  String html; html.reserve(12000);
+  server.setContentLength(CONTENT_LENGTH_UNKNOWN);
+  server.send(200, "text/html", "");
+  auto flush = [&](){
+    if (html.length()) {
+      server.sendContent(html);
+      html = "";
+    }
+  };
   const int uiMaxGpio = 
   #if defined(CONFIG_IDF_TARGET_ESP32)
     39;
@@ -7308,7 +7318,8 @@ void handleSetupPage() {
   html += F("details.collapse summary,html[data-theme='dark'] details.collapse summary{color:#ffffff}html[data-theme='light'] details.collapse summary{color:#000000}");
   html += F("@media(max-width:760px){.page-head{padding:10px 12px}.page-head h1{font-size:1.2rem}.setup-hero{grid-template-columns:1fr}.setup-badges{grid-template-columns:1fr 1fr}.setup-nav{top:8px;flex-wrap:nowrap;overflow:auto;padding-bottom:6px}.setup-nav a{white-space:nowrap}.setup-actions-top{top:8px;z-index:9;padding:10px;border-radius:14px;background:rgba(13,23,24,.88);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);border:1px solid rgba(92,131,125,.2)}.row{padding-top:8px;flex-direction:column;align-items:stretch}.row label{min-width:0;width:100%}.row .btn,.row .btn-alt{width:100%}.switchline{align-items:flex-start}}");
   html += F(":root{--setup-bg:#f3f7fc;--setup-panel:#ffffff;--setup-ink:#172033;--setup-muted:#68758a;--setup-line:#dbe4ef;--setup-blue:#2563eb}html[data-theme='dark']{--setup-bg:#0b1220;--setup-panel:#111c2e;--setup-ink:#e7eef9;--setup-muted:#9aa9bd;--setup-line:#293a54;--setup-blue:#60a5fa}.wrap{max-width:1180px;margin:0 auto;padding:0 20px}body{background:var(--setup-bg);color:var(--setup-ink)}.page-head{margin:0 -20px 16px;padding:16px 20px;border:0;border-bottom:1px solid var(--setup-line);border-radius:0;background:var(--setup-panel);box-shadow:0 4px 14px rgba(15,23,42,.06)}.page-kicker{color:var(--setup-blue)}.page-sub,.setup-hero-copy p,.card-intro,.row small{color:var(--setup-muted)}.setup-hero{display:block;margin:0 -20px 16px;padding:18px 20px;border-radius:0;background:var(--setup-panel);border:0;border-bottom:1px solid var(--setup-line);box-shadow:none}.setup-overview-title{color:var(--setup-blue);margin-bottom:10px}.setup-badges{grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}.setup-badge{border-radius:7px;padding:12px;background:var(--setup-bg);border:1px solid var(--setup-line)}.setup-badge-k{color:var(--setup-muted)}.setup-badge-v{color:var(--setup-ink)}.setup-nav{top:8px;margin:0 0 10px;padding:7px;border-radius:7px;background:var(--setup-panel);border:1px solid var(--setup-line);box-shadow:0 5px 14px rgba(15,23,42,.08)}.setup-nav a{border-radius:6px;background:transparent;color:var(--setup-muted);border-color:transparent;padding:8px 11px}.setup-nav a:hover{transform:none;background:rgba(37,99,235,.1);border-color:rgba(37,99,235,.22);color:var(--setup-blue);box-shadow:none}.setup-actions-top{top:61px;margin:0 0 16px;padding:8px;border-radius:7px;background:var(--setup-panel);border:1px solid var(--setup-line);box-shadow:0 5px 14px rgba(15,23,42,.08)}.card{border-radius:7px;background:var(--setup-panel);border:1px solid var(--setup-line);box-shadow:0 6px 18px rgba(15,23,42,.06)}.card::before{height:2px;background:var(--setup-blue)}.card h3{color:var(--setup-ink)}details.collapse summary{color:var(--setup-ink);padding:7px 0;font-size:1rem}details.collapse summary:after{border-radius:6px;border-color:var(--setup-line);background:var(--setup-bg)}.collapse-body{border-top:1px solid var(--setup-line);padding-top:12px}.row{border-top-color:var(--setup-line)}label{color:var(--setup-ink)}input[type=text],input[type=number],select{background:var(--setup-bg);color:var(--setup-ink);border-color:var(--setup-line);border-radius:6px}.chip{background:var(--setup-bg);border-color:var(--setup-line);color:var(--setup-ink);border-radius:6px}.btn,.btn-alt{border-radius:6px}.btn-alt{background:var(--setup-bg);color:var(--setup-ink);border-color:var(--setup-line)}.save-confirm{margin-left:auto}@media(max-width:760px){.wrap{padding:0 12px}.page-head,.setup-hero{margin-left:-12px;margin-right:-12px;padding-left:12px;padding-right:12px}.setup-badges{grid-template-columns:repeat(2,minmax(0,1fr))}.setup-nav{top:8px}.setup-actions-top{top:58px}.setup-actions-top .save-confirm{margin-left:0}.row{padding-top:10px}}@media(max-width:440px){.setup-badges{grid-template-columns:1fr}.setup-actions-top .btn,.setup-actions-top .btn-alt{flex:1 1 100%}}</style></head><body>"); 
-  html += F("</style></head><body>");
+  // The preceding CSS fragment already closes style/head and opens body.
+  flush();
 
   html += F("<div class='wrap'><div class='page-head'><div class='page-head-copy'><div class='page-kicker'>Controller configuration</div><h1>System Setup</h1><div class='page-sub'>Firmware v");
   html += kFirmwareVersion;
@@ -7374,6 +7385,7 @@ void handleSetupPage() {
   html += F("</div>"); // end tankCard
   html += F("</div></details></div>");
 
+  flush();
   // Delays & Pause + thresholds
   html += F("<div class='card narrow' id='delays-card'><details class='collapse'><summary>Weather Delays & Pause</summary><div class='collapse-body'><p class='card-intro'>Weather locks and pause controls live here, including After-Rain Delay timing and wind thresholds.</p>");
   html += F("<div class='cols2 panel-split'>");
@@ -7417,6 +7429,7 @@ void handleSetupPage() {
   html += F("</div>"); // end cols2
   html += F("</div></details></div>"); // end Delays card
 
+  flush();
   // Smart Watering
   html += F("<div class='card narrow' id='smart-card'><details class='collapse'><summary>Smart Watering</summary><div class='collapse-body'><p class='card-intro'>Adjust scheduled and manual runtimes from weather and ground-moisture rules.</p>");
   html += F("<div class='cols2 panel-split'>");
@@ -7475,6 +7488,7 @@ void handleSetupPage() {
   html += F("</div>");
   html += F("</div></div></details></div>");
 
+  flush();
   // Physical rain & forecast
   html += F("<div class='card narrow' id='rain-card'><details class='collapse'><summary>Rain Inputs</summary><div class='collapse-body'><p class='card-intro'>Choose which rain sources can stop or delay irrigation. Open-Meteo uses the forecast location below; the physical sensor uses the GPIO here.</p>");
   html += F("<div class='row switchline'><label>Disable Open-Meteo Rain</label><input type='checkbox' name='rainForecastDisabled' ");
@@ -7484,6 +7498,7 @@ void handleSetupPage() {
   html += F("<div class='row switchline'><label>Invert Sensor</label><input type='checkbox' name='rainSensorInvert' "); html += (rainSensorInvert?"checked":""); html += F("><small>Use if board is NO</small></div>");
   html += F("</div></details></div>");
 
+  flush();
   // Weather
   html += F("<div class='card narrow' id='weather-card'><details class='collapse'><summary>Forecast Location & Model</summary><div class='collapse-body'><p class='card-intro'>Enter the irrigation site coordinates and choose the Open-Meteo forecast model used for dashboard weather, rain delay, wind delay, and Smart Watering.</p>");
   html += F("<div class='row'><label>Open-Meteo</label><a class='btn-alt' id='setupMeteoLink' href='https://open-meteo.com/en/docs?latitude=");
@@ -7530,6 +7545,7 @@ void handleSetupPage() {
   html += F("<div class='row helptext'><label></label><small>No API key required. Enter your coordinates for Open-Meteo.</small></div>");
   html += F("</div></details></div>");
 
+  flush();
   // Timezone
   html += F("<div class='card narrow' id='timezone-card'><details class='collapse'><summary>Timezone</summary><div class='collapse-body'><p class='card-intro'>Use a POSIX timezone string or a fixed UTC offset so schedules and weather line up with local time.</p>");
 
@@ -7624,6 +7640,7 @@ void handleSetupPage() {
   html += F("'><small>Minutes from UTC</small></div>");
   html += F("</div></details></div>"); // end Timezone card
 
+  flush();
   // Display / Auto backlight
   html += F("<div class='card narrow' id='display-card'><details class='collapse'><summary>Display & Backlight</summary><div class='collapse-body'><p class='card-intro'>Choose the screen type, rotation, and light-sensor backlight behavior.</p>");
   html += F("<div class='row'><label>Display</label><select class='in-med' name='displayType' id='displayTypeSelect'>");
@@ -7682,6 +7699,7 @@ void handleSetupPage() {
   html += F("><small>Enable if your LDR reads higher when dark</small></div>");
   html += F("</div></details></div>");
 
+  flush();
   // SPI (TFT) config
   html += F("<div class='card narrow' id='advanced-card' data-tft-only><details class='collapse'><summary>TFT Display Pins</summary><div class='collapse-body'><p class='card-intro'>Advanced TFT SPI and backlight pin mapping. These pins are only used when Display is set to TFT.</p>");
   html += F("<div class='row'><label>TFT Size</label><div class='chip'>");
@@ -7737,6 +7755,7 @@ void handleSetupPage() {
   html += F("</small></div>");
   html += F("</div></details></div>");
 
+  flush();
   // I2C config
   html += F("<div class='card narrow' id='i2c-card'><details class='collapse'><summary>I2C Relay Expander Pins</summary><div class='collapse-body'><p class='card-intro'>SDA and SCL for the PCF8574 relay expanders. Leave these alone unless your expander wiring is different.</p>");
   html += F("<div class='row'><label>SDA</label><input class='in-xs' type='number' min='0' max='48' name='i2cSda' value='");
@@ -7790,6 +7809,7 @@ void handleSetupPage() {
   html += F("</div>");
   html += F("</div></details></div>");
 
+  flush();
   // Manual buttons
   html += F("<div class='card narrow' id='buttons-card'><details class='collapse'><summary>Physical Button Pins</summary><div class='collapse-body'><p class='card-intro'>Optional input pins for local controls. Buttons use INPUT_PULLUP, so wire the button to pull the pin LOW when pressed.</p>");
   html += F("<div class='row switchline'><label>Select Button GPIO</label><input class='in-xs' type='number' min='-1' max='"); html += String(uiMaxGpio); html += F("' name='manualSelectPin' value='");
@@ -7805,6 +7825,7 @@ void handleSetupPage() {
 
   
 
+  flush();
   // MQTT
   html += F("<div class='card narrow' id='mqtt-card'><details class='collapse'><summary>MQTT Integration</summary><div class='collapse-body'><p class='card-intro'>Publish controller status and accept simple commands from Home Assistant or another MQTT client.</p>");
   html += F("<div class='row switchline'><label>Enable MQTT</label><input type='checkbox' name='mqttEnabled' "); html += (mqttEnabled ? "checked" : ""); html += F("></div>");
@@ -8008,7 +8029,8 @@ void handleSetupPage() {
 
   html += F("</div></body></html>");
 
-  server.send(200,"text/html",html);
+  flush();
+  server.sendContent("");
 }
 
 // ---------- Schedule POST (per-zone card or full form) ----------
