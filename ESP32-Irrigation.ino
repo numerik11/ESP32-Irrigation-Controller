@@ -51,7 +51,7 @@ extern "C" {
 // ---------- Hardware ----------
 static const char kFirmwareSignature[] __attribute__((used)) =
   "Original author: Beau Kaczmarek - https://github.com/numerik11/ESP32-Irrigation-Controller";
-static const char kFirmwareVersion[] = "1.1.6";
+static const char kFirmwareVersion[] = "1.1.7";
 static const char kFirmwareBuildDate[] = __DATE__ " " __TIME__;
 static const uint8_t MAX_ZONES = 16;
 #if defined(CONFIG_IDF_TARGET_ESP32)
@@ -555,6 +555,7 @@ void turnOffZone(int zone);
 bool turnOnValveManual(int z, String* error = nullptr);
 void turnOffValveManual(int z);
 static void updateBootCount();
+static bool saveBootCount(uint32_t count);
 void handleRoot();
 void handleSubmit();
 void handleSetupPage();
@@ -2532,17 +2533,17 @@ void handleDiagnosticsPage() {
   html += F("@media(prefers-color-scheme:dark){:root{--bg:#0b1220;--panel:#111c2e;--ink:#e7eef9;--muted:#9aa9bd;--line:#293a54;--brand:#60a5fa;--brand-dark:#1d4ed8}}");
   html += F("*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font-family:'Segoe UI',Arial,sans-serif;line-height:1.45;-webkit-font-smoothing:antialiased}.wrap{max-width:1180px;margin:0 auto;padding:20px}");
   html += F(".nav{display:flex;justify-content:space-between;gap:16px;align-items:center;flex-wrap:wrap;margin:-20px -20px 24px;padding:16px 20px;background:var(--brand-dark);color:#fff;box-shadow:0 6px 18px rgba(15,23,42,.18)}.brand{font-weight:800;font-size:1.3rem}.links{display:flex;gap:8px;flex-wrap:wrap}");
-  html += F("a,.btn{display:inline-flex;align-items:center;justify-content:center;border:1px solid var(--line);border-radius:7px;padding:8px 12px;color:inherit;text-decoration:none;background:var(--panel);font-weight:700;transition:filter .15s,transform .08s}a:hover,.btn:hover{filter:brightness(1.08)}a:active,.btn:active{transform:translateY(1px)}.links a{border-color:rgba(255,255,255,.28);background:rgba(255,255,255,.1);color:#fff;font-size:.9rem}.links a:last-child{background:#fff;color:var(--brand-dark)}");
+  html += F("a,.btn{display:inline-flex;align-items:center;justify-content:center;border:1px solid var(--line);border-radius:7px;padding:8px 12px;color:inherit;text-decoration:none;background:var(--panel);font-weight:700;cursor:pointer;transition:filter .15s,transform .08s}a:hover,.btn:hover{filter:brightness(1.08)}a:active,.btn:active{transform:translateY(1px)}.links a{border-color:rgba(255,255,255,.28);background:rgba(255,255,255,.1);color:#fff;font-size:.9rem}.links a:last-child{background:#fff;color:var(--brand-dark)}");
   html += F(".grid{display:grid;gap:14px}.diag-grid{grid-template-columns:repeat(12,minmax(0,1fr));align-items:stretch;grid-auto-flow:row dense}.card{min-width:0;background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:16px;box-shadow:0 4px 14px rgba(15,23,42,.055)}.status-card{grid-column:span 4}.weather-card{grid-column:span 8}.pin-card{grid-column:span 6;overflow:hidden}.card-wide{grid-column:1/-1}");
   html += F("h1,h2{margin:0}h1{font-size:1.55rem}h2{font-size:1rem}.card-head{display:flex;align-items:center;justify-content:space-between;gap:12px;min-height:34px;margin:-2px 0 4px;padding-bottom:10px;border-bottom:1px solid var(--line)}.card-tag{flex:0 0 auto;color:var(--muted);font-size:.7rem;font-weight:750;text-transform:uppercase;letter-spacing:.08em}.k{color:var(--muted);font-size:.76rem;text-transform:uppercase;letter-spacing:.09em;font-weight:750}.v{font-size:1.35rem;font-weight:800;overflow-wrap:anywhere}.card .k+.v{margin-top:4px}");
   html += F("table{width:100%;border-collapse:collapse;font-size:.88rem}.status-card table,.weather-card table{table-layout:fixed}td,th{padding:8px 0;border-top:1px solid var(--line);vertical-align:top}tbody tr:first-child td{border-top:0}th{text-align:left;color:var(--muted);font-size:.68rem;text-transform:uppercase;letter-spacing:.08em}td:first-child{width:44%;color:var(--muted);padding-right:14px}td:last-child{text-align:right;font-weight:700;overflow-wrap:anywhere}.pin-table th:nth-child(2),.pin-table td:nth-child(2){width:104px;text-align:left}.pin-table th:nth-child(3),.pin-table td:nth-child(3){padding-left:16px}.pin-table td:first-child{width:auto;color:var(--ink);font-weight:700}.pin-table td:last-child{text-align:left;font-weight:500;color:var(--muted)}.pin-table td:nth-child(2){font-weight:800;white-space:nowrap}.ok{color:var(--ok)}.warn{color:var(--warn)}.bad{color:var(--bad)}code{display:inline-block;max-width:100%;border:1px solid var(--line);border-radius:5px;padding:2px 6px;background:var(--bg);font-family:Consolas,monospace;font-size:.82rem;color:var(--ink);white-space:normal;overflow-wrap:anywhere}");
   html += F("@media(max-width:820px){.status-card,.weather-card{grid-column:span 6}.hardware-card{grid-column:1/-1}.pin-card{grid-column:1/-1}}@media(max-width:640px){.wrap{padding:12px}.nav{margin:-12px -12px 16px;padding:14px 12px;align-items:flex-start}.links{width:100%;display:grid;grid-template-columns:repeat(4,1fr);gap:6px}.links a{padding:7px 5px;font-size:.8rem;white-space:nowrap}.diag-grid{grid-template-columns:1fr;gap:10px}.status-card,.weather-card,.pin-card,.card-wide,.hardware-card{grid-column:1}.card{padding:14px}h1{font-size:1.35rem}.card-head{margin-top:0}.pin-table thead{display:none}.pin-table tr{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:2px 10px;padding:9px 0;border-top:1px solid var(--line)}.pin-table tbody tr:first-child{border-top:0}.pin-table td{display:block;width:auto!important;padding:0!important;border:0}.pin-table td:nth-child(2){text-align:right}.pin-table td:nth-child(3){grid-column:1/-1;font-size:.82rem}.pin-table td:last-child{text-align:left}td,th{padding:8px 0}}</style></head><body><main class='wrap'>");
   html += F("<div class='nav'><div><div class='k'>Controller Health</div><h1>Diagnostics</h1></div><div class='links'><a href='/'>Home</a><a href='/setup'>Setup</a><a href='/events'>Events</a><a href='/diagnostics.json'>JSON</a></div></div>");
-  html += F("<style>.metric-grid{grid-template-columns:repeat(5,minmax(0,1fr));align-items:stretch}.metric-card{min-height:104px;display:flex;flex-direction:column;justify-content:space-between;overflow:hidden}.metric-card .v{font-size:1.14rem}.metric-card .k{font-size:.68rem}.metric-card:before{content:'';display:block;width:42px;height:3px;border-radius:3px;background:var(--brand);margin:-3px 0 12px}.metric-card:nth-child(2):before{background:var(--warn)}.metric-card:nth-child(3):before{background:var(--ok)}.metric-card:nth-child(4):before{background:#7c3aed}.metric-card:nth-child(5):before{background:#0891b2}.section-title{grid-column:1/-1;display:flex;align-items:center;gap:12px;margin:18px 0 0;color:var(--ink);font-size:.82rem;text-transform:uppercase;letter-spacing:.1em;font-weight:800}.section-title:after{content:'';height:1px;flex:1;background:var(--line)}.status{display:inline-flex;align-items:center;gap:7px}.status:before{content:'';flex:0 0 auto;width:8px;height:8px;border-radius:50%;background:currentColor}.grid+.grid{margin-top:14px}@media(max-width:980px){.metric-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.metric-grid .metric-card:first-child{grid-column:1/-1}}@media(max-width:480px){.metric-grid{grid-template-columns:1fr}.metric-grid .metric-card:first-child{grid-column:1}.metric-card{min-height:88px}.metric-card .v{font-size:1.08rem}}</style>");
+  html += F("<style>.metric-grid{grid-template-columns:repeat(5,minmax(0,1fr));align-items:stretch}.metric-card{min-height:104px;display:flex;flex-direction:column;justify-content:space-between;overflow:hidden}.metric-card .v{font-size:1.14rem}.metric-card .k{font-size:.68rem}.metric-value-row{display:flex;align-items:center;gap:9px}.btn-small{padding:3px 7px;border-radius:5px;font-size:.68rem;line-height:1.2;color:var(--muted)}.metric-card:before{content:'';display:block;width:42px;height:3px;border-radius:3px;background:var(--brand);margin:-3px 0 12px}.metric-card:nth-child(2):before{background:var(--warn)}.metric-card:nth-child(3):before{background:var(--ok)}.metric-card:nth-child(4):before{background:#7c3aed}.metric-card:nth-child(5):before{background:#0891b2}.section-title{grid-column:1/-1;display:flex;align-items:center;gap:12px;margin:18px 0 0;color:var(--ink);font-size:.82rem;text-transform:uppercase;letter-spacing:.1em;font-weight:800}.section-title:after{content:'';height:1px;flex:1;background:var(--line)}.status{display:inline-flex;align-items:center;gap:7px}.status:before{content:'';flex:0 0 auto;width:8px;height:8px;border-radius:50%;background:currentColor}.grid+.grid{margin-top:14px}@media(max-width:980px){.metric-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.metric-grid .metric-card:first-child{grid-column:1/-1}}@media(max-width:480px){.metric-grid{grid-template-columns:1fr}.metric-grid .metric-card:first-child{grid-column:1}.metric-card{min-height:88px}.metric-card .v{font-size:1.08rem}}</style>");
 
   html += F("<section class='grid metric-grid'>");
   html += F("<div class='card metric-card'><div class='k'>Uptime</div><div class='v'>"); html += formatRuntimeClock(uptimeSec); html += F("</div></div>");
-  html += F("<div class='card metric-card'><div class='k'>Boot Count</div><div class='v'>"); html += String(bootCount); html += F("</div><div class='k'>Reset: "); html += resetReasonText(esp_reset_reason()); html += F("</div></div>");
+  html += F("<div class='card metric-card'><div class='k'>Boot Count</div><div class='metric-value-row'><div id='diagBootCount' class='v'>"); html += String(bootCount); html += F("</div><button id='resetBootCount' class='btn btn-small' type='button' title='Set boot count to zero'>Reset</button></div><div class='k'>Reset: "); html += resetReasonText(esp_reset_reason()); html += F("</div></div>");
   html += F("<div class='card metric-card'><div class='k'>WiFi</div><div id='diagWifiIp' class='v status ");
   html += (WiFi.status() == WL_CONNECTED ? "ok" : "bad"); html += F("'>");
   html += (WiFi.status() == WL_CONNECTED ? WiFi.localIP().toString() : String("Disconnected")); html += F("</div><div class='k' id='diagWifiRssi'>RSSI ");
@@ -2560,7 +2561,7 @@ void handleDiagnosticsPage() {
   html += F("<tr><td>Build</td><td>"); html += kFirmwareBuildDate; html += F("</td></tr>");
   html += F("<tr><td>Reset reason</td><td>"); html += resetReasonText(esp_reset_reason()); html += F("</td></tr>");
   html += F("<tr><td>Reset code</td><td>"); html += String((int)esp_reset_reason()); html += F("</td></tr>");
-  html += F("<tr><td>Boot count</td><td>"); html += String(bootCount); html += F("</td></tr>");
+  html += F("<tr><td>Boot count</td><td id='diagBootCountTable'>"); html += String(bootCount); html += F("</td></tr>");
   html += F("<tr><td>SDK</td><td>"); html += ESP.getSdkVersion(); html += F("</td></tr>");
   html += F("<tr><td>CPU</td><td>"); html += String(ESP.getCpuFreqMHz()); html += F(" MHz</td></tr>");
   html += F("<tr><td>Sketch</td><td>"); html += String(ESP.getSketchSize()); html += F(" B</td></tr>");
@@ -2652,6 +2653,7 @@ void handleDiagnosticsPage() {
   html += F("</section></main><script>");
   html += F("function wifiQuality(v,c){if(!c)return'Disconnected';if(typeof v!=='number')return'Connected';if(v>=-50)return'Excellent';if(v>=-60)return'Strong';if(v>=-67)return'Good';if(v>=-75)return'Fair';if(v>=-82)return'Weak';return'Very weak';}");
   html += F("async function refreshWifiStatus(){try{const r=await fetch('/status',{cache:'no-store'});const s=await r.json();const connected=!!s.wifiConnected;const rssi=(typeof s.rssi==='number')?s.rssi:null;const quality=wifiQuality(rssi,connected);const signal=(rssi===null?'--':rssi)+' dBm - '+quality;const ip=document.getElementById('diagWifiIp');const rr=document.getElementById('diagWifiRssi');const nw=document.getElementById('diagNetworkWifi');if(ip){ip.textContent=connected?(s.wifiIp||'Connected'):'Disconnected';ip.className='v status '+(connected?'ok':'bad');}if(rr)rr.textContent='RSSI '+signal;if(nw)nw.textContent=signal;}catch(e){}}");
+  html += F("document.getElementById('resetBootCount')?.addEventListener('click',async function(){this.disabled=true;try{const r=await fetch('/reset_boot_count',{method:'POST'});if(!r.ok)throw new Error(await r.text());document.getElementById('diagBootCount').textContent='0';document.getElementById('diagBootCountTable').textContent='0';}catch(e){alert('Unable to reset boot count');}finally{this.disabled=false;}});");
   html += F("setInterval(refreshWifiStatus,60000);refreshWifiStatus();");
   html += F("</script></body></html>");
 
@@ -2832,6 +2834,15 @@ void setup() {
   server.on("/tank", HTTP_GET, handleTankCalibration);
   server.on("/diagnostics", HTTP_GET, handleDiagnosticsPage);
   server.on("/diagnostics.json", HTTP_GET, handleDiagnosticsJson);
+  server.on("/reset_boot_count", HTTP_POST, [](){
+    HttpScope _scope;
+    if (!saveBootCount(0)) {
+      server.send(500, "text/plain", "Unable to save boot count");
+      return;
+    }
+    bootCount = 0;
+    server.send(200, "text/plain", "OK");
+  });
 
   // /status JSON
   server.on("/status", HTTP_GET, [](){
@@ -9428,14 +9439,15 @@ static uint32_t readBootCount() {
   return (uint32_t)strtoul(value.c_str(), nullptr, 10);
 }
 
-static void saveBootCount(uint32_t count) {
+static bool saveBootCount(uint32_t count) {
   File f = LittleFS.open("/boot_count.txt", "w");
   if (!f) {
     Serial.println("[BOOT] Unable to persist boot count");
-    return;
+    return false;
   }
-  f.print(count);
+  const bool saved = f.print(count) > 0;
   f.close();
+  return saved;
 }
 
 static void updateBootCount() {
