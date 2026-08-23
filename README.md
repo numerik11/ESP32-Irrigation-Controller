@@ -108,7 +108,7 @@ An optional level sensor can help select between a rainwater tank and mains supp
 <img width="650" alt="ESP32-S3 6 Zone 24V AC Irrigation Controller" src="https://github.com/user-attachments/assets/f9d2c234-1e8a-4ff2-8e8d-51a5bdf73905" />
 </p>
 
-### Example hardware build
+### TFT Display
 
 <p align="center">
 <img width="215" height="113" alt="PXL_20260808_043755753~2" src="https://github.com/user-attachments/assets/42fbe90b-aeb4-48c1-9cfa-cd5753487815" />
