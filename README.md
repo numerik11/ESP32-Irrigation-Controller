@@ -111,7 +111,7 @@ An optional level sensor can help select between a rainwater tank and mains supp
 ### Example hardware build
 
 <p align="center">
-<img width="450" alt="ESP32 Irrigation Controller Hardware Build" src="https://github.com/user-attachments/assets/2caa1f7a-3e10-4306-ac2d-97c6a0ce8309" />
+<img width="215" height="113" alt="PXL_20260808_043755753~2" src="https://github.com/user-attachments/assets/42fbe90b-aeb4-48c1-9cfa-cd5753487815" />
 </p>
 
 > ⚠️ Wiring and available GPIOs vary between boards, relay modules, and irrigation systems. Confirm pin assignments, relay polarity, and voltage requirements before applying power.
