@@ -45,7 +45,7 @@ See controller status, active and upcoming zones, progress, weather, tank level,
 Configure zones, schedules, GPIO assignments, relay polarity, weather rules, sensors, MQTT, and displays from your browser.
 
 <p align="center">
-<img width="350" alt="ESP32 Irrigation Setup" src="https://github.com/user-attachments/assets/ebdb1294-a135-4ca0-a4f9-31c44ddc50de" />
+<img width="609" height="821" alt="image" src="https://github.com/user-attachments/assets/6d97ff3c-84df-40e8-a4f5-4e66dac3346f" />
 </p>
 
 ### Events
@@ -53,7 +53,7 @@ Configure zones, schedules, GPIO assignments, relay polarity, weather rules, sen
 Review watering and system activity, including weather-related delays, and export the log as CSV.
 
 <p align="center">
-<img width="500" alt="ESP32 Irrigation Event Log" src="https://github.com/user-attachments/assets/46bd8e74-fc39-48e6-be24-0bccc911c33f" />
+<img width="650" height="492" alt="image" src="https://github.com/user-attachments/assets/1bc1d7e9-1449-4f20-a51b-a0eaa4b347e2" />
 </p>
 
 ## ✨ Features
