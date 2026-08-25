@@ -51,7 +51,7 @@ extern "C" {
 // ---------- Hardware ----------
 static const char kFirmwareSignature[] __attribute__((used)) =
   "Original author: Beau Kaczmarek - https://github.com/numerik11/ESP32-Irrigation-Controller";
-static const char kFirmwareVersion[] = "1.1.10";
+static const char kFirmwareVersion[] = "1.1.11";
 static const char kFirmwareBuildDate[] = __DATE__ " " __TIME__;
 static const uint8_t MAX_ZONES = 16;
 #if defined(CONFIG_IDF_TARGET_ESP32)
@@ -6574,8 +6574,8 @@ void handleRoot() {
 
   // --- Summary cards ---
   html += F("<div class='wrap section-block' id='summary-section'><div class='section-head'><div><div class='section-kicker'>Overview</div><h2>Controller summary</h2></div>");
-  html += F("<p class='section-note'>Live weather, delay and watering status</p></div>");
-  html += F("<div class='glass section summary-shell'><div class='grid summary-grid'>");
+  html += F("<button class='btn btn-secondary' type='button' id='summaryToggle' aria-controls='summaryBody' aria-expanded='false'>Show Summary</button></div>");
+  html += F("<div id='summaryBody' class='glass section summary-shell' style='display:none'><div class='grid summary-grid'>");
 
   html += F("<div class='card summary-card weather-card'><h3><span class='summary-heading-icon' aria-hidden='true'>&#9728;</span><span class='summary-heading-copy'><span class='summary-heading-k'>Live conditions</span>Current Weather</span></h3><div class='summary-metric-grid'>");
   html += F("<div class='metric-tile'><span class='metric-k'>Temperature</span><div class='metric-v big-metric'><span id='tempChip'>");
@@ -6978,8 +6978,8 @@ void handleRoot() {
   html += F("    if(_lastTemp!==null){ const d=v-_lastTemp; if(d>0.1) _lastTempTrend='\\u2191'; else if(d<-0.1) _lastTempTrend='\\u2193'; }");
   html += F("    _lastTemp=v;");
   html += F("  } else { tempEl.textContent='--'; _lastTemp=null; _lastTempTrend='\\u2192'; }");
-  html += F("  if(trendEl){ trendEl.textContent=_lastTempTrend; trendEl.style.color=(_lastTempTrend==='\\u2191')?'#2563eb':(_lastTempTrend==='\\u2193')?'#dc2626':'inherit'; }");
-  html += F("  if(heroWeatherTrend){ heroWeatherTrend.textContent=_lastTempTrend; heroWeatherTrend.style.color=(_lastTempTrend==='\\u2191')?'#2563eb':(_lastTempTrend==='\\u2193')?'#dc2626':'inherit'; }");
+  html += F("  if(trendEl){ trendEl.textContent=_lastTempTrend; trendEl.style.color=(_lastTempTrend==='\\u2191')?'#dc2626':(_lastTempTrend==='\\u2193')?'#2563eb':'inherit'; }");
+  html += F("  if(heroWeatherTrend){ heroWeatherTrend.textContent=_lastTempTrend; heroWeatherTrend.style.color=(_lastTempTrend==='\\u2191')?'#dc2626':(_lastTempTrend==='\\u2193')?'#2563eb':'inherit'; }");
   html += F("}");
   html += F("const feelsEl=document.getElementById('feelsChip'); if(feelsEl){ const v=st.feels_like; feelsEl.textContent=(typeof v==='number')?showTemp(v).toFixed(1)+' '+tempUnit:'--'; }");
   html += F("const humEl=document.getElementById('humChip'); if(humEl){ const v=st.humidity; humEl.textContent=(typeof v==='number')?Math.round(v)+' %':'--'; }");
@@ -7066,6 +7066,9 @@ void handleRoot() {
   html += F("  try{ await fetch('/submit',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:fd.toString()}); location.reload(); }catch(e){ console.error(e); }");
   html += F("} ");
   html += F("document.getElementById('btn-save-all')?.addEventListener('click', saveAll);document.getElementById('btn-save-all-bottom')?.addEventListener('click', saveAll);");
+  html += F("const summaryBody=document.getElementById('summaryBody'); const summaryToggle=document.getElementById('summaryToggle');");
+  html += F("if(summaryBody && summaryToggle){ const syncSummary=()=>{ const open=summaryBody.style.display!=='none'; summaryToggle.textContent=open?'Hide Summary':'Show Summary'; summaryToggle.setAttribute('aria-expanded',open?'true':'false'); };");
+  html += F("summaryToggle.addEventListener('click',()=>{ const open=summaryBody.style.display!=='none'; summaryBody.style.display=open?'none':'block'; syncSummary(); }); syncSummary(); }");
   html += F("const schedBody=document.getElementById('schedBody'); const schedToggle=document.getElementById('schedToggle');");
   html += F("if(schedBody && schedToggle){ const syncSched=()=>{ const open=schedBody.style.display!=='none'; schedToggle.textContent=open?'Hide Schedules':'Show Schedules'; };");
   html += F("schedToggle.addEventListener('click',()=>{ const open=schedBody.style.display!=='none'; schedBody.style.display=open?'none':'block'; syncSched(); }); syncSched(); }");
