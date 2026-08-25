@@ -37,7 +37,7 @@ After flashing:
 See controller status, active and upcoming zones, progress, weather, tank level, water source, and delay reasons at a glance.
 
 <p align="center">
-<img width="650" alt="ESP32 Irrigation Main Dashboard" src="https://github.com/user-attachments/assets/ab7c199f-7b89-4def-9b42-57d2f057a21e" />
+<img width="649" height="884" alt="image" src="https://github.com/user-attachments/assets/c706a0ac-1eee-4caf-85cb-5e3076c29c7a" />
 </p>
 
 ### Setup
