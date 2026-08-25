@@ -18,7 +18,7 @@ No Arduino IDE is required. Connect the ESP32 by USB and open the:
 ### 👉 [ESP32 Irrigation Web Flasher](https://numerik11.github.io/ESP32-Irrigation-Controller/web-flasher/)
 
 <p align="center">
-<img width="400" alt="ESP32 Irrigation Web Flasher" src="https://github.com/user-attachments/assets/50a83c68-66b7-4adb-b288-8f777f0b0462" />
+<img width="551" height="356" alt="image" src="https://github.com/user-attachments/assets/4a00fcc5-bc6c-4c65-83ed-a533b325adec" />
 </p>
 
 After flashing:
