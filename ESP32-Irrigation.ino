@@ -6502,6 +6502,23 @@ void handleRoot() {
   html += F("@media(max-width:720px){.wrap{padding:0 10px;margin:10px auto}.nav .meta{width:100%;display:grid;grid-template-columns:repeat(2,minmax(0,1fr))}.pill,#themeBtn{width:100%;min-width:0}.hero-shell{padding:13px}.hero-mini-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.dash-nav{top:8px;overflow:auto;flex-wrap:nowrap}.summary-card{grid-column:span 12}.weather-card .summary-metric-grid,.next-card .summary-metric-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.card{padding:13px}}");
   html += F("@media(max-width:440px){.nav .meta{grid-template-columns:1fr}.hero-actions{grid-template-columns:1fr}.hero-mini-grid{grid-template-columns:1fr}.weather-card .summary-metric-grid,.next-card .summary-metric-grid{grid-template-columns:1fr}.next-card .metric-wide{grid-column:auto}.condition-wrap,.wind-compass-wrap{align-items:flex-start}.days-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}");
   html += F(".dash-head{margin:12px 0;padding:14px;border-top:3px solid var(--primary);box-shadow:var(--shadow)}.dash-head-top{display:flex;align-items:center;justify-content:space-between;gap:14px}.dash-head-copy{min-width:0}.dash-head-title{margin:2px 0 5px;font-size:1.35rem;line-height:1.15;letter-spacing:0}.dash-head-context{display:flex;align-items:center;gap:7px;flex-wrap:wrap;color:var(--muted);font-size:.82rem;font-weight:700}.dash-head-context a{color:var(--ink)}.dash-head-actions{display:flex;gap:7px;flex:0 0 auto}.dash-head-actions .btn{padding:8px 11px;min-width:0}.dash-metrics{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));margin-top:12px;border:1px solid var(--line);border-radius:7px;overflow:hidden}.dash-metric{min-width:0;padding:9px 11px;background:var(--panel);border-left:1px solid var(--line)}.dash-metric:first-child{border-left:0}.dash-metric-k{display:block;color:var(--muted);font-size:.65rem;font-weight:800;letter-spacing:.08em;text-transform:uppercase}.dash-metric-v{display:block;margin-top:3px;font-size:1.03rem;font-weight:800;line-height:1.12;overflow-wrap:anywhere}.dash-metric-sub{display:block;margin-top:3px;color:var(--muted);font-size:.74rem;line-height:1.2;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.dash-metric-weather{display:flex;align-items:center;gap:6px}.dash-head+.dash-nav{margin-top:0}@media(max-width:760px){.dash-head-top{align-items:flex-start;flex-direction:column}.dash-head-actions{width:100%}.dash-head-actions .btn{flex:1;text-align:center}.dash-metrics{grid-template-columns:repeat(2,minmax(0,1fr))}.dash-metric:nth-child(3){border-left:0;border-top:1px solid var(--line)}.dash-metric:nth-child(4){border-top:1px solid var(--line)}}@media(max-width:440px){.dash-head-title{font-size:1.2rem}.dash-head-context{align-items:flex-start;flex-direction:column;gap:3px}.dash-head-actions .btn{padding:8px 6px;font-size:.82rem}.dash-metric{padding:8px}.dash-metric-v{font-size:.94rem}}");
+  // Controller summary visual hierarchy
+  html += F(".summary-shell{position:relative;padding:10px;overflow:hidden;background:linear-gradient(135deg,rgba(37,99,235,.055),rgba(8,145,178,.025) 46%,rgba(21,128,61,.045));border-color:var(--line)}");
+  html += F(".summary-shell::before{content:'';position:absolute;inset:0 0 auto;height:3px;background:linear-gradient(90deg,#2563eb,#0891b2 48%,#16a34a)}");
+  html += F(".summary-card{--summary-accent:#2563eb;position:relative;isolation:isolate;overflow:hidden;border:1px solid var(--line);border-left:4px solid var(--summary-accent);border-top-width:1px;background:var(--card);box-shadow:0 5px 16px rgba(15,23,42,.06)}");
+  html += F(".summary-card.weather-card{--summary-accent:#0891b2}.summary-card.next-card{--summary-accent:#16a34a}");
+  html += F(".summary-card::after{content:'';position:absolute;z-index:-1;right:-72px;top:-82px;width:180px;height:180px;border-radius:50%;background:var(--summary-accent);opacity:.045;pointer-events:none}");
+  html += F(".summary-card h3{min-height:42px;margin:0;padding:0 0 10px;border-bottom:1px solid var(--line);gap:10px;letter-spacing:0}");
+  html += F(".summary-heading-icon{display:grid;place-items:center;flex:0 0 34px;width:34px;height:34px;border-radius:9px;background:color-mix(in srgb,var(--summary-accent) 13%,var(--card));border:1px solid color-mix(in srgb,var(--summary-accent) 28%,var(--line));color:var(--summary-accent);font-size:1.05rem;line-height:1}");
+  html += F(".summary-heading-copy{display:flex;flex-direction:column;gap:2px;line-height:1.08}.summary-heading-k{color:var(--muted);font-size:.62rem;font-weight:800;letter-spacing:.1em;text-transform:uppercase}");
+  html += F(".summary-card .metric-tile{border-color:var(--line);background:color-mix(in srgb,var(--summary-accent) 3.5%,var(--panel));box-shadow:0 1px 2px rgba(15,23,42,.035);transition:border-color .15s ease,background .15s ease}");
+  html += F(".summary-card .metric-tile:hover{border-color:color-mix(in srgb,var(--summary-accent) 38%,var(--line));background:color-mix(in srgb,var(--summary-accent) 6%,var(--panel))}");
+  html += F(".summary-card .metric-k{color:color-mix(in srgb,var(--muted) 88%,var(--summary-accent))}.summary-card .big-metric{color:var(--summary-accent)}");
+  html += F(".summary-subhead{display:flex;align-items:center;gap:9px;margin-top:2px;color:var(--summary-accent)}.summary-subhead::after{content:'';height:1px;flex:1;background:var(--line)}");
+  html += F(".status-pills .badge{position:relative;border-radius:8px;background:var(--panel);font-weight:650}.status-pills .badge::before{content:'';width:8px;height:8px;border-radius:50%;background:currentColor;box-shadow:0 0 0 3px color-mix(in srgb,currentColor 13%,transparent)}.status-pills .b-ok{color:#15803d}.status-pills .b-warn{color:#b45309}.status-pills .b-bad{color:#b91c1c}.status-pills .badge b{color:var(--ink)}");
+  html += F(".next-card .summary-note{margin-top:auto;border-left:3px solid var(--summary-accent);background:color-mix(in srgb,var(--summary-accent) 6%,var(--panel));line-height:1.55}.next-card .summary-note strong{color:var(--ink)}");
+  html += F("html[data-theme='dark'] .summary-shell{background:linear-gradient(135deg,rgba(37,99,235,.09),rgba(8,145,178,.035) 46%,rgba(22,163,74,.06))}html[data-theme='dark'] .summary-card{background:var(--card)}");
+  html += F("@media(max-width:720px){.summary-shell{padding:8px}.summary-card{border-left-width:3px}.summary-card h3{min-height:38px}.summary-heading-icon{width:31px;height:31px;flex-basis:31px}.summary-card .metric-tile:hover{border-color:var(--line)}}@media(max-width:440px){.summary-shell{padding:6px}.summary-card{padding:12px}.summary-card::after{display:none}.summary-meta.status-pills{grid-template-columns:repeat(2,minmax(0,1fr))}.status-pills .badge{padding:7px 6px;font-size:.76rem}}");
   html += F("</style></head><body>");
   flush();
 
@@ -6557,10 +6574,10 @@ void handleRoot() {
 
   // --- Summary cards ---
   html += F("<div class='wrap section-block' id='summary-section'><div class='section-head'><div><div class='section-kicker'>Overview</div><h2>Controller summary</h2></div>");
-  html += F("<p class='section-note'></p></div>");
+  html += F("<p class='section-note'>Live weather, delay and watering status</p></div>");
   html += F("<div class='glass section summary-shell'><div class='grid summary-grid'>");
 
-  html += F("<div class='card summary-card weather-card'><h3>Current Weather</h3><div class='summary-metric-grid'>");
+  html += F("<div class='card summary-card weather-card'><h3><span class='summary-heading-icon' aria-hidden='true'>&#9728;</span><span class='summary-heading-copy'><span class='summary-heading-k'>Live conditions</span>Current Weather</span></h3><div class='summary-metric-grid'>");
   html += F("<div class='metric-tile'><span class='metric-k'>Temperature</span><div class='metric-v big-metric'><span id='tempChip'>");
   html += (isnan(temp) ? String("--") : String(temp,1)+" "+temperatureUnitChar());
   html += F("</span> <span id='tempTrend' style='font-weight:900;'>&rarr;</span></div></div>");
@@ -6594,7 +6611,7 @@ void handleRoot() {
   html += F("<div class='metric-tile'><span class='metric-k'>Sunset</span><div class='metric-v' id='suns'>--:--</div></div></div></div>");
 
   // Delays + Next Water
-  html += F("<div class='card summary-card next-card'><h3>Delays & Next Water</h3><div class='summary-meta status-pills'>");
+  html += F("<div class='card summary-card next-card'><h3><span class='summary-heading-icon' aria-hidden='true'>&#9201;</span><span class='summary-heading-copy'><span class='summary-heading-k'>Automation outlook</span>Delays & Next Water</span></h3><div class='summary-meta status-pills'>");
   html += F("<div id='rainBadge' class='badge "); html += (rainDelayBlockingNow ? "b-bad" : "b-ok"); html += F("'>Rain: <b>");
   html += (rainDelayBlockingNow ? causeText : String("Off")); html += F("</b></div>");
   html += F("<div id='windBadge' class='badge "); html += (windActive ? "b-warn" : "b-ok"); html += F("'>Wind: <b>");
