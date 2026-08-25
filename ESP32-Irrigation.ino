@@ -51,7 +51,7 @@ extern "C" {
 // ---------- Hardware ----------
 static const char kFirmwareSignature[] __attribute__((used)) =
   "Original author: Beau Kaczmarek - https://github.com/numerik11/ESP32-Irrigation-Controller";
-static const char kFirmwareVersion[] = "1.1.11";
+static const char kFirmwareVersion[] = "1.1.12";
 static const char kFirmwareBuildDate[] = __DATE__ " " __TIME__;
 static const uint8_t MAX_ZONES = 16;
 #if defined(CONFIG_IDF_TARGET_ESP32)
@@ -6519,6 +6519,16 @@ void handleRoot() {
   html += F(".next-card .summary-note{margin-top:auto;border-left:3px solid var(--summary-accent);background:color-mix(in srgb,var(--summary-accent) 6%,var(--panel));line-height:1.55}.next-card .summary-note strong{color:var(--ink)}");
   html += F("html[data-theme='dark'] .summary-shell{background:linear-gradient(135deg,rgba(37,99,235,.09),rgba(8,145,178,.035) 46%,rgba(96,165,250,.06))}html[data-theme='dark'] .summary-card{background:var(--card)}");
   html += F("@media(max-width:720px){.summary-shell{padding:8px}.summary-card{border-left-width:3px}.summary-card h3{min-height:38px}.summary-heading-icon{width:31px;height:31px;flex-basis:31px}.summary-card .metric-tile:hover{border-color:var(--line)}}@media(max-width:440px){.summary-shell{padding:6px}.summary-card{padding:12px}.summary-card::after{display:none}.summary-meta.status-pills{grid-template-columns:repeat(2,minmax(0,1fr))}.status-pills .badge{padding:7px 6px;font-size:.76rem}}");
+  // Collapsible section controls and final responsive layout polish
+  html += F(".section-head{flex-wrap:wrap}.section-head-copy{min-width:0}.section-summary{margin:4px 0 0;color:var(--muted);font-size:.82rem;line-height:1.35}");
+  html += F(".collapsible-section-head{padding:12px 14px;border:1px solid var(--line);border-left:3px solid var(--primary);border-radius:8px;background:var(--card);box-shadow:0 4px 14px rgba(15,23,42,.055);transition:border-color .16s ease,box-shadow .16s ease}");
+  html += F(".collapsible-section-head.is-open{border-color:color-mix(in srgb,var(--primary) 34%,var(--line));box-shadow:0 7px 18px rgba(37,99,235,.09)}");
+  html += F(".collapse-toggle{display:inline-flex;align-items:center;justify-content:center;gap:9px;min-width:146px;min-height:40px;padding:9px 12px;border-color:color-mix(in srgb,var(--primary) 24%,var(--line));background:color-mix(in srgb,var(--primary) 5%,var(--panel));white-space:nowrap}");
+  html += F(".collapse-toggle::after{content:'\\203A';display:inline-grid;place-items:center;width:22px;height:22px;border-radius:5px;background:color-mix(in srgb,var(--primary) 10%,var(--panel));color:var(--primary);font-size:1.25rem;line-height:1;transition:transform .16s ease,background .16s ease}");
+  html += F(".collapse-toggle[aria-expanded='true']::after{transform:rotate(90deg);background:color-mix(in srgb,var(--primary) 16%,var(--panel))}");
+  html += F(".action-card .toolbar{display:grid;grid-template-columns:repeat(auto-fit,minmax(118px,1fr));width:100%;gap:8px}.action-card .toolbar .btn{text-align:center}");
+  html += F("@media(max-width:720px){.collapsible-section-head{align-items:stretch;padding:11px 12px}.collapsible-section-head .collapse-toggle{width:100%;justify-content:space-between}.sched-tools{width:100%}.sched-tools .collapse-toggle{flex:1 1 160px}.zone-row-status{justify-content:space-between}.action-grid{grid-template-columns:1fr}.action-card{min-height:0}}");
+  html += F("@media(max-width:480px){.section-head h2{font-size:1.08rem}.section-summary{font-size:.78rem}.zone-row-actions{display:grid;grid-template-columns:1fr 1fr;width:100%}.zone-row-actions .btn{width:100%}.action-card .toolbar{grid-template-columns:1fr}.dash-nav a{min-width:auto}}");
   html += F("</style></head><body>");
   flush();
 
@@ -6573,8 +6583,8 @@ void handleRoot() {
   html += F("<div class='wrap'><div class='dash-nav glass'><a href='#summary-section'>Summary</a><a href='#schedules-section'>Schedules</a><a href='#zones-section'>Zones</a><a href='#controls-section'>Controls</a></div></div>");
 
   // --- Summary cards ---
-  html += F("<div class='wrap section-block' id='summary-section'><div class='section-head'><div><div class='section-kicker'>Overview</div><h2>Controller summary</h2></div>");
-  html += F("<button class='btn btn-secondary' type='button' id='summaryToggle' aria-controls='summaryBody' aria-expanded='false'>Show Summary</button></div>");
+  html += F("<div class='wrap section-block' id='summary-section'><div class='section-head collapsible-section-head'><div class='section-head-copy'><div class='section-kicker'>Overview</div><h2>Controller summary</h2><p class='section-summary'>Live weather, delays and the next scheduled watering.</p></div>");
+  html += F("<button class='btn btn-secondary collapse-toggle' type='button' id='summaryToggle' aria-controls='summaryBody' aria-expanded='false'>Show Summary</button></div>");
   html += F("<div id='summaryBody' class='glass section summary-shell' style='display:none'><div class='grid summary-grid'>");
 
   html += F("<div class='card summary-card weather-card'><h3><span class='summary-heading-icon' aria-hidden='true'>&#9728;</span><span class='summary-heading-copy'><span class='summary-heading-k'>Live conditions</span>Current Weather</span></h3><div class='summary-metric-grid'>");
@@ -6652,7 +6662,7 @@ void handleRoot() {
     }
     html += F("</span><br><strong>Applies To:</strong> Scheduled and manual runs.</div></div>");
   }
-  html += F("</div></div>"); // end glass / grid
+  html += F("</div></div></div>"); // end grid / summary shell / wrap
   flush();
 
   // ---------- Schedules (collapsible) ----------
@@ -6668,8 +6678,8 @@ void handleRoot() {
   };
   html += F("<div class='wrap section-block' id='schedules-section'><div class='section-head'><div><div class='section-kicker'>Scheduling</div><h2>Zone schedules</h2></div>");
   html += F("<p class='section-note'></p></div>");
-  html += F("<div class='card sched sched-shell'><div class='sched-top'><div class='sched-top-copy'><div class='section-kicker'>Planner</div><h3>Weekly schedule editor</h3><p></p></div>");
-  html += F("<div class='sched-tools'><button class='btn btn-secondary' type='button' id='schedToggle'>Show Schedules</button><button class='btn' id='btn-save-all' title='Save all zone schedules'>Save All</button></div></div>");
+  html += F("<div class='card sched sched-shell'><div class='sched-top'><div class='sched-top-copy'><div class='section-kicker'>Planner</div><h3>Weekly schedule editor</h3><p>Set watering days, start times and run duration for each zone.</p></div>");
+  html += F("<div class='sched-tools'><button class='btn btn-secondary collapse-toggle' type='button' id='schedToggle' aria-controls='schedBody' aria-expanded='false'>Show Schedules</button><button class='btn' id='btn-save-all' title='Save all zone schedules'>Save All</button></div></div>");
   html += F("<div id='schedBody' class='sched-ctr sched-body' style='display:none'>");
   html += F("<div class='sched-grid'>");
 
@@ -7067,10 +7077,10 @@ void handleRoot() {
   html += F("} ");
   html += F("document.getElementById('btn-save-all')?.addEventListener('click', saveAll);document.getElementById('btn-save-all-bottom')?.addEventListener('click', saveAll);");
   html += F("const summaryBody=document.getElementById('summaryBody'); const summaryToggle=document.getElementById('summaryToggle');");
-  html += F("if(summaryBody && summaryToggle){ const syncSummary=()=>{ const open=summaryBody.style.display!=='none'; summaryToggle.textContent=open?'Hide Summary':'Show Summary'; summaryToggle.setAttribute('aria-expanded',open?'true':'false'); };");
+  html += F("if(summaryBody && summaryToggle){ const syncSummary=()=>{ const open=summaryBody.style.display!=='none'; summaryToggle.textContent=open?'Hide Summary':'Show Summary'; summaryToggle.setAttribute('aria-expanded',open?'true':'false'); summaryToggle.closest('.collapsible-section-head')?.classList.toggle('is-open',open); };");
   html += F("summaryToggle.addEventListener('click',()=>{ const open=summaryBody.style.display!=='none'; summaryBody.style.display=open?'none':'block'; syncSummary(); }); syncSummary(); }");
   html += F("const schedBody=document.getElementById('schedBody'); const schedToggle=document.getElementById('schedToggle');");
-  html += F("if(schedBody && schedToggle){ const syncSched=()=>{ const open=schedBody.style.display!=='none'; schedToggle.textContent=open?'Hide Schedules':'Show Schedules'; };");
+  html += F("if(schedBody && schedToggle){ const syncSched=()=>{ const open=schedBody.style.display!=='none'; schedToggle.textContent=open?'Hide Schedules':'Show Schedules'; schedToggle.setAttribute('aria-expanded',open?'true':'false'); };");
   html += F("schedToggle.addEventListener('click',()=>{ const open=schedBody.style.display!=='none'; schedBody.style.display=open?'none':'block'; syncSched(); }); syncSched(); }");
   // Toggle Duration 2 rows when Start 2 is enabled
   html += F("for(let z=0; z<ZC; z++){");
