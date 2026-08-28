@@ -37,7 +37,7 @@ After flashing:
 See controller status, active and upcoming zones, progress, weather, tank level, water source, and delay reasons at a glance.
 
 <p align="center">
-<img width="649" height="884" alt="image" src="https://github.com/user-attachments/assets/c706a0ac-1eee-4caf-85cb-5e3076c29c7a" />
+<img width="862" height="899" alt="image" src="https://github.com/user-attachments/assets/cf75fb58-65f0-445e-abe4-f65609e4c525" />
 </p>
 
 ### Setup
