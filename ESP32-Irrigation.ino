@@ -51,8 +51,16 @@ extern "C" {
 // ---------- Hardware ----------
 static const char kFirmwareSignature[] __attribute__((used)) =
   "Original author: Beau Kaczmarek - https://github.com/numerik11/ESP32-Irrigation-Controller";
-static const char kFirmwareVersion[] = "2.2";
+static const char kFirmwareVersion[] = "2.3";
 static const char kFirmwareBuildDate[] = __DATE__ " " __TIME__;
+static const char kUpdateReportUrl[] =
+  "https://irrigation-update-counter.beaukacz86.workers.dev/v1/report";
+static const char kUpdateReportStatePath[] = "/update_report.txt";
+static const uint32_t UPDATE_REPORT_BOOT_DELAY_MS = 30000UL;
+static const uint32_t UPDATE_REPORT_RETRY_MS = 15UL * 60UL * 1000UL;
+static String updateReportEventId;
+static bool updateReportPending = false;
+static uint32_t updateReportNextAttemptMs = 0;
 static const uint8_t MAX_ZONES = 16;
 #if defined(CONFIG_IDF_TARGET_ESP32)
 static const int I2C_SDA_DEFAULT = 21;
@@ -556,6 +564,8 @@ bool turnOnValveManual(int z, String* error = nullptr);
 void turnOffValveManual(int z);
 static void updateBootCount();
 static bool saveBootCount(uint32_t count);
+static void initUpdateReportState();
+static void tickUpdateReport();
 void handleRoot();
 void handleSubmit();
 void handleSetupPage();
@@ -2696,6 +2706,7 @@ void setup() {
     }
   }
   updateBootCount();
+  initUpdateReportState();
   Serial.printf("[BOOT] count=%lu reset=%s (%d)\n",
                 (unsigned long)bootCount,
                 resetReasonText(esp_reset_reason()),
@@ -3295,6 +3306,8 @@ void loop() {
     wifiCheck();
     now = millis();
   }
+
+  tickUpdateReport();
 
   checkWindRain();
   mqttEnsureConnected();
@@ -9534,4 +9547,96 @@ static void updateBootCount() {
   bootCount = readBootCount();
   if (bootCount != 0xFFFFFFFFUL) ++bootCount;
   saveBootCount(bootCount);
+}
+
+static bool isValidUpdateReportEventId(const String& value) {
+  if (value.length() != 32) return false;
+  for (size_t i = 0; i < value.length(); ++i) {
+    const char c = value[i];
+    if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'))) return false;
+  }
+  return true;
+}
+
+static String makeUpdateReportEventId() {
+  char value[33];
+  snprintf(value, sizeof(value), "%08lx%08lx%08lx%08lx",
+           (unsigned long)esp_random(), (unsigned long)esp_random(),
+           (unsigned long)esp_random(), (unsigned long)esp_random());
+  return String(value);
+}
+
+static bool saveUpdateReportState(bool reported) {
+  File f = LittleFS.open(kUpdateReportStatePath, "w");
+  if (!f) return false;
+  f.println(F("UPDATE_REPORT1"));
+  f.println(kFirmwareVersion);
+  f.println(updateReportEventId);
+  f.println(reported ? '1' : '0');
+  f.close();
+  return true;
+}
+
+static void initUpdateReportState() {
+  String savedVersion;
+  String savedEventId;
+  bool reported = false;
+
+  File f = LittleFS.open(kUpdateReportStatePath, "r");
+  if (f) {
+    String magic = f.readStringUntil('\n'); magic.trim();
+    savedVersion = f.readStringUntil('\n'); savedVersion.trim();
+    savedEventId = f.readStringUntil('\n'); savedEventId.trim();
+    String savedReported = f.readStringUntil('\n'); savedReported.trim();
+    reported = savedReported == "1";
+    f.close();
+    if (magic != "UPDATE_REPORT1") savedVersion = "";
+  }
+
+  if (savedVersion == kFirmwareVersion && isValidUpdateReportEventId(savedEventId)) {
+    updateReportEventId = savedEventId;
+    updateReportPending = !reported;
+  } else {
+    updateReportEventId = makeUpdateReportEventId();
+    updateReportPending = true;
+    saveUpdateReportState(false);
+  }
+  updateReportNextAttemptMs = millis() + UPDATE_REPORT_BOOT_DELAY_MS;
+}
+
+static void tickUpdateReport() {
+  if (!updateReportPending || WiFi.status() != WL_CONNECTED) return;
+  const uint32_t now = millis();
+  if ((int32_t)(now - updateReportNextAttemptMs) < 0) return;
+  updateReportNextAttemptMs = now + UPDATE_REPORT_RETRY_MS;
+
+  JsonDocument doc;
+  doc["version"] = kFirmwareVersion;
+  #if defined(CONFIG_IDF_TARGET_ESP32S3)
+    doc["board"] = "esp32-s3-devkitc-1";
+  #else
+    doc["board"] = "esp32-dev";
+  #endif
+  doc["eventId"] = updateReportEventId;
+  String payload;
+  serializeJson(doc, payload);
+
+  WiFiClientSecure secure;
+  secure.setInsecure();
+  HTTPClient http;
+  http.setConnectTimeout(5000);
+  http.setTimeout(5000);
+  if (!http.begin(secure, kUpdateReportUrl)) return;
+  http.addHeader("Content-Type", "application/json");
+  http.addHeader("User-Agent", "ESP32-Irrigation/2.3");
+  const int code = http.POST(payload);
+  http.end();
+
+  if (code >= 200 && code < 300) {
+    updateReportPending = false;
+    saveUpdateReportState(true);
+    Serial.println("[UPDATE] Firmware 2.3 success reported");
+  } else {
+    Serial.printf("[UPDATE] Success report retry scheduled (HTTP %d)\n", code);
+  }
 }

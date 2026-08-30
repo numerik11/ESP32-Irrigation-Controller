@@ -82,6 +82,14 @@
       color: #52606d;
     }
 
+    .update-count {
+      padding-top: 10px;
+      border-top: 1px solid #d8dee4;
+      color: #52606d;
+      font-size: 14px;
+      font-weight: 700;
+    }
+
     label {
       display: block;
       margin-bottom: 8px;
@@ -139,6 +147,11 @@
         border-top-color: #374151;
       }
 
+      .update-count {
+        color: #cbd5e1;
+        border-top-color: #374151;
+      }
+
       p {
         color: #cbd5e1;
       }
@@ -165,6 +178,7 @@
         <span class="version-value" id="availableVersion">Loading...</span>
       </div>
       <div class="version-status unknown" id="versionStatus">Open this page from the controller Setup page to compare versions.</div>
+      <div class="update-count" id="updateCount" aria-live="polite">Loading successful updates...</div>
     </section>
 
     <div class="installer">
@@ -175,12 +189,14 @@
   </main>
 
   <script>
-    const updaterVersion = "2.2";
+    const updaterVersion = "2.3";
+    const counterUrl = "https://irrigation-update-counter.beaukacz86.workers.dev";
     const board = document.getElementById("board");
     const installer = document.getElementById("installer");
     const currentVersion = document.getElementById("currentVersion");
     const availableVersion = document.getElementById("availableVersion");
     const versionStatus = document.getElementById("versionStatus");
+    const updateCount = document.getElementById("updateCount");
     const params = new URLSearchParams(window.location.search);
     const current = params.get("current") || "";
 
@@ -212,6 +228,25 @@
       return `${board.value}?v=${encodeURIComponent(updaterVersion)}`;
     }
 
+    async function loadUpdateCount(version) {
+      const normalized = normalizeVersion(version);
+      if (!normalized) {
+        updateCount.textContent = "Update count unavailable.";
+        return;
+      }
+      updateCount.textContent = `Firmware ${normalized} — loading successful updates...`;
+      try {
+        const response = await fetch(`${counterUrl}/v1/count?version=${encodeURIComponent(normalized)}`, { cache: "no-store" });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const result = await response.json();
+        const count = Number(result.count);
+        if (!Number.isSafeInteger(count) || count < 0) throw new Error("Invalid count");
+        updateCount.textContent = `Firmware ${normalized} — ${count} successful ${count === 1 ? "update" : "updates"}.`;
+      } catch (error) {
+        updateCount.textContent = `Firmware ${normalized} — update count unavailable.`;
+      }
+    }
+
     async function updateManifest() {
       const url = manifestUrl();
       installer.setAttribute("manifest", url);
@@ -220,8 +255,10 @@
         const response = await fetch(url, { cache: "reload" });
         const manifest = await response.json();
         setStatus(manifest.version);
+        loadUpdateCount(manifest.version);
       } catch (error) {
         setStatus("");
+        loadUpdateCount("");
       }
     }
 
