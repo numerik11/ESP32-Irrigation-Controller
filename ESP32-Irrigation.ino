@@ -51,7 +51,7 @@ extern "C" {
 // ---------- Hardware ----------
 static const char kFirmwareSignature[] __attribute__((used)) =
   "Original author: Beau Kaczmarek - https://github.com/numerik11/ESP32-Irrigation-Controller";
-static const char kFirmwareVersion[] = "2.0";
+static const char kFirmwareVersion[] = "2.1";
 static const char kFirmwareBuildDate[] = __DATE__ " " __TIME__;
 static const uint8_t MAX_ZONES = 16;
 #if defined(CONFIG_IDF_TARGET_ESP32)
@@ -6544,6 +6544,15 @@ void handleRoot() {
   html += F(".action-card .toolbar{display:grid;grid-template-columns:repeat(auto-fit,minmax(118px,1fr));width:100%;gap:8px}.action-card .toolbar .btn{text-align:center}");
   html += F("@media(max-width:720px){.collapsible-section-head{align-items:stretch;padding:11px 12px}.collapsible-section-head .collapse-toggle{width:100%;justify-content:space-between}.sched-tools{width:100%}.sched-tools .collapse-toggle{flex:1 1 160px}.zone-row-status{justify-content:space-between}.action-grid{grid-template-columns:1fr}.action-card{min-height:0}}");
   html += F("@media(max-width:480px){.section-head h2{font-size:1.08rem}.section-summary{font-size:.78rem}.zone-row-actions{display:grid;grid-template-columns:1fr 1fr;width:100%}.zone-row-actions .btn{width:100%}.action-card .toolbar{grid-template-columns:1fr}.dash-nav a{min-width:auto}}");
+  // Keep the mobile utility bar focused on identity and the two controls people use.
+  // Time, date, timezone, firmware and host remain visible on wider screens; the
+  // dashboard card immediately below already presents the useful mobile context.
+  html += F("@media(max-width:720px){.nav{padding:9px 10px}.nav .in{flex-wrap:nowrap;gap:10px}.brand{min-width:0;flex:1 1 auto}.brand-copy{min-width:0}.brand-title,.brand-sub{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.nav .meta{display:flex;width:auto;flex:0 0 auto;gap:6px}.nav .meta>span.pill{display:none}#btn-master{width:auto;min-width:92px;min-height:38px;padding:7px 10px;white-space:nowrap}#themeBtn{position:relative;width:38px;min-width:38px;min-height:38px;padding:0;font-size:0}#themeBtn::before{content:'\\25D0';font-size:1.05rem;line-height:1}.dash-head{margin-top:10px}}");
+  html += F("@media(max-width:360px){.brand-sub{display:none}.brand-title{font-size:.88rem}.dot{width:8px;height:8px}#btn-master{min-width:84px;padding-inline:8px;font-size:.78rem}}");
+  // Preserve a two-column weather summary on phones. The previous narrow-screen
+  // rule expanded every small reading into a full-width row.
+  html += F("@media(max-width:480px){.weather-card{gap:10px}.weather-card .summary-metric-grid,.weather-card .summary-metric-grid.metric-pair{grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}.weather-card .metric-tile{min-height:70px;padding:9px 10px;gap:6px}.weather-card .metric-k{font-size:.66rem;letter-spacing:.09em}.weather-card .metric-v{font-size:.96rem}.weather-card .metric-v.big-metric{font-size:1.2rem}.weather-card .condition-tile,.weather-card .wind-dir-tile{min-height:86px}.weather-card .condition-wrap,.weather-card .wind-compass-wrap{align-items:center;gap:7px}.weather-card .wind-compass{width:52px;height:52px;flex-basis:52px}.weather-card .wind-needle{height:18px}.weather-card .summary-subhead{margin-top:0}}");
+  html += F("@media(max-width:360px){.weather-card .summary-metric-grid.metric-pair{grid-template-columns:1fr}.weather-card .condition-tile,.weather-card .wind-dir-tile{min-height:76px}}");
   html += F("</style></head><body>");
   flush();
 
