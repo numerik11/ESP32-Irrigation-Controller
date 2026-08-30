@@ -51,7 +51,7 @@ extern "C" {
 // ---------- Hardware ----------
 static const char kFirmwareSignature[] __attribute__((used)) =
   "Original author: Beau Kaczmarek - https://github.com/numerik11/ESP32-Irrigation-Controller";
-static const char kFirmwareVersion[] = "2.1";
+static const char kFirmwareVersion[] = "2.2";
 static const char kFirmwareBuildDate[] = __DATE__ " " __TIME__;
 static const uint8_t MAX_ZONES = 16;
 #if defined(CONFIG_IDF_TARGET_ESP32)
@@ -6553,6 +6553,10 @@ void handleRoot() {
   // rule expanded every small reading into a full-width row.
   html += F("@media(max-width:480px){.weather-card{gap:10px}.weather-card .summary-metric-grid,.weather-card .summary-metric-grid.metric-pair{grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}.weather-card .metric-tile{min-height:70px;padding:9px 10px;gap:6px}.weather-card .metric-k{font-size:.66rem;letter-spacing:.09em}.weather-card .metric-v{font-size:.96rem}.weather-card .metric-v.big-metric{font-size:1.2rem}.weather-card .condition-tile,.weather-card .wind-dir-tile{min-height:86px}.weather-card .condition-wrap,.weather-card .wind-compass-wrap{align-items:center;gap:7px}.weather-card .wind-compass{width:52px;height:52px;flex-basis:52px}.weather-card .wind-needle{height:18px}.weather-card .summary-subhead{margin-top:0}}");
   html += F("@media(max-width:360px){.weather-card .summary-metric-grid.metric-pair{grid-template-columns:1fr}.weather-card .condition-tile,.weather-card .wind-dir-tile{min-height:76px}}");
+  // Keep schedule editing dense enough for a phone without shrinking tap targets.
+  // Time, duration and weekday controls stay horizontal instead of becoming rows.
+  html += F("@media(max-width:480px){.sched-body{padding:8px}.sched-grid{gap:8px}.sched-card{padding:10px}.sched-card h4{margin-bottom:7px}.sched-card .rowx{margin:7px 0}.sched-card .rowx>label{margin-bottom:2px;font-size:.72rem}.sched-card .in{padding:8px 9px}.sched-card .time-spin{width:auto;max-width:100%;grid-template-columns:auto 6px auto auto;gap:5px;padding:6px}.sched-card .time-part{grid-template-columns:auto 32px}.sched-card .time-val{width:54px}.sched-card .time-arrow{width:32px}.sched-card .time-ampm{grid-column:auto;width:54px}.sched-card .duration-spin{grid-template-columns:auto auto auto auto}.sched-card .duration-spin .time-val{width:58px}.sched-card .duration-unit{margin-right:2px;font-size:.7rem}.sched-card .days-grid{grid-template-columns:repeat(4,minmax(0,1fr));gap:6px}.sched-card .day span{min-height:40px;padding:8px 5px;font-size:.7rem}.sched-card .toolbar{margin-top:9px}.sched-card .toolbar .btn{min-height:40px;padding:9px 12px}}");
+  html += F("@media(max-width:350px){.sched-card .time-spin{gap:3px;padding:5px}.sched-card .time-part{grid-template-columns:auto 29px}.sched-card .time-val{width:48px}.sched-card .time-arrow{width:29px}.sched-card .time-ampm{width:48px}.sched-card .duration-spin .time-val{width:52px}.sched-card .days-grid{grid-template-columns:repeat(3,minmax(0,1fr))}}");
   html += F("</style></head><body>");
   flush();
 
