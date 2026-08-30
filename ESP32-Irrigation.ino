@@ -51,7 +51,7 @@ extern "C" {
 // ---------- Hardware ----------
 static const char kFirmwareSignature[] __attribute__((used)) =
   "Original author: Beau Kaczmarek - https://github.com/numerik11/ESP32-Irrigation-Controller";
-static const char kFirmwareVersion[] = "2.3";
+static const char kFirmwareVersion[] = "2.4";
 static const char kFirmwareBuildDate[] = __DATE__ " " __TIME__;
 static const char kUpdateReportUrl[] =
   "https://irrigation-update-counter.beaukacz86.workers.dev/v1/report";
@@ -6570,6 +6570,10 @@ void handleRoot() {
   // Time, duration and weekday controls stay horizontal instead of becoming rows.
   html += F("@media(max-width:480px){.sched-body{padding:8px}.sched-grid{gap:8px}.sched-card{padding:10px}.sched-card h4{margin-bottom:7px}.sched-card .rowx{margin:7px 0}.sched-card .rowx>label{margin-bottom:2px;font-size:.72rem}.sched-card .in{padding:8px 9px}.sched-card .time-spin{width:auto;max-width:100%;grid-template-columns:auto 6px auto auto;gap:5px;padding:6px}.sched-card .time-part{grid-template-columns:auto 32px}.sched-card .time-val{width:54px}.sched-card .time-arrow{width:32px}.sched-card .time-ampm{grid-column:auto;width:54px}.sched-card .duration-spin{grid-template-columns:auto auto auto auto}.sched-card .duration-spin .time-val{width:58px}.sched-card .duration-unit{margin-right:2px;font-size:.7rem}.sched-card .days-grid{grid-template-columns:repeat(4,minmax(0,1fr));gap:6px}.sched-card .day span{min-height:40px;padding:8px 5px;font-size:.7rem}.sched-card .toolbar{margin-top:9px}.sched-card .toolbar .btn{min-height:40px;padding:9px 12px}}");
   html += F("@media(max-width:350px){.sched-card .time-spin{gap:3px;padding:5px}.sched-card .time-part{grid-template-columns:auto 29px}.sched-card .time-val{width:48px}.sched-card .time-arrow{width:29px}.sched-card .time-ampm{width:48px}.sched-card .duration-spin .time-val{width:52px}.sched-card .days-grid{grid-template-columns:repeat(3,minmax(0,1fr))}}");
+  // Keep delays and next-water information scannable without a long stack of
+  // full-width tiles. The status badge already carries the delay cause.
+  html += F("@media(max-width:480px){.next-card{gap:9px}.next-card .summary-meta.status-pills{grid-template-columns:repeat(2,minmax(0,1fr));gap:6px}.next-card .status-pills .badge{min-width:0;padding:7px 8px;overflow:hidden}.next-card .status-pills .badge b{display:block;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.next-card .summary-metric-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}.next-card .metric-wide{grid-column:1/-1}.next-card .delay-cause-tile{display:none}.next-card .metric-tile{min-height:66px;padding:9px 10px;gap:5px}.next-card .metric-k{font-size:.66rem;letter-spacing:.08em}.next-card .metric-v{font-size:.96rem}.next-card .summary-support{font-size:.76rem}.next-card .summary-note{margin-top:0;padding:9px 10px;font-size:.78rem;line-height:1.4}.next-card .smart-extra{display:none}}");
+  html += F("@media(max-width:350px){.next-card .status-pills .badge{font-size:.7rem;padding-inline:6px}}");
   html += F("</style></head><body>");
   flush();
 
@@ -6668,7 +6672,7 @@ void handleRoot() {
   html += F("<div id='windBadge' class='badge "); html += (windActive ? "b-warn" : "b-ok"); html += F("'>Wind: <b>");
   html += (windActive?"Active":"Off"); html += F("</b></div></div>");
   html += F("<div class='summary-metric-grid'>");
-  html += F("<div class='metric-tile metric-wide'><span class='metric-k'>Delay Cause</span><div class='metric-v' id='rainCauseBadge'>"); html += causeText; html += F("</div></div>");
+  html += F("<div class='metric-tile metric-wide delay-cause-tile'><span class='metric-k'>Delay Cause</span><div class='metric-v' id='rainCauseBadge'>"); html += causeText; html += F("</div></div>");
   html += F("<div class='metric-tile'><span class='metric-k'>Rain 1h</span><div class='metric-v'><span id='acc1h'>--</span><span class='metric-unit'>mm</span></div></div>");
   html += F("<div class='metric-tile'><span class='metric-k'>Rain 24h</span><div class='metric-v'><span id='acc24'>--</span><span class='metric-unit'>mm</span></div></div>");
   html += F("<div class='metric-tile metric-wide'><span class='metric-k'>Zone & Start</span><div class='metric-v' id='nwTime'>");
@@ -6701,7 +6705,7 @@ void handleRoot() {
       html += String(moistureSkipThresholdPct);
       html += F("%");
     }
-    html += F("</span><br><strong>Applies To:</strong> Scheduled and manual runs.</div></div>");
+    html += F("</span><span class='smart-extra'><br><strong>Applies To:</strong> Scheduled and manual runs.</span></div></div>");
   }
   html += F("</div></div></div>"); // end grid / summary shell / wrap
   flush();
@@ -9628,14 +9632,14 @@ static void tickUpdateReport() {
   http.setTimeout(5000);
   if (!http.begin(secure, kUpdateReportUrl)) return;
   http.addHeader("Content-Type", "application/json");
-  http.addHeader("User-Agent", "ESP32-Irrigation/2.3");
+  http.addHeader("User-Agent", String("ESP32-Irrigation/") + kFirmwareVersion);
   const int code = http.POST(payload);
   http.end();
 
   if (code >= 200 && code < 300) {
     updateReportPending = false;
     saveUpdateReportState(true);
-    Serial.println("[UPDATE] Firmware 2.3 success reported");
+    Serial.printf("[UPDATE] Firmware %s success reported\n", kFirmwareVersion);
   } else {
     Serial.printf("[UPDATE] Success report retry scheduled (HTTP %d)\n", code);
   }

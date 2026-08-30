@@ -10,7 +10,7 @@ store a MAC address, serial number, controller configuration, or location.
 
 ## Endpoints
 
-- `GET /v1/count?version=2.3` returns the successful-update total.
+- `GET /v1/count?version=2.4` returns the successful-update total.
 - `POST /v1/report` accepts `version`, `board`, and `eventId` after a stable boot.
 - `GET /health` provides a deployment health check.
 
