@@ -172,6 +172,7 @@ configured names and existing `espirrigation/cmd/zone/<index>` command topics.
 | `/status` | JSON system status |
 | `/events` | Event log |
 | `/tank` | Tank sensor calibration |
+| `/update` | Password-protected browser OTA uploader |
 | `/download/events.csv` | Download event log |
 | `/i2c-test` | I²C/relay test |
 | `/stopall` | Stop all active zones |
@@ -189,6 +190,43 @@ To compile with Arduino IDE:
 4. Select **Minimal SPIFFS (Large APPS with OTA)** so the firmware has enough program space while retaining two OTA application slots.
 
 > Do not select **Huge APP** or **No OTA** if you intend to update firmware over the network; those layouts normally provide only one application slot.
+
+### Browser OTA (ArduinoOTA alternative)
+
+The firmware also provides an HTTP updater, so Arduino IDE network discovery and
+the ArduinoOTA protocol are not required:
+
+1. In **Setup → Firmware Updates**, save an OTA password of 8–64 characters.
+2. Compile with **Minimal SPIFFS (Large APPS with OTA)** and use **Sketch → Export Compiled Binary**.
+3. Open `http://<controller-ip>/update` in a browser.
+4. Sign in with username `admin` and the OTA password, select the application `.bin`, and install it.
+
+The controller stops active valves before writing, validates the image, switches
+the boot slot only after a complete upload, and then restarts. Keep the controller
+powered throughout the update. The password also secures ArduinoOTA and access to
+the downloaded configuration file; it is stored locally in the controller's
+configuration just like the MQTT password.
+
+An existing installation can use this route only after firmware containing the
+route has been installed. In particular, an older ESP32 image using a single-app
+partition cannot convert itself to an OTA layout. Flash the full Minimal SPIFFS
+image once over USB/Web Serial (erasing the device so the partition table is
+replaced); subsequent application updates can use `/update`. ArduinoOTA remains
+available as a fallback when it works on the local network.
+
+### Faster OTA build verification on Windows
+
+The PowerShell helper builds with Minimal SPIFFS and keeps Arduino's normal
+persistent compilation cache enabled:
+
+```powershell
+.\scripts\verify-ota.ps1
+```
+
+The default checks the ESP32 Dev Module. Use `-Target esp32s3` for the S3 or
+`-Target all` before publishing both images. The first build can take several
+minutes; later builds with the same board core and partition setting reuse the
+cache and should be substantially faster.
 
 ## ⚠️ Electrical safety
 

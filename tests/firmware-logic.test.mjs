@@ -11,7 +11,7 @@ import {
 
 const testDirectory = path.dirname(fileURLToPath(import.meta.url));
 const repositoryRoot = path.resolve(testDirectory, "..");
-const esp32 = await readFirmware(path.join(repositoryRoot, "ESP32-Irrigation.ino"));
+const esp32 = await readFirmware(path.join(repositoryRoot, "ESP32-Irrigation", "ESP32-Irrigation.ino"));
 const esp8266 = await readFirmware(path.join(repositoryRoot, "ESP8266-Irrigation.ino"));
 
 test("ESP32 GPIO polarity produces the safe relay levels", () => {
@@ -203,6 +203,52 @@ test("ESP32 publishes the Home Assistant discovery contract from its status payl
   assert.match(discovery, /i\s*=\s*\(int\)zonesCount;\s*i\s*<\s*\(int\)MAX_ZONES/, "stale zone discoveries are removed");
   assert.match(publishConfig, /_mqtt\.publish\(topic\.c_str\(\), payload\.c_str\(\), true\)/, "discovery is retained");
   assert.match(reconnect, /mqttTryPublishHomeAssistantDiscovery\(now\)/, "discovery runs after MQTT connects");
+});
+
+test("ESP32 browser OTA is authenticated, writes an app image, and restarts only after success", () => {
+  const authenticate = extractFunction(esp32, "otaHttpAuthenticate");
+  const updatePage = extractFunction(esp32, "handleOtaUpdatePage");
+  const upload = extractFunction(esp32, "handleOtaUploadData");
+  const result = extractFunction(esp32, "handleOtaUploadResult");
+  const configure = extractFunction(esp32, "handleConfigure");
+  const loadConfig = extractFunction(esp32, "loadConfig");
+  const saveConfig = extractFunction(esp32, "saveConfig");
+
+  assert.match(esp32, /#include\s+<Update\.h>/, "ESP32 Update support is included");
+  assert.match(esp32, /server\.on\("\/update",\s*HTTP_GET,\s*handleOtaUpdatePage\)/);
+  assert.match(
+    esp32,
+    /server\.on\("\/update",\s*HTTP_POST,\s*handleOtaUploadResult,\s*handleOtaUploadData\)/,
+  );
+
+  assert.match(authenticate, /!otaPassword\.length\(\)/, "an empty password disables browser OTA");
+  assert.match(authenticate, /server\.authenticate\("admin",\s*otaPassword\.c_str\(\)\)/);
+  assert.match(authenticate, /server\.requestAuthentication\(\)/);
+  assert.match(updatePage, /otaHttpAuthenticate\(\)/, "the update page is protected");
+  assert.match(updatePage, /Minimal SPIFFS \(Large APPS with OTA\)/);
+
+  assert.match(upload, /endsWith\("\.bin"\)/, "only an application binary is accepted");
+  assert.match(upload, /pendingStart\[z\]\s*=\s*false/);
+  assert.match(upload, /turnOffZone\(z\)/, "active valves are stopped before writing flash");
+  assert.match(upload, /Update\.begin\(UPDATE_SIZE_UNKNOWN,\s*U_FLASH\)/);
+  assert.match(upload, /Update\.write\(upload\.buf,\s*upload\.currentSize\)/);
+  assert.match(upload, /Update\.end\(true\)/);
+  assert.match(upload, /Update\.abort\(\)/);
+
+  assert.match(result, /otaUploadAuthorized\s*&&\s*otaUploadStarted/);
+  assert.match(result, /otaUploadComplete\s*&&\s*!otaUploadFailed\s*&&\s*!Update\.hasError\(\)/);
+  assert.match(result, /ESP\.restart\(\)/);
+  assert.doesNotMatch(upload, /ESP\.restart\(\)/, "partial uploads must not restart the controller");
+
+  assert.match(configure, /OTA password must contain 8 to 64 characters/);
+  assert.match(configure, /ArduinoOTA\.setPassword\(otaPassword\.c_str\(\)\)/);
+  assert.match(loadConfig, /otaPassword\s*=\s*s/);
+  assert.match(saveConfig, /f\.println\(otaPassword\)/);
+  assert.match(
+    esp32,
+    /otaPassword\.length\(\)\s*&&\s*!otaHttpAuthenticate\(\)/,
+    "saved credentials protect config.txt downloads",
+  );
 });
 
 test("ESP8266 clamps configuration and classifies pins and rain codes", () => {

@@ -19,6 +19,9 @@
 #include <Arduino.h>
 #include <ArduinoJson.h>
 #include <ArduinoOTA.h>
+#if ENABLE_OTA
+  #include <Update.h>
+#endif
 #include <WiFiManager.h>
 #include <WiFi.h>
 #include <WiFiClientSecure.h>
@@ -703,6 +706,7 @@ uint16_t mqttPort  = 1883;
 String mqttUser    = "";
 String mqttPass    = "";
 String mqttBase    = "espirrigation";
+String otaPassword = "";
 
 WiFiClient   _mqttNetCli;
 PubSubClient _mqtt(_mqttNetCli);
@@ -2792,6 +2796,135 @@ void handleDiagnosticsPage() {
 
   server.send(200, "text/html", html);
 }
+
+#if ENABLE_OTA
+static bool otaUploadAuthorized = false;
+static bool otaUploadStarted = false;
+static bool otaUploadComplete = false;
+static bool otaUploadFailed = false;
+static String otaUploadError;
+
+static bool otaHttpAuthenticate() {
+  if (!otaPassword.length()) {
+    server.send(503, "text/plain", "Browser OTA is disabled. Set an OTA password in Setup first.");
+    return false;
+  }
+  if (!server.authenticate("admin", otaPassword.c_str())) {
+    server.requestAuthentication();
+    return false;
+  }
+  return true;
+}
+
+static void handleOtaUpdatePage() {
+  HttpScope _scope;
+  if (!otaHttpAuthenticate()) return;
+
+  String html;
+  html.reserve(5200);
+  html += F("<!doctype html><html lang='en'><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'>");
+  html += F("<title>ESP Irrigation Firmware Update</title><style>:root{color-scheme:light dark;--bg:#eef4fb;--panel:#fff;--ink:#172033;--muted:#66758a;--line:#d8e3ef;--blue:#2563eb;--bad:#b91c1c}@media(prefers-color-scheme:dark){:root{--bg:#0b1220;--panel:#111c2e;--ink:#e7eef9;--muted:#9aa9bd;--line:#293a54;--blue:#60a5fa;--bad:#f87171}}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.45 'Segoe UI',Arial,sans-serif}.wrap{max-width:680px;margin:0 auto;padding:24px}.card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:22px;box-shadow:0 10px 28px rgba(15,23,42,.1)}h1{margin:0 0 8px;font-size:1.55rem}p{color:var(--muted)}.meta{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:18px 0}.meta div{border:1px solid var(--line);border-radius:8px;padding:10px}.meta span{display:block;color:var(--muted);font-size:.78rem;text-transform:uppercase;letter-spacing:.06em}input{display:block;width:100%;padding:12px;border:1px solid var(--line);border-radius:8px;background:var(--panel);color:var(--ink);margin:12px 0}button,.link{display:inline-block;border:0;border-radius:8px;padding:11px 15px;background:var(--blue);color:#fff;font-weight:700;text-decoration:none;cursor:pointer}.link{background:transparent;color:var(--blue);border:1px solid var(--line);margin-left:6px}progress{width:100%;height:18px;margin-top:18px}#status{min-height:24px;font-weight:700}.warn{color:var(--bad);font-weight:700;font-size:.9rem}@media(max-width:540px){.wrap{padding:14px}.meta{grid-template-columns:1fr}}</style></head><body><main class='wrap'><section class='card'>");
+  html += F("<h1>Firmware update</h1><p>Upload the application <code>.bin</code> produced with <b>Minimal SPIFFS (Large APPS with OTA)</b>.</p><div class='meta'><div><span>Installed version</span><b>");
+  html += kFirmwareVersion;
+  html += F("</b></div><div><span>Available OTA slot</span><b>");
+  html += String(ESP.getFreeSketchSpace());
+  html += F(" bytes</b></div></div><p class='warn'>Keep power connected. Active valves will be stopped before flash writing starts.</p><form id='uploadForm' method='POST' action='/update' enctype='multipart/form-data'><input id='firmware' type='file' name='firmware' accept='.bin,application/octet-stream' required><button id='uploadButton' type='submit'>Install firmware</button><a class='link' href='/setup'>Back to setup</a><progress id='progress' max='100' value='0' hidden></progress><p id='status'></p></form></section></main><script>");
+  html += F("const form=document.getElementById('uploadForm'),file=document.getElementById('firmware'),button=document.getElementById('uploadButton'),progress=document.getElementById('progress'),status=document.getElementById('status');form.addEventListener('submit',e=>{e.preventDefault();if(!file.files.length)return;if(!confirm('Install this firmware and restart the controller?'))return;button.disabled=true;progress.hidden=false;status.textContent='Uploading...';const xhr=new XMLHttpRequest();xhr.open('POST','/update');xhr.upload.onprogress=e=>{if(e.lengthComputable)progress.value=Math.round(e.loaded*100/e.total)};xhr.onload=()=>{status.textContent=xhr.responseText||((xhr.status===200)?'Update installed. Restarting...':'Update failed.');if(xhr.status!==200)button.disabled=false;};xhr.onerror=()=>{status.textContent='Connection lost during upload. Check the controller before retrying.';button.disabled=false;};xhr.send(new FormData(form));});");
+  html += F("</script></body></html>");
+  server.send(200, "text/html", html);
+}
+
+static void handleOtaUploadData() {
+  HTTPUpload& upload = server.upload();
+
+  if (upload.status == UPLOAD_FILE_START) {
+    otaUploadAuthorized = otaHttpAuthenticate();
+    otaUploadStarted = false;
+    otaUploadComplete = false;
+    otaUploadFailed = false;
+    otaUploadError = "";
+    if (!otaUploadAuthorized) return;
+
+    String filename = upload.filename;
+    filename.toLowerCase();
+    if (!filename.endsWith(".bin")) {
+      otaUploadFailed = true;
+      otaUploadError = "Only an application .bin file can be installed.";
+      return;
+    }
+
+    g_inHttp = true;
+    for (int z = 0; z < (int)MAX_ZONES; ++z) {
+      pendingStart[z] = false;
+      if (zoneActive[z]) turnOffZone(z);
+    }
+
+    if (!Update.begin(UPDATE_SIZE_UNKNOWN, U_FLASH)) {
+      Update.printError(Serial);
+      otaUploadFailed = true;
+      otaUploadError = "No OTA slot is available or the partition is too small.";
+      g_inHttp = false;
+      return;
+    }
+    otaUploadStarted = true;
+    Serial.printf("[OTA HTTP] Receiving %s\n", upload.filename.c_str());
+  } else if (!otaUploadAuthorized || otaUploadFailed) {
+    return;
+  } else if (upload.status == UPLOAD_FILE_WRITE) {
+    if (Update.write(upload.buf, upload.currentSize) != upload.currentSize) {
+      Update.printError(Serial);
+      otaUploadFailed = true;
+      otaUploadError = "Flash write failed. The existing firmware is still selected.";
+      Update.abort();
+      g_inHttp = false;
+    } else {
+      yield();
+    }
+  } else if (upload.status == UPLOAD_FILE_END) {
+    if (!Update.end(true)) {
+      Update.printError(Serial);
+      otaUploadFailed = true;
+      otaUploadError = "Firmware validation failed. The existing firmware is still selected.";
+    } else {
+      otaUploadComplete = true;
+      Serial.printf("[OTA HTTP] Installed %u bytes\n", (unsigned)upload.totalSize);
+    }
+    g_inHttp = false;
+  } else if (upload.status == UPLOAD_FILE_ABORTED) {
+    Update.abort();
+    otaUploadFailed = true;
+    otaUploadError = "Upload was aborted. The existing firmware is still selected.";
+    g_inHttp = false;
+  }
+}
+
+static void handleOtaUploadResult() {
+  if (!otaHttpAuthenticate()) {
+    g_inHttp = false;
+    return;
+  }
+
+  const bool success = otaUploadAuthorized && otaUploadStarted &&
+                       otaUploadComplete && !otaUploadFailed && !Update.hasError();
+  server.sendHeader("Connection", "close");
+  if (!success) {
+    const String message = otaUploadError.length()
+      ? otaUploadError
+      : String("No valid firmware file was received.");
+    server.send(400, "text/plain", message);
+    otaUploadAuthorized = false;
+    otaUploadStarted = false;
+    otaUploadComplete = false;
+    g_inHttp = false;
+    return;
+  }
+
+  server.send(200, "text/plain", "Update installed successfully. Controller restarting...");
+  delay(750);
+  ESP.restart();
+}
+#endif
+
 // ---------- Setup ----------
 void setup() {
   Serial.begin(115200);
@@ -2949,6 +3082,7 @@ void setup() {
   // OTA
   #if ENABLE_OTA
     ArduinoOTA.setHostname(kHost);
+    if (otaPassword.length()) ArduinoOTA.setPassword(otaPassword.c_str());
     ArduinoOTA.begin();
   #endif
 
@@ -2968,6 +3102,10 @@ void setup() {
   server.on("/tank", HTTP_GET, handleTankCalibration);
   server.on("/diagnostics", HTTP_GET, handleDiagnosticsPage);
   server.on("/diagnostics.json", HTTP_GET, handleDiagnosticsJson);
+  #if ENABLE_OTA
+    server.on("/update", HTTP_GET, handleOtaUpdatePage);
+    server.on("/update", HTTP_POST, handleOtaUploadResult, handleOtaUploadData);
+  #endif
   server.on("/reset_boot_count", HTTP_POST, [](){
     HttpScope _scope;
     if (!saveBootCount(0)) {
@@ -3250,6 +3388,11 @@ void setup() {
   // Downloads / Admin
   server.on("/download/config.txt", HTTP_GET, [](){
     HttpScope _scope;
+#if ENABLE_OTA
+    // config.txt contains the MQTT and OTA credentials. Once an OTA password
+    // exists, require it before allowing the file to leave the controller.
+    if (otaPassword.length() && !otaHttpAuthenticate()) return;
+#endif
     if (LittleFS.exists("/config.txt")){ File f=LittleFS.open("/config.txt","r"); server.streamFile(f,"text/plain"); f.close(); }
     else server.send(404,"text/plain","missing");
   });
@@ -7532,12 +7675,12 @@ void handleSetupPage() {
   html += F("<div class='setup-badge'><div class='setup-badge-k'>Forecast Site</div><div class='setup-badge-v'>"); html += setupWeatherLabel; html += F("</div></div>");
   html += F("<div class='setup-badge'><div class='setup-badge-k'>Forecast Model</div><div class='setup-badge-v'>"); html += setupModelLabel; html += F("</div></div>");
   html += F("</div></div>");
-  html += F("<style>#setupForm{display:flex;flex-direction:column}.card.narrow{width:300mm;max-width:100%;align-self:center}#setupForm>.setup-nav{order:0}#setupForm>.setup-actions-top{order:1}#smart-card{order:10}#delays-card{order:20}#weather-card{order:30}#tank-card{order:40}#rain-card{order:50}#timezone-card{order:60}#pins-card{order:70}#i2c-card{order:80}#buttons-card{order:90}#display-card{order:100}#advanced-card{order:110}#mqtt-card{order:120}</style>");
+  html += F("<style>#setupForm{display:flex;flex-direction:column}.card.narrow{width:300mm;max-width:100%;align-self:center}#setupForm>.setup-nav{order:0}#setupForm>.setup-actions-top{order:1}#smart-card{order:10}#delays-card{order:20}#weather-card{order:30}#tank-card{order:40}#rain-card{order:50}#timezone-card{order:60}#pins-card{order:70}#i2c-card{order:80}#buttons-card{order:90}#display-card{order:100}#advanced-card{order:110}#mqtt-card{order:120}#ota-card{order:130}</style>");
   html += F("<form id='setupForm' action='/configure' method='POST' novalidate>");
-  html += F("<div class='setup-nav'><a href='#smart-card'>Smart Watering</a><a href='#delays-card'>Delays &amp; Pause</a><a href='#weather-card'>Forecast</a><a href='#tank-card'>Water &amp; Tank</a><a href='#rain-card'>Rain Inputs</a><a href='#timezone-card'>Timezone</a><a href='#pins-card'>GPIO</a><a href='#i2c-card'>I2C</a><a href='#buttons-card'>Buttons</a><a href='#display-card'>Display</a><a href='#advanced-card'>TFT Pins</a><a href='#mqtt-card'>MQTT</a></div>");
+  html += F("<div class='setup-nav'><a href='#smart-card'>Smart Watering</a><a href='#delays-card'>Delays &amp; Pause</a><a href='#weather-card'>Forecast</a><a href='#tank-card'>Water &amp; Tank</a><a href='#rain-card'>Rain Inputs</a><a href='#timezone-card'>Timezone</a><a href='#pins-card'>GPIO</a><a href='#i2c-card'>I2C</a><a href='#buttons-card'>Buttons</a><a href='#display-card'>Display</a><a href='#advanced-card'>TFT Pins</a><a href='#mqtt-card'>MQTT</a><a href='#ota-card'>Firmware</a></div>");
   html += F("<div class='setup-actions-top'><button class='btn' type='submit' id='btn-save-setup'>Save Changes</button><a class='btn-alt' href='/'>Home</a><a class='btn-alt' href='https://numerik11.github.io/ESP32-Irrigation-Controller/web-flasher/?current=");
   html += kFirmwareVersion;
-  html += F("' target='_blank' rel='noopener'>Firmware Update</a><button class='btn-alt' type='button' id='btn-clear-cooldown'>Clear After-Rain Delay</button><button class='btn btn-danger' type='button' onclick=\"if(confirm('Reboot controller now?'))fetch('/reboot',{method:'POST'})\">Reboot</button><span class='save-confirm' id='save-confirm'>Saved</span></div>");
+  html += F("' target='_blank' rel='noopener'>Web Flasher</a><a class='btn-alt' href='/update'>Browser OTA</a><button class='btn-alt' type='button' id='btn-clear-cooldown'>Clear After-Rain Delay</button><button class='btn btn-danger' type='button' onclick=\"if(confirm('Reboot controller now?'))fetch('/reboot',{method:'POST'})\">Reboot</button><span class='save-confirm' id='save-confirm'>Saved</span></div>");
 
   // Tank (available for all modes; water source switching works with any zone count)
   html += F("<div class='card narrow' id='tank-card'><details class='collapse'><summary>Water Source & Tank</summary><div class='collapse-body'><p class='card-intro'>Control how the controller chooses between tank and mains and where the tank sensor is connected.</p>");
@@ -8033,6 +8176,16 @@ void handleSetupPage() {
   html += F("<div class='row'><label>Password</label><input class='in-med' type='text' name='mqttPass' value='"); html += mqttPass; html += F("'></div>");
   html += F("<div class='row'><label>Base Topic</label><input class='in-med' type='text' name='mqttBase' value='"); html += mqttBase; html += F("'><small>e.g. espirrigation</small></div>");
   html += F("</div></details></div>");
+
+#if ENABLE_OTA
+  html += F("<div class='card narrow' id='ota-card'><details class='collapse' open><summary>Firmware Updates</summary><div class='collapse-body'><p class='card-intro'>Install a compiled application image directly from a browser, with ArduinoOTA retained as a second network update method.</p>");
+  html += F("<div class='row'><label>Browser OTA</label><div class='sub'>");
+  html += otaPassword.length() ? F("Password configured") : F("Disabled until a password is set");
+  html += F("</div></div><div class='row'><label>OTA Username</label><div class='sub'><code>admin</code></div></div>");
+  html += F("<div class='row'><label>New OTA Password</label><input class='in-med' type='password' name='otaPassword' minlength='8' maxlength='64' autocomplete='new-password' placeholder='Leave blank to keep current password'><small>8-64 characters. Used by both Browser OTA and ArduinoOTA. The current password is never displayed.</small></div>");
+  html += F("<div class='row'><label>Upload Firmware</label><div><a class='btn-alt' href='/update'>Open Browser OTA</a><small>Save a new password before opening the uploader.</small></div></div>");
+  html += F("</div></details></div>");
+#endif
 
   html += F("</form>");
 
@@ -8914,6 +9067,13 @@ void loadConfig() {
     int p = s.toInt();
     dhtSensorPin = (p == -1 || isValidOutputPin(p)) ? p : -1;
   }
+  // Password shared by Browser OTA and ArduinoOTA (optional trailing line).
+  if (nextTail(s)) {
+    s.trim();
+    s.replace("\r", "");
+    s.replace("\n", "");
+    if (s.length() >= 8 && s.length() <= 64) otaPassword = s;
+  }
 
   if (!(smartCoolTempC < smartHotTempC && smartHotTempC < smartVeryHotTempC)) {
     smartCoolTempC = 18.0f;
@@ -9063,6 +9223,7 @@ void saveConfig() {
   // NEW: local temperature/humidity source
   f.println(climateSourceValue());
   f.println(dhtSensorPin);
+  f.println(otaPassword);
 
   f.close();
 }
@@ -9125,6 +9286,26 @@ void saveSchedule() {
 void handleConfigure() {
   HttpScope _scope;
   String displayCfgErr;
+  String requestedOtaPassword;
+  bool changeOtaPassword = false;
+
+#if ENABLE_OTA
+  if (server.hasArg("otaPassword")) {
+    requestedOtaPassword = server.arg("otaPassword");
+    requestedOtaPassword.trim();
+    requestedOtaPassword.replace("\r", "");
+    requestedOtaPassword.replace("\n", "");
+    if (requestedOtaPassword.length()) {
+      if (requestedOtaPassword.length() < 8 || requestedOtaPassword.length() > 64) {
+        displayCfgErr += "OTA password must contain 8 to 64 characters.\n";
+      } else if (otaPassword.length() && !otaHttpAuthenticate()) {
+        return;
+      } else {
+        changeOtaPassword = true;
+      }
+    }
+  }
+#endif
 
     // NEW: snapshot current values before applying POST changes
   float  oldLat    = meteoLat;
@@ -9481,6 +9662,12 @@ void handleConfigure() {
     server.send(400, "text/plain", displayCfgErr);
     return;
   }
+#if ENABLE_OTA
+  if (changeOtaPassword) {
+    otaPassword = requestedOtaPassword;
+    ArduinoOTA.setPassword(otaPassword.c_str());
+  }
+#endif
   if (server.hasArg("manualSelectPin")) {
     int p = server.arg("manualSelectPin").toInt();
     if (p == -1 || isValidGpioPin(p)) manualSelectPin = p;
