@@ -157,6 +157,12 @@ Manual compilation requires the [Kincony PCF8574 library](https://www.kincony.co
 
 MQTT supports integrations such as Home Assistant, Node-RED, custom dashboards, and other home-automation systems.
 
+When MQTT is enabled, the controller publishes retained Home Assistant discovery
+configuration after connecting to the broker. Home Assistant automatically creates
+the rainfall and cooldown sensors, master/pause/rain/wind binary sensors, and one
+switch for every configured irrigation zone. Zone switches use the controller's
+configured names and existing `espirrigation/cmd/zone/<index>` command topics.
+
 ### Web endpoints
 
 | Path | Description |
@@ -180,9 +186,9 @@ To compile with Arduino IDE:
 1. Add `https://dl.espressif.com/dl/package_esp32_index.json` to **Additional Boards Manager URLs**.
 2. Install **ESP32 by Espressif Systems**.
 3. Select **ESP32 Dev Module** or **ESP32S3 Dev Module**, as appropriate.
-4. Select an OTA-capable partition layout if OTA updates are required. **Huge APP** or **No OTA** can provide more space when OTA is not needed.
+4. Select **Minimal SPIFFS (Large APPS with OTA)** so the firmware has enough program space while retaining two OTA application slots.
 
-> Do not select a **No OTA** partition if you intend to update firmware over the network.
+> Do not select **Huge APP** or **No OTA** if you intend to update firmware over the network; those layouts normally provide only one application slot.
 
 ## ⚠️ Electrical safety
 

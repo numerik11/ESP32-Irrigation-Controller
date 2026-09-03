@@ -1,5 +1,5 @@
-//-- If using Arduino IDE use a partition scheme that includes a SPIFFS/LittleFS partition, for example:
-//-- No OTA (2MB APP / 2MB SPIFFS) or Huge APP (3MB No OTA/1MB SPIFFS) 
+//-- If using Arduino IDE, select Minimal SPIFFS (Large APPS with OTA).
+//-- It provides two application slots for OTA plus a SPIFFS/LittleFS partition.
 
 #ifndef ENABLE_DEBUG_ROUTES
   #define ENABLE_DEBUG_ROUTES 0   // set to 1 when you need them
@@ -710,11 +710,130 @@ uint32_t     _lastMqttPub = 0;
 uint32_t     _lastMqttAttempt = 0;
 uint32_t     _mqttReconnectDelayMs = 15000;
 uint8_t      _mqttReconnectFailures = 0;
+bool         _mqttDiscoveryPublished = false;
+uint32_t     _lastMqttDiscoveryAttempt = 0;
 
 static const uint32_t MQTT_RECONNECT_DELAY_MIN_MS = 15000;
 static const uint32_t MQTT_RECONNECT_DELAY_MAX_MS = 300000;
+static const uint32_t MQTT_DISCOVERY_RETRY_MS = 30000;
+static const char MQTT_DISCOVERY_PREFIX[] = "homeassistant";
+
+static void mqttAddHomeAssistantDevice(JsonDocument& d) {
+  JsonObject device = d["device"].to<JsonObject>();
+  JsonArray identifiers = device["identifiers"].to<JsonArray>();
+  identifiers.add("espirrigation");
+  device["name"] = "ESP Irrigation";
+  device["manufacturer"] = "ESP32 Irrigation Controller";
+  device["model"] = "ESP32 Irrigation Controller";
+}
+
+static void mqttBeginHomeAssistantEntity(JsonDocument& d,
+                                         const String& name,
+                                         const String& uniqueId,
+                                         const String& stateTopic) {
+  d.clear();
+  d["name"] = name;
+  d["unique_id"] = uniqueId;
+  d["state_topic"] = stateTopic;
+  mqttAddHomeAssistantDevice(d);
+}
+
+static bool mqttPublishHomeAssistantConfig(const char* component,
+                                           const String& objectId,
+                                           JsonDocument& d) {
+  String topic = String(MQTT_DISCOVERY_PREFIX) + "/" + component + "/" + objectId + "/config";
+  String payload;
+  payload.reserve(640);
+  serializeJson(d, payload);
+  return _mqtt.publish(topic.c_str(), payload.c_str(), true);
+}
+
+static bool mqttPublishHomeAssistantDiscovery() {
+  if (!mqttEnabled || !_mqtt.connected()) return false;
+
+  const String stateTopic = mqttBase + "/status";
+  bool allPublished = true;
+  JsonDocument d;
+
+  mqttBeginHomeAssistantEntity(d, "24h Rainfall", "espirrigation_rainfall_24h", stateTopic);
+  d["value_template"] = "{{ value_json.rain24hActual }}";
+  d["unit_of_measurement"] = "mm";
+  d["device_class"] = "precipitation";
+  d["state_class"] = "measurement";
+  if (!mqttPublishHomeAssistantConfig("sensor", "espirrigation_rainfall_24h", d)) allPublished = false;
+
+  mqttBeginHomeAssistantEntity(d, "Irrigation Cooldown", "espirrigation_cooldown", stateTopic);
+  d["value_template"] = "{{ value_json.cooldownRemaining }}";
+  d["unit_of_measurement"] = "s";
+  d["device_class"] = "duration";
+  d["state_class"] = "measurement";
+  if (!mqttPublishHomeAssistantConfig("sensor", "espirrigation_cooldown", d)) allPublished = false;
+
+  mqttBeginHomeAssistantEntity(d, "Irrigation Master", "espirrigation_master", stateTopic);
+  d["value_template"] = "{{ 'ON' if value_json.masterOn else 'OFF' }}";
+  d["payload_on"] = "ON";
+  d["payload_off"] = "OFF";
+  if (!mqttPublishHomeAssistantConfig("binary_sensor", "espirrigation_master", d)) allPublished = false;
+
+  mqttBeginHomeAssistantEntity(d, "Irrigation Paused", "espirrigation_paused", stateTopic);
+  d["value_template"] = "{{ 'ON' if value_json.paused else 'OFF' }}";
+  d["payload_on"] = "ON";
+  d["payload_off"] = "OFF";
+  if (!mqttPublishHomeAssistantConfig("binary_sensor", "espirrigation_paused", d)) allPublished = false;
+
+  mqttBeginHomeAssistantEntity(d, "Rain Active", "espirrigation_rain_active", stateTopic);
+  d["value_template"] = "{{ 'ON' if value_json.rainActive else 'OFF' }}";
+  d["payload_on"] = "ON";
+  d["payload_off"] = "OFF";
+  if (!mqttPublishHomeAssistantConfig("binary_sensor", "espirrigation_rain_active", d)) allPublished = false;
+
+  mqttBeginHomeAssistantEntity(d, "Wind Active", "espirrigation_wind_active", stateTopic);
+  d["value_template"] = "{{ 'ON' if value_json.windActive else 'OFF' }}";
+  d["payload_on"] = "ON";
+  d["payload_off"] = "OFF";
+  if (!mqttPublishHomeAssistantConfig("binary_sensor", "espirrigation_wind_active", d)) allPublished = false;
+
+  for (int i = 0; i < (int)zonesCount; ++i) {
+    const String zoneNumber = String(i + 1);
+    const String objectId = "espirrigation_zone_" + zoneNumber;
+    String zoneLabel = zoneNames[i];
+    zoneLabel.trim();
+    if (!zoneLabel.length()) zoneLabel = "Zone " + zoneNumber;
+
+    mqttBeginHomeAssistantEntity(d, "Irrigation " + zoneLabel, objectId, stateTopic);
+    d["value_template"] = "{{ 'ON' if value_json.zones[" + String(i) + "].active else 'OFF' }}";
+    d["command_topic"] = mqttBase + "/cmd/zone/" + String(i);
+    d["payload_on"] = "on";
+    d["payload_off"] = "off";
+    d["state_on"] = "ON";
+    d["state_off"] = "OFF";
+    d["icon"] = "mdi:sprinkler";
+    if (!mqttPublishHomeAssistantConfig("switch", objectId, d)) allPublished = false;
+  }
+
+  // Remove retained discovery entries for zones that are no longer configured.
+  for (int i = (int)zonesCount; i < (int)MAX_ZONES; ++i) {
+    const String objectId = "espirrigation_zone_" + String(i + 1);
+    const String topic = String(MQTT_DISCOVERY_PREFIX) + "/switch/" + objectId + "/config";
+    if (!_mqtt.publish(topic.c_str(), "", true)) allPublished = false;
+  }
+
+  Serial.printf("[MQTT] Home Assistant discovery %s (%u zones)\n",
+                allPublished ? "published" : "incomplete", (unsigned)zonesCount);
+  return allPublished;
+}
+
+static void mqttTryPublishHomeAssistantDiscovery(uint32_t now) {
+  if (_mqttDiscoveryPublished) return;
+  if (_lastMqttDiscoveryAttempt != 0 &&
+      now - _lastMqttDiscoveryAttempt < MQTT_DISCOVERY_RETRY_MS) return;
+  _lastMqttDiscoveryAttempt = now;
+  _mqttDiscoveryPublished = mqttPublishHomeAssistantDiscovery();
+}
 
 void mqttSetup(){
+  _mqttDiscoveryPublished = false;
+  _lastMqttDiscoveryAttempt = 0;
   if (!mqttEnabled || mqttBroker.length()==0) return;
   _mqtt.setServer(mqttBroker.c_str(), mqttPort);
   _mqtt.setBufferSize(2048);
@@ -746,12 +865,13 @@ void mqttSetup(){
 void mqttEnsureConnected(){
   if (!mqttEnabled || mqttBroker.length()==0) return;
   if (WiFi.status() != WL_CONNECTED) return;
+  const uint32_t now = millis();
   if (_mqtt.connected()) {
     _mqttReconnectFailures = 0;
     _mqttReconnectDelayMs = MQTT_RECONNECT_DELAY_MIN_MS;
+    mqttTryPublishHomeAssistantDiscovery(now);
     return;
   }
-  const uint32_t now = millis();
   if (now - _lastMqttAttempt < _mqttReconnectDelayMs) return;
   _lastMqttAttempt = now;
   String cid = "espirrigation-" + WiFi.macAddress();
@@ -765,6 +885,9 @@ void mqttEnsureConnected(){
     _mqttReconnectFailures = 0;
     _mqttReconnectDelayMs = MQTT_RECONNECT_DELAY_MIN_MS;
     _mqtt.subscribe( (mqttBase + "/cmd/#").c_str() );
+    _mqttDiscoveryPublished = false;
+    _lastMqttDiscoveryAttempt = 0;
+    mqttTryPublishHomeAssistantDiscovery(now);
   } else {
     if (_mqttReconnectFailures < 8) _mqttReconnectFailures++;
     uint32_t nextDelay = MQTT_RECONNECT_DELAY_MIN_MS;

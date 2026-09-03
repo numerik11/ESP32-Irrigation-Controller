@@ -5,6 +5,7 @@ import test from "node:test";
 
 import {
   compileFirmwareFunctions,
+  extractFunction,
   readFirmware,
 } from "./helpers/firmware-source.mjs";
 
@@ -152,6 +153,56 @@ test("ESP32 status LED pulse and wrapped flash windows honor boundaries", () => 
   clock.now = 100;
   assert.equal(statusPixelWindowOn(1000, 900, 200), false);
   assert.equal(statusPixelWindowOn(0, 0, 10), false);
+});
+
+test("ESP32 publishes the Home Assistant discovery contract from its status payload", () => {
+  const status = extractFunction(esp32, "mqttPublishStatus");
+  const discovery = extractFunction(esp32, "mqttPublishHomeAssistantDiscovery");
+  const publishConfig = extractFunction(esp32, "mqttPublishHomeAssistantConfig");
+  const reconnect = extractFunction(esp32, "mqttEnsureConnected");
+
+  for (const field of [
+    "rain24hActual",
+    "cooldownRemaining",
+    "masterOn",
+    "paused",
+    "rainActive",
+    "windActive",
+    "zones",
+    "active",
+  ]) {
+    assert.match(status, new RegExp(`\\[\\"${field}\\"\\]`), `${field} is published in MQTT status`);
+  }
+
+  const expectedEntities = [
+    ["sensor", "espirrigation_rainfall_24h"],
+    ["sensor", "espirrigation_cooldown"],
+    ["binary_sensor", "espirrigation_master"],
+    ["binary_sensor", "espirrigation_paused"],
+    ["binary_sensor", "espirrigation_rain_active"],
+    ["binary_sensor", "espirrigation_wind_active"],
+  ];
+  for (const [component, uniqueId] of expectedEntities) {
+    assert.ok(discovery.includes(`"${component}", "${uniqueId}"`), `${uniqueId} is discovered`);
+  }
+
+  for (const templateField of [
+    "value_json.rain24hActual",
+    "value_json.cooldownRemaining",
+    "value_json.masterOn",
+    "value_json.paused",
+    "value_json.rainActive",
+    "value_json.windActive",
+    "value_json.zones[",
+  ]) {
+    assert.ok(discovery.includes(templateField), `${templateField} template is configured`);
+  }
+
+  assert.match(discovery, /i\s*<\s*\(int\)zonesCount/, "switches follow the configured zone count");
+  assert.match(discovery, /cmd\/zone\//, "switch commands use the existing zone command topic");
+  assert.match(discovery, /i\s*=\s*\(int\)zonesCount;\s*i\s*<\s*\(int\)MAX_ZONES/, "stale zone discoveries are removed");
+  assert.match(publishConfig, /_mqtt\.publish\(topic\.c_str\(\), payload\.c_str\(\), true\)/, "discovery is retained");
+  assert.match(reconnect, /mqttTryPublishHomeAssistantDiscovery\(now\)/, "discovery runs after MQTT connects");
 });
 
 test("ESP8266 clamps configuration and classifies pins and rain codes", () => {
