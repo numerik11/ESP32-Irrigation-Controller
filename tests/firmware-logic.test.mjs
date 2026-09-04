@@ -299,6 +299,7 @@ test("ESP8266 runtime and minute helpers handle limits and slot selection", () =
 
 test("ESP8266 scheduler starts due slots once and respects disabled days", () => {
   const calls = [];
+  const clock = { tm_wday: 1, tm_hour: 6, tm_min: 30 };
   const state = {
     zonesCount: 2,
     lastStartMinuteEpoch: [0, 0],
@@ -316,7 +317,7 @@ test("ESP8266 scheduler starts due slots once and respects disabled days", () =>
       calls.push([zone, slot]);
       return true;
     },
-    localtime_r: () => ({ tm_wday: 1, tm_hour: 6, tm_min: 30 }),
+    localtime_r: () => clock,
   };
   const { processDueStartsAtMinute } = compileFirmwareFunctions(
     esp8266,
@@ -329,10 +330,23 @@ test("ESP8266 scheduler starts due slots once and respects disabled days", () =>
     },
   );
 
-  processDueStartsAtMinute(10_000);
+  const primaryMinute = 10_020;
+  processDueStartsAtMinute(primaryMinute);
   assert.deepEqual(calls, [[0, 1]]);
-  assert.deepEqual(state.lastStartMinuteEpoch, [10_000, 0]);
+  assert.equal(
+    calls.some(([zone]) => zone === 1),
+    false,
+    "a zone disabled on Monday does not start",
+  );
+  assert.deepEqual(state.lastStartMinuteEpoch, [primaryMinute, 0]);
 
-  processDueStartsAtMinute(10_000);
+  processDueStartsAtMinute(primaryMinute);
   assert.deepEqual(calls, [[0, 1]], "same schedule minute is not triggered twice");
+
+  clock.tm_hour = 7;
+  clock.tm_min = 45;
+  const secondaryMinute = primaryMinute + 75 * 60;
+  processDueStartsAtMinute(secondaryMinute);
+  assert.deepEqual(calls, [[0, 1], [0, 2]], "enabled secondary slot starts at 07:45");
+  assert.deepEqual(state.lastStartMinuteEpoch, [secondaryMinute, 0]);
 });

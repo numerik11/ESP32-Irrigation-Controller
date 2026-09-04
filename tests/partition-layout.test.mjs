@@ -26,13 +26,19 @@ for (const target of ["esp32-dev", "esp32-s3-devkitc-1"]) {
   test(`${target} web-flasher image has two OTA slots and enough room`, async () => {
     const targetDirectory = path.join(repositoryRoot, "web-flasher", target);
     const table = parsePartitionTable(await readFile(path.join(targetDirectory, "partitions.bin")));
+    const manifest = JSON.parse(await readFile(path.join(targetDirectory, "manifest.json"), "utf8"));
     const otaData = table.find((entry) => entry.type === 0x01 && entry.subtype === 0x00);
     const ota0 = table.find((entry) => entry.type === 0x00 && entry.subtype === 0x10);
     const ota1 = table.find((entry) => entry.type === 0x00 && entry.subtype === 0x11);
+    const firmwarePart = manifest.builds
+      .flatMap((build) => build.parts)
+      .find((part) => part.path.split("?", 1)[0] === "firmware.bin");
 
     assert.ok(otaData, "otadata partition is required");
     assert.ok(ota0, "ota_0 application slot is required");
     assert.ok(ota1, "ota_1 application slot is required");
+    assert.ok(firmwarePart, "manifest must reference firmware.bin");
+    assert.equal(firmwarePart.offset, ota0.offset, "firmware must be flashed at the ota_0 offset");
     assert.equal(ota0.size, ota1.size, "OTA application slots must be equally sized");
     assert.ok(ota0.offset + ota0.size <= ota1.offset, "OTA application slots must not overlap");
 
