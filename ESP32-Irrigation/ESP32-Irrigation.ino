@@ -54,7 +54,7 @@ extern "C" {
 // ---------- Hardware ----------
 static const char kFirmwareSignature[] __attribute__((used)) =
   "Original author: Beau Kaczmarek - https://github.com/numerik11/ESP32-Irrigation-Controller";
-static const char kFirmwareVersion[] = "2.6";
+static const char kFirmwareVersion[] = "2.7";
 static const char kFirmwareBuildDate[] = __DATE__ " " __TIME__;
 static const char kUpdateReportUrl[] =
   "https://irrigation-update-counter.beaukacz86.workers.dev/v1/report";
@@ -413,6 +413,11 @@ bool runZonesConcurrent = false;
 
 // Scheduling
 bool enableStartTime2[MAX_ZONES] = {false};
+// Preserve wind protection when loading older schedules.
+bool zoneWindDelayEnabled[MAX_ZONES] = {
+  true, true, true, true, true, true, true, true,
+  true, true, true, true, true, true, true, true
+};
 bool days[MAX_ZONES][7] = {{false}};
 bool zoneActive[MAX_ZONES] = {false};
 bool zoneStartedManual[MAX_ZONES] = {false};
@@ -1080,9 +1085,14 @@ void rebuildRuntimeCountersFromEvents() {
   f.close();
 }
 
+static bool windBlocksZone(int z) {
+  return z >= 0 && z < (int)MAX_ZONES && windActive && zoneWindDelayEnabled[z];
+}
+
 static void stopAutoZonesForBlock() {
   for (int z = 0; z < (int)zonesCount; ++z) {
-    if (zoneActive[z] && !zoneStartedManual[z]) turnOffZone(z);
+    if (zoneActive[z] && !zoneStartedManual[z] &&
+        (!systemMasterEnabled || isBlockedNow() || rainActive || windBlocksZone(z))) turnOffZone(z);
   }
 }
 
@@ -3617,9 +3627,13 @@ void loop() {
   const bool hardBlock = (!systemMasterEnabled || isPausedNow());
   const bool cooldownActive = isCooldownActiveNow();
   const bool manualDelayBypassActive = hasActiveManualZone();
+  bool windBypassRunning = false;
+  for (int z = 0; z < (int)zonesCount; ++z) {
+    if (zoneActive[z] && !zoneWindDelayEnabled[z]) windBypassRunning = true;
+  }
   const bool delayScreenActive = !manualActive &&
                                  !manualDelayBypassActive &&
-                                 (hardBlock || cooldownActive || rainActive || windActive);
+                                 (hardBlock || cooldownActive || rainActive || (windActive && !windBypassRunning));
 
   if (hardBlock || cooldownActive || rainActive || windActive) {
     stopAutoZonesForBlock();
@@ -3724,7 +3738,7 @@ void loop() {
           // Cancel when blocked/rain; queue during wind so it can run later.
           if (isBlockedNow()) { cancelStart(z, "BLOCKED", false); continue; }
           if (rainActive)     { cancelStart(z, "RAIN",    true ); continue; }
-          if (windActive)     { pendingStart[z] = true; logEvent(z,"QUEUED","WIND",false); continue; }
+          if (windBlocksZone(z)) { pendingStart[z] = true; logEvent(z,"QUEUED","WIND",false); continue; }
 
           if (!runZonesConcurrent) {
             // sequential: only start if nothing is running; else queue (still allowed)
@@ -3739,13 +3753,13 @@ void loop() {
 
       if (!runZonesConcurrent) {
         // sequential: drain one queued zone if nothing currently running
-        if (!anyActive && !rainActive && !windActive) {
-          for (int z=0; z<(int)zonesCount; z++) if (pendingStart[z]) { pendingStart[z]=false; turnOnZone(z); break; }
+        if (!anyActive && !rainActive) {
+          for (int z=0; z<(int)zonesCount; z++) if (pendingStart[z] && !windBlocksZone(z)) { pendingStart[z]=false; turnOnZone(z); break; }
         }
-      } else if (!rainActive && !windActive) {
+      } else if (!rainActive) {
         // concurrent: start any queued zones once delays clear
         for (int z=0; z<(int)zonesCount; z++) {
-          if (pendingStart[z]) { pendingStart[z]=false; turnOnZone(z); anyActive = true; }
+          if (pendingStart[z] && !windBlocksZone(z)) { pendingStart[z]=false; turnOnZone(z); anyActive = true; }
         }
       }
     }
@@ -3951,7 +3965,7 @@ void drawManualSelection() {
     statusText = "RAIN";
     statusColor = C_BAD;
     snprintf(detailLine, sizeof(detailLine), "Rain delay is active");
-  } else if (windActive) {
+  } else if (windBlocksZone(selectedZone)) {
     statusId = 7;
     statusText = "WIND";
     statusColor = C_WARN;
@@ -6118,7 +6132,7 @@ void turnOnZone(int z) {
 
   if (isBlockedNow())  { cancelStart(z, "BLOCKED", false); return; }
   if (rainActive)      { cancelStart(z, "RAIN",    true ); return; }
-  if (windActive)      { pendingStart[z] = true; logEvent(z, "QUEUED", "WIND", false); return; }
+  if (windBlocksZone(z)) { pendingStart[z] = true; logEvent(z, "QUEUED", "WIND", false); return; }
 
   const bool usePcf = useExpanderForZone(z);
   if (!usePcf) {
@@ -6191,7 +6205,7 @@ void turnOffZone(int z) {
   bool mainsOn=false, tankOn=false;
   chooseWaterSource(src, mainsOn, tankOn);
 
-  bool wasDelayed = rainActive || windActive || isPausedNow() ||
+  bool wasDelayed = rainActive || windBlocksZone(z) || isPausedNow() ||
                     !systemMasterEnabled ||
                     (rainCooldownUntilEpoch > time(nullptr));
   logEvent(z, "STOPPED", zoneStartedManual[z] ? "MANUAL" : src, wasDelayed);
@@ -7053,6 +7067,9 @@ void handleRoot() {
     html += F("</h4><form method='POST' action='/submit'>");
     html += F("<input type='hidden' name='onlyZone' value='"); html += String(z); html += F("'>");
 
+    html += F("<div class='rowx'><label>Wind Delay</label><div class='field'><label class='toggle-inline'><input type='checkbox' name='zoneWindDelay");
+    html += String(z); html += F("' "); html += (zoneWindDelayEnabled[z] ? "checked" : "");
+    html += F("> Enable</label><small>Uses the wind switch and threshold in Setup.</small></div></div>");
     // Name
     html += F("<div class='rowx'><label>Name</label><div class='field'>");
     html += F("<input class='in' type='text' name='zoneName"); html += String(z);
@@ -7432,7 +7449,7 @@ void handleRoot() {
   html += F("    const q=n=>document.querySelector(`[name='${n}']`);");
   html += F("    const add=(k)=>{const el=q(k); if(el){ if((el.type||'').toLowerCase()==='checkbox'){ if(el.checked) fd.append(k,'on'); } else { fd.append(k,el.value); } } };");
   html += F("    add('zoneName'+z); add('startHour'+z); add('startMin'+z); add('startHour2'+z); add('startMin2'+z); add('durationMin'+z); add('durationSec'+z); add('duration2Min'+z); add('duration2Sec'+z);");
-  html += F("    add('enableStartTime2'+z);");
+  html += F("    add('enableStartTime2'+z); add('zoneWindDelay'+z);");
   html += F("    for(let d=0; d<7; d++) add('day'+z+'_'+d);");
   html += F("  }");
   html += F("  try{ await fetch('/submit',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:fd.toString()}); location.reload(); }catch(e){ console.error(e); }");
@@ -8470,6 +8487,7 @@ void handleSubmit() {
       if (server.hasArg("duration2Min"+String(z))) duration2Min[z]=clampInt(server.arg("duration2Min"+String(z)).toInt(), 0, 600);
       if (server.hasArg("duration2Sec"+String(z))) duration2Sec[z]=clampInt(server.arg("duration2Sec"+String(z)).toInt(), 0, 59);
       enableStartTime2[z] = server.hasArg("enableStartTime2"+String(z));
+      zoneWindDelayEnabled[z] = server.hasArg("zoneWindDelay"+String(z));
       // Days
       for (int d=0; d<7; d++) days[z][d] = server.hasArg("day"+String(z)+"_"+String(d));
 
@@ -8495,6 +8513,7 @@ void handleSubmit() {
     if (server.hasArg("duration2Min"+String(z))) duration2Min[z]=clampInt(server.arg("duration2Min"+String(z)).toInt(), 0, 600);
     if (server.hasArg("duration2Sec"+String(z))) duration2Sec[z]=clampInt(server.arg("duration2Sec"+String(z)).toInt(), 0, 59);
     enableStartTime2[z] = server.hasArg("enableStartTime2"+String(z));
+    zoneWindDelayEnabled[z] = server.hasArg("zoneWindDelay"+String(z));
   }
   saveSchedule(); saveConfig();
   server.sendHeader("Location","/",true); server.send(302,"text/plain","");
@@ -9316,6 +9335,7 @@ void loadSchedule() {
     int enIdx = (tcount >= 9) ? 8 : 6; // compatibility when duration2 fields absent
     enableStartTime2[i] = (tok(enIdx, enableStartTime2[i]) == 1);
 
+    zoneWindDelayEnabled[i] = tok(16, 1) == 1;
     int dayStart = enIdx + 1;
     for (int d=0; d<7; d++) {
       days[i][d] = (tok(dayStart + d, days[i][d]) == 1);
@@ -9338,6 +9358,7 @@ void saveSchedule() {
     f.print(duration2Sec[i]);f.print(',');
     f.print(enableStartTime2[i] ? '1' : '0');
     for (int d=0; d<7; d++){ f.print(','); f.print(days[i][d] ? '1' : '0'); }
+    f.print(','); f.print(zoneWindDelayEnabled[i] ? '1' : '0');
     f.println();
   }
   f.close();
