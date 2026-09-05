@@ -15,7 +15,7 @@ Schedules run on the controller, so watering continues even when the internet is
 
 No Arduino IDE is required. Connect the ESP32 by USB and open the:
 
-### 👉 [ESP32 Irrigation Web Flasher](https://numerik11.github.io/ESP32-Irrigation-Controller/web-flasher/)
+### 👉 [ESP32 Irrigation Web Flasher](https://hjennerway.github.io/ESP32-Irrigation-Controller/web-flasher/)
 
 <p align="center">
 <img width="582" height="464" alt="image" src="https://github.com/user-attachments/assets/e68a9ddc-96ca-4974-9211-f4d3a9568ea1" />
@@ -157,6 +157,12 @@ Manual compilation requires the [Kincony PCF8574 library](https://www.kincony.co
 
 MQTT supports integrations such as Home Assistant, Node-RED, custom dashboards, and other home-automation systems.
 
+When MQTT is enabled, the controller publishes retained Home Assistant discovery
+configuration after connecting to the broker. Home Assistant automatically creates
+the rainfall and cooldown sensors, master/pause/rain/wind binary sensors, and one
+switch for every configured irrigation zone. Zone switches use the controller's
+configured names and existing `espirrigation/cmd/zone/<index>` command topics.
+
 ### Web endpoints
 
 | Path | Description |
@@ -166,6 +172,7 @@ MQTT supports integrations such as Home Assistant, Node-RED, custom dashboards, 
 | `/status` | JSON system status |
 | `/events` | Event log |
 | `/tank` | Tank sensor calibration |
+| `/update` | Password-protected browser OTA uploader |
 | `/download/events.csv` | Download event log |
 | `/i2c-test` | I²C/relay test |
 | `/stopall` | Stop all active zones |
@@ -180,9 +187,46 @@ To compile with Arduino IDE:
 1. Add `https://dl.espressif.com/dl/package_esp32_index.json` to **Additional Boards Manager URLs**.
 2. Install **ESP32 by Espressif Systems**.
 3. Select **ESP32 Dev Module** or **ESP32S3 Dev Module**, as appropriate.
-4. Select an OTA-capable partition layout if OTA updates are required. **Huge APP** or **No OTA** can provide more space when OTA is not needed.
+4. Select **Minimal SPIFFS (Large APPS with OTA)** so the firmware has enough program space while retaining two OTA application slots.
 
-> Do not select a **No OTA** partition if you intend to update firmware over the network.
+> Do not select **Huge APP** or **No OTA** if you intend to update firmware over the network; those layouts normally provide only one application slot.
+
+### Browser OTA (ArduinoOTA alternative)
+
+The firmware also provides an HTTP updater, so Arduino IDE network discovery and
+the ArduinoOTA protocol are not required:
+
+1. In **Setup → Firmware Updates**, save an OTA password of 8–64 characters.
+2. Compile with **Minimal SPIFFS (Large APPS with OTA)** and use **Sketch → Export Compiled Binary**.
+3. Open `http://<controller-ip>/update` in a browser.
+4. Sign in with username `admin` and the OTA password, select the application `.bin`, and install it.
+
+The controller stops active valves before writing, validates the image, switches
+the boot slot only after a complete upload, and then restarts. Keep the controller
+powered throughout the update. The password also secures ArduinoOTA and access to
+the downloaded configuration file; it is stored locally in the controller's
+configuration just like the MQTT password.
+
+An existing installation can use this route only after firmware containing the
+route has been installed. In particular, an older ESP32 image using a single-app
+partition cannot convert itself to an OTA layout. Flash the full Minimal SPIFFS
+image once over USB/Web Serial (erasing the device so the partition table is
+replaced); subsequent application updates can use `/update`. ArduinoOTA remains
+available as a fallback when it works on the local network.
+
+### Faster OTA build verification on Windows
+
+The PowerShell helper builds with Minimal SPIFFS and keeps Arduino's normal
+persistent compilation cache enabled:
+
+```powershell
+.\scripts\verify-ota.ps1
+```
+
+The default checks the ESP32 Dev Module. Use `-Target esp32s3` for the S3 or
+`-Target all` before publishing both images. The first build can take several
+minutes; later builds with the same board core and partition setting reuse the
+cache and should be substantially faster.
 
 ## ⚠️ Electrical safety
 
@@ -204,8 +248,8 @@ To compile with Arduino IDE:
 
 ## 🔗 Links
 
-- [Web Flasher](https://numerik11.github.io/ESP32-Irrigation-Controller/web-flasher/)
-- [GitHub repository](https://github.com/numerik11/ESP32-Irrigation-Controller)
+- [Web Flasher](https://hjennerway.github.io/ESP32-Irrigation-Controller/web-flasher/)
+- [GitHub repository](https://github.com/hjennerway/ESP32-Irrigation-Controller)
 
 If this project helps you, consider giving it a ⭐ on GitHub. Bug reports, testing, and suggestions are welcome.
 
