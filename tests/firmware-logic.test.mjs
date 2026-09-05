@@ -15,7 +15,7 @@ const esp32 = await readFirmware(
   path.join(repositoryRoot, "firmware", "ESP32-Irrigation", "ESP32-Irrigation.ino"),
 );
 const esp8266 = await readFirmware(
-  path.join(repositoryRoot, "firmware", "ESP8266-Irrigation.ino"),
+  path.join(repositoryRoot, "firmware", "ESP8266-Irrigation", "ESP8266-Irrigation.ino"),
 );
 
 test("ESP32 GPIO polarity produces the safe relay levels", () => {
