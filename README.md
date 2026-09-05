@@ -244,8 +244,8 @@ cache and should be substantially faster.
 
 ## 🔗 Links
 
-- [Web Flasher](https://hjennerway.github.io/ESP32-Irrigation-Controller/web-flasher/)
-- [GitHub repository](https://github.com/hjennerway/ESP32-Irrigation-Controller)
+- [Web Flasher](https://numerik11.github.io/ESP32-Irrigation-Controller/web-flasher/)
+- [GitHub repository](https://github.com/numerik11/ESP32-Irrigation-Controller)
 
 If this project helps you, consider giving it a ⭐ on GitHub. Bug reports, testing, and suggestions are welcome.
 

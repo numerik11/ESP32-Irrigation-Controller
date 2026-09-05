@@ -161,6 +161,7 @@
 <body>
   <main>
     <h1>ESP32 Irrigation Firmware Update</h1>
+    <p>Version 2.5 adds Open-Meteo Soil Moisture (0–1 cm) as a source in Smart Watering settings.</p>
 
     <label for="board">Board</label>
     <select id="board">
@@ -189,7 +190,7 @@
   </main>
 
   <script>
-    const updaterVersion = "2.4";
+    const updaterVersion = "2.5";
     const counterUrl = "https://irrigation-update-counter.beaukacz86.workers.dev";
     const board = document.getElementById("board");
     const installer = document.getElementById("installer");

@@ -54,7 +54,7 @@ extern "C" {
 // ---------- Hardware ----------
 static const char kFirmwareSignature[] __attribute__((used)) =
   "Original author: Beau Kaczmarek - https://github.com/numerik11/ESP32-Irrigation-Controller";
-static const char kFirmwareVersion[] = "2.4";
+static const char kFirmwareVersion[] = "2.5";
 static const char kFirmwareBuildDate[] = __DATE__ " " __TIME__;
 static const char kUpdateReportUrl[] =
   "https://irrigation-update-counter.beaukacz86.workers.dev/v1/report";
@@ -398,6 +398,11 @@ float    smartActualRainSkipMm = 5.0f;
 int      smartLightRainAdjustPct = -30;
 float    smartForecastRainSkipMm = 5.0f;
 bool     moistureProbeEnabled = false;
+bool     moistureUseMeteo = false;
+int      meteoMoisturePct = -1;
+unsigned long meteoMoistureFetchedMs = 0;
+unsigned long meteoMoistureAttemptMs = 0;
+bool     meteoMoistureAttempted = false;
 int      moisturePin = -1;
 int      moistureDryRaw = 3000;
 int      moistureWetRaw = 1200;
@@ -928,6 +933,7 @@ void mqttPublishStatus(){
   d["smartWatering"] = smartWateringEnabled;
   d["smartFactor"] = smartWateringFactor();
   d["moistureEnabled"] = moistureProbeEnabled;
+  d["moistureSource"] = moistureUseMeteo ? "meteo" : "probe";
   d["moisturePct"] = moisturePercent();
   d["moistureRaw"] = moistureRaw();
   d["moistureSkip"] = isSoilWetForSmartSkip();
@@ -1500,7 +1506,7 @@ bool isTankLow() {
 }
 
 int moistureRaw() {
-  if (!moistureProbeEnabled) return -1;
+  if (!moistureProbeEnabled || moistureUseMeteo) return -1;
   if (!isValidAdcPin(moisturePin)) return -1;
   const int N = 8;
   uint32_t acc = 0;
@@ -1509,6 +1515,11 @@ int moistureRaw() {
 }
 
 int moisturePercent() {
+  if (!moistureProbeEnabled) return -1;
+  if (moistureUseMeteo) {
+    if (millis() - meteoMoistureFetchedMs >= 2UL * 60UL * 60UL * 1000UL) return -1;
+    return meteoMoisturePct;
+  }
   const int raw = moistureRaw();
   if (raw < 0) return -1;
   if (moistureDryRaw == moistureWetRaw) return -1;
@@ -2581,6 +2592,7 @@ void handleDiagnosticsJson() {
   water["tankPct"] = tankPercent();
   water["tankLow"] = isTankLow();
   water["moistureEnabled"] = moistureProbeEnabled;
+  water["moistureSource"] = moistureUseMeteo ? "meteo" : "probe";
   water["moisturePct"] = moisturePercent();
   water["moistureRaw"] = moistureRaw();
   water["moistureSkip"] = isSoilWetForSmartSkip();
@@ -3225,6 +3237,7 @@ void setup() {
     doc["smartWatering"] = smartWateringEnabled;
     doc["smartFactor"] = smartWateringFactor();
     doc["moistureEnabled"] = moistureProbeEnabled;
+    doc["moistureSource"] = moistureUseMeteo ? "meteo" : "probe";
     doc["moisturePct"] = moisturePercent();
     doc["moistureRaw"] = moistureRaw();
     doc["moistureSkip"] = isSoilWetForSmartSkip();
@@ -4080,6 +4093,36 @@ void tickManualButtons() {
 }
 
 // ---------- Weather / Forecast ----------
+int meteoSoilPercent(float fraction) {
+  if (!isfinite(fraction) || fraction < 0.0f || fraction > 1.0f) return -1;
+  return (int)lroundf(fraction * 100.0f);
+}
+
+// Use automatic model selection independently of the weather model: not all
+// weather models provide the 0-1 cm layer. The first hour is the current hour.
+void updateMeteoMoisture() {
+  if (!moistureProbeEnabled || !moistureUseMeteo) return;
+  const unsigned long nowMs = millis();
+  if (meteoMoistureAttempted && nowMs - meteoMoistureAttemptMs < 15UL * 60UL * 1000UL) return;
+  meteoMoistureAttempted = true;
+  meteoMoistureAttemptMs = nowMs;
+  meteoMoisturePct = -1;
+  if (!isValidLatLon(meteoLat, meteoLon)) return;
+  String url = "https://api.open-meteo.com/v1/forecast?latitude=" + String(meteoLat, 6) +
+    "&longitude=" + String(meteoLon, 6) +
+    "&hourly=soil_moisture_0_to_1cm&forecast_hours=1&timeformat=unixtime&timezone=GMT";
+  int code = 0;
+  String payload = httpGetMeteo(url, code, meteoHttpTimeoutMs());
+  if (code != 200) return;
+  JsonDocument data;
+  if (deserializeJson(data, payload) != DeserializationError::Ok) return;
+  JsonVariant value = data["hourly"]["soil_moisture_0_to_1cm"][0];
+  if (!value.is<float>()) return;
+  const float fraction = value.as<float>();
+  meteoMoisturePct = meteoSoilPercent(fraction);
+  meteoMoistureFetchedMs = millis();
+}
+
 String fetchWeather() {
   if (!isValidLatLon(meteoLat, meteoLon)) return "";
   String model = cleanMeteoModel(meteoModel);
@@ -4414,6 +4457,8 @@ void updateCachedWeather() {
   // saved setup once. This keeps first WiFi provisioning focused on bringing
   // up the local UI and avoids early heap-heavy TLS work after WiFiManager.
   if (!g_configLoadedFromFs) return;
+
+  updateMeteoMoisture();
 
   unsigned long nowms = millis();
   bool needCur = (cachedWeatherData == "" ||
@@ -6967,7 +7012,7 @@ void handleRoot() {
       html += F("No valid reading");
     } else {
       html += String(moisturePctNow);
-      html += F("% wet, skip at ");
+      html += moistureUseMeteo ? F("% water volume (Open-Meteo 0-1 cm), skip at ") : F("% wet, skip at ");
       html += String(moistureSkipThresholdPct);
       html += F("%");
     }
@@ -7326,7 +7371,7 @@ void handleRoot() {
   html += F("const enabled=!!st.smartWatering; const pct=(typeof st.smartFactor==='number')?Math.round(st.smartFactor*100):100;");
   html += F("if(note) note.classList.toggle('is-disabled',!enabled); if(status) status.textContent=enabled?'Enabled':'Disabled'; if(factor) factor.textContent=(enabled?pct:100)+'%';");
   html += F("if(skip) skip.textContent=(enabled&&pct<=0)?' - starts will be skipped by the current smart rules':'';");
-  html += F("if(moisture){ if(!st.moistureEnabled) moisture.textContent='Disabled'; else if(typeof st.moisturePct!=='number'||st.moisturePct<0) moisture.textContent='No valid reading'; else moisture.textContent=Math.round(st.moisturePct)+'% wet'+(st.moistureSkip?' - skip active':''); }");
+  html += F("if(moisture){ if(!st.moistureEnabled) moisture.textContent='Disabled'; else if(typeof st.moisturePct!=='number'||st.moisturePct<0) moisture.textContent='No valid reading'; else moisture.textContent=Math.round(st.moisturePct)+(st.moistureSource==='meteo'?'% water volume (Open-Meteo 0-1 cm)':'% wet')+(st.moistureSkip?' - skip active':''); }");
   html += F("})();");
 
   // Next Water
@@ -7445,7 +7490,7 @@ void handleSetupPage() {
   if (setupModelLabel == "best_match") setupModelLabel = "Best match";
   else setupModelLabel.replace("_", " ");
   int setupMoistureRaw = moistureRaw();
-  int setupMoisturePct = -1;
+  int setupMoisturePct = moisturePercent();
   if (setupMoistureRaw >= 0 && moistureDryRaw != moistureWetRaw) {
     setupMoisturePct = constrain(map(setupMoistureRaw, moistureDryRaw, moistureWetRaw, 0, 100), 0, 100);
   }
@@ -7678,7 +7723,7 @@ void handleSetupPage() {
   html += F("<style>#setupForm{display:flex;flex-direction:column}.card.narrow{width:300mm;max-width:100%;align-self:center}#setupForm>.setup-nav{order:0}#setupForm>.setup-actions-top{order:1}#smart-card{order:10}#delays-card{order:20}#weather-card{order:30}#tank-card{order:40}#rain-card{order:50}#timezone-card{order:60}#pins-card{order:70}#i2c-card{order:80}#buttons-card{order:90}#display-card{order:100}#advanced-card{order:110}#mqtt-card{order:120}#ota-card{order:130}</style>");
   html += F("<form id='setupForm' action='/configure' method='POST' novalidate>");
   html += F("<div class='setup-nav'><a href='#smart-card'>Smart Watering</a><a href='#delays-card'>Delays &amp; Pause</a><a href='#weather-card'>Forecast</a><a href='#tank-card'>Water &amp; Tank</a><a href='#rain-card'>Rain Inputs</a><a href='#timezone-card'>Timezone</a><a href='#pins-card'>GPIO</a><a href='#i2c-card'>I2C</a><a href='#buttons-card'>Buttons</a><a href='#display-card'>Display</a><a href='#advanced-card'>TFT Pins</a><a href='#mqtt-card'>MQTT</a><a href='#ota-card'>Firmware</a></div>");
-  html += F("<div class='setup-actions-top'><button class='btn' type='submit' id='btn-save-setup'>Save Changes</button><a class='btn-alt' href='/'>Home</a><a class='btn-alt' href='https://hjennerway.github.io/ESP32-Irrigation-Controller/web-flasher/?current=");
+  html += F("<div class='setup-actions-top'><button class='btn' type='submit' id='btn-save-setup'>Save Changes</button><a class='btn-alt' href='/'>Home</a><a class='btn-alt' href='https://numerik11.github.io/ESP32-Irrigation-Controller/web-flasher/?current=");
   html += kFirmwareVersion;
   html += F("' target='_blank' rel='noopener'>Web Flasher</a><a class='btn-alt' href='/update'>Browser OTA</a><button class='btn-alt' type='button' id='btn-clear-cooldown'>Clear After-Rain Delay</button><button class='btn btn-danger' type='button' onclick=\"if(confirm('Reboot controller now?'))fetch('/reboot',{method:'POST'})\">Reboot</button><span class='save-confirm' id='save-confirm'>Saved</span></div>");
 
@@ -7796,9 +7841,13 @@ void handleSetupPage() {
   html += F("</div>");
   html += F("<div>");
   html += F("<div class='subhead'>Ground Moisture</div><hr class='hr'>");
-  html += F("<div class='row switchline'><label>Ground Moisture Probe</label><input type='checkbox' name='moistureProbeEnabled' ");
+  html += F("<div class='row switchline'><label>Enable Ground Moisture</label><input type='checkbox' name='moistureProbeEnabled' ");
   html += (moistureProbeEnabled ? "checked" : "");
   html += F("><small>Wet soil can skip scheduled and manual starts</small></div>");
+  html += F("<div class='row'><label>Moisture Source</label><select name='moistureSource'>");
+  html += F("<option value='probe'"); html += (!moistureUseMeteo ? " selected" : ""); html += F(">Physical soil moisture probe</option>");
+  html += F("<option value='meteo'"); html += (moistureUseMeteo ? " selected" : ""); html += F(">Open-Meteo Soil Moisture (0-1 cm)</option>");
+  html += F("</select><small>Open-Meteo uses your forecast coordinates and automatic model selection. Modelled volumetric water content: 0.30 m3/m3 = 30%. Review the skip threshold for this source. GPIO and Dry/Wet calibration apply only to the physical probe.</small></div>");
   #if defined(CONFIG_IDF_TARGET_ESP32)
     html += F("<div class='row'><label>Moisture Probe GPIO</label><input class='in-xs' type='number' min='-1' max='39' name='moisturePin' value='");
     html += String(moisturePin); html += F("'><small>ADC1 pin, ESP32 GPIO32-39, or -1 disabled</small></div>");
@@ -7809,11 +7858,13 @@ void handleSetupPage() {
   html += F("<div class='row'><label>Current Moisture</label><div class='chip' id='moistureLiveRaw'>Raw: ");
   if (setupMoistureRaw < 0) html += F("--");
   else html += String(setupMoistureRaw);
-  html += F("</div><div class='chip' id='moistureLivePct'>Wet: ");
+  html += F("</div><div class='chip' id='moistureLivePct'>");
+  html += moistureUseMeteo ? F("Water volume: ") : F("Wet: ");
   if (setupMoisturePct < 0) html += F("--");
   else { html += String(setupMoisturePct); html += F("%"); }
   html += F("</div><small id='moistureLiveHint'>");
-  if (!moistureProbeEnabled) html += F("Enable the probe and save to start live calibration readings.");
+  if (!moistureProbeEnabled) html += F("Enable ground moisture and save to start readings.");
+  else if (moistureUseMeteo) html += F("Open-Meteo 0-1 cm volumetric water content; unavailable readings do not trigger a skip.");
   else if (setupMoistureRaw < 0) html += F("No valid ADC reading. Check the GPIO and wiring.");
   else html += F("Use the raw value to set Dry and Wet calibration points.");
   html += F("</small></div>");
@@ -7825,7 +7876,7 @@ void handleSetupPage() {
   html += F("'><small>Raw ADC value measured in wet soil</small></div>");
   html += F("<div class='row'><label>Moisture Skip Above (%)</label><input class='in-sm' type='number' min='0' max='100' name='moistureSkipPct' value='");
   html += String(moistureSkipThresholdPct);
-  html += F("'><small>Skip starts when measured soil moisture is at or above this level</small></div>");
+  html += F("'><small>Skip starts at or above this level. Open-Meteo uses volumetric water percentage.</small></div>");
   html += F("</div>");
   html += F("</div></div></details></div>");
 
@@ -8237,9 +8288,10 @@ void handleSetupPage() {
   html += F("  try{const r=await fetch('/status'); const st=await r.json();");
   html += F("    const en=!!st.moistureEnabled; const raw=(typeof st.moistureRaw==='number')?st.moistureRaw:-1; const pct=(typeof st.moisturePct==='number')?st.moisturePct:-1;");
   html += F("    if(rawEl) rawEl.textContent='Raw: '+(en&&raw>=0?raw:'--');");
-  html += F("    if(pctEl) pctEl.textContent='Wet: '+(en&&pct>=0?(Math.round(pct)+'%'):'--');");
+  html += F("    if(pctEl) pctEl.textContent=(st.moistureSource==='meteo'?'Water volume: ':'Wet: ')+(en&&pct>=0?(Math.round(pct)+'%'):'--');");
   html += F("    if(hint){");
-  html += F("      if(!en) hint.textContent='Enable the probe and save to start live calibration readings.';");
+  html += F("      if(!en) hint.textContent='Enable ground moisture and save to start readings.';");
+  html += F("      else if(st.moistureSource==='meteo') hint.textContent=pct<0?'Open-Meteo soil moisture unavailable. Skip inactive.':'Open-Meteo 0-1 cm volumetric water content.'+(st.moistureSkip?' Skip is active.':'');");
   html += F("      else if(raw<0) hint.textContent='No valid ADC reading. Check the GPIO and wiring.';");
   html += F("      else hint.textContent='Use the raw value to set Dry and Wet calibration points.'+(st.moistureSkip?' Skip is active.':'');");
   html += F("    }");
@@ -9074,6 +9126,7 @@ void loadConfig() {
     s.replace("\n", "");
     if (s.length() >= 8 && s.length() <= 64) otaPassword = s;
   }
+  if (nextTail(s) && s.length()) moistureUseMeteo = (s == "meteo");
 
   if (!(smartCoolTempC < smartHotTempC && smartHotTempC < smartVeryHotTempC)) {
     smartCoolTempC = 18.0f;
@@ -9224,6 +9277,7 @@ void saveConfig() {
   f.println(climateSourceValue());
   f.println(dhtSensorPin);
   f.println(otaPassword);
+  f.println(moistureUseMeteo ? "meteo" : "probe");
 
   f.close();
 }
@@ -9432,6 +9486,10 @@ void handleConfigure() {
     if (v >= 0.0f && v <= 200.0f) smartForecastRainSkipMm = v;
   }
   moistureProbeEnabled = server.hasArg("moistureProbeEnabled");
+  if (server.hasArg("moistureSource")) moistureUseMeteo = (server.arg("moistureSource") == "meteo");
+  // Settings may change coordinates or source; discard the old site reading.
+  meteoMoisturePct = -1;
+  meteoMoistureAttempted = false;
   if (server.hasArg("moisturePin")) {
     int p = server.arg("moisturePin").toInt();
     moisturePin = (p == -1 || isValidAdcPin(p)) ? p : -1;

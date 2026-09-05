@@ -75,4 +75,8 @@ test("web flasher publishes one version and links both manifests", async () => {
   const updaterVersion = /const\s+updaterVersion\s*=\s*["']([^"']+)["']/.exec(index);
   assert.ok(updaterVersion, "index.html declares updaterVersion");
   assert.equal(updaterVersion[1], manifests[0].version);
+  const firmware = await readFile(path.join(repositoryRoot, "ESP32-Irrigation", "ESP32-Irrigation.ino"), "utf8");
+  const firmwareVersion = /kFirmwareVersion\[\]\s*=\s*"([^"]+)"/.exec(firmware);
+  assert.ok(firmwareVersion, "firmware declares its version");
+  assert.equal(firmwareVersion[1], manifests[0].version, "firmware and updater versions match");
 });
