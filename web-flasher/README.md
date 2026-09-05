@@ -2,7 +2,7 @@
 
 This folder contains a browser-based USB firmware installer for the ESP32 irrigation firmware.
 
-Goto: https://hjennerway.github.io/ESP32-Irrigation-Controller/web_flasher/
+Goto: https://numerick11.github.io/ESP32-Irrigation-Controller/web-flasher/
 
 ## Boards
 
@@ -16,7 +16,7 @@ Use Chrome or Edge. ESP Web Tools needs Web Serial, so Firefox and Safari will n
 When GitHub Pages is enabled for this repository, open:
 
 ```text
-https://hjennerway.github.io/ESP32-Irrigation-Controller/web_flasher/
+https://numerick11.github.io/ESP32-Irrigation-Controller/web-flasher/
 ```
 
 If that URL returns `404`, GitHub Pages has not been enabled or has not finished deploying yet.
@@ -24,7 +24,7 @@ If that URL returns `404`, GitHub Pages has not been enabled or has not finished
 For local testing:
 
 ```powershell
-cd web_flasher
+cd web-flasher
 python -m http.server 8080
 ```
 

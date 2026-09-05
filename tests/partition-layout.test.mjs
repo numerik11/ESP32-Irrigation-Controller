@@ -24,7 +24,7 @@ function parsePartitionTable(buffer) {
 
 for (const target of ["esp32-dev", "esp32-s3-devkitc-1"]) {
   test(`${target} web-flasher image has two OTA slots and enough room`, async () => {
-    const targetDirectory = path.join(repositoryRoot, "web_flasher", target);
+    const targetDirectory = path.join(repositoryRoot, "web-flasher", target);
     const table = parsePartitionTable(await readFile(path.join(targetDirectory, "partitions.bin")));
     const manifest = JSON.parse(await readFile(path.join(targetDirectory, "manifest.json"), "utf8"));
     const otaData = table.find((entry) => entry.type === 0x01 && entry.subtype === 0x00);

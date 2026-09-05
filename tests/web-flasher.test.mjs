@@ -6,7 +6,7 @@ import test from "node:test";
 
 const testDirectory = path.dirname(fileURLToPath(import.meta.url));
 const repositoryRoot = path.resolve(testDirectory, "..");
-const webFlasherDirectory = path.join(repositoryRoot, "web_flasher");
+const webFlasherDirectory = path.join(repositoryRoot, "web-flasher");
 
 const targets = [
   {

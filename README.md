@@ -15,7 +15,7 @@ Schedules run on the controller, so watering continues even when the internet is
 
 No Arduino IDE is required. Connect the ESP32 by USB and open the:
 
-### 👉 [ESP32 Irrigation Web Flasher](https://hjennerway.github.io/ESP32-Irrigation-Controller/web_flasher/)
+### 👉 [ESP32 Irrigation Web Flasher](https://numerick11.github.io/ESP32-Irrigation-Controller/web-flasher/)
 
 <p align="center">
 <img width="582" height="464" alt="image" src="https://github.com/user-attachments/assets/e68a9ddc-96ca-4974-9211-f4d3a9568ea1" />
@@ -248,7 +248,7 @@ cache and should be substantially faster.
 
 ## 🔗 Links
 
-- [Web Flasher](https://hjennerway.github.io/ESP32-Irrigation-Controller/web_flasher/)
+- [Web Flasher](https://numerick11.github.io/ESP32-Irrigation-Controller/web-flasher/)
 - [GitHub repository](https://github.com/hjennerway/ESP32-Irrigation-Controller)
 
 If this project helps you, consider giving it a ⭐ on GitHub. Bug reports, testing, and suggestions are welcome.
