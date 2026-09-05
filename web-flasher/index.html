@@ -161,7 +161,7 @@
 <body>
   <main>
     <h1>ESP32 Irrigation Firmware Update</h1>
-    <p>Version 2.5 adds Open-Meteo Soil Moisture (0–1 cm) as a source in Smart Watering settings.</p>
+    <p>Version 2.6 adds installation from public GitHub firmware links in Browser OTA.</p>
 
     <label for="board">Board</label>
     <select id="board">
@@ -186,11 +186,15 @@
       <esp-web-install-button id="installer"></esp-web-install-button>
     </div>
 
+    <p><a id="firmwareDownload" href="esp32-dev/firmware.bin?v=2.6" download>Download application .bin for Browser OTA</a></p>
+    <label for="firmwareLink">GitHub URL for Browser OTA</label>
+    <input id="firmwareLink" type="url" readonly style="width:100%;padding:10px" aria-label="GitHub firmware URL for selected board">
+    <p>Copy this URL into the controller's Browser OTA page, or download the .bin and upload it there.</p>
     <p>Use Chrome or Edge. Connect the board by USB, choose the matching board, then install.</p>
   </main>
 
   <script>
-    const updaterVersion = "2.5";
+    const updaterVersion = "2.6";
     const counterUrl = "https://irrigation-update-counter.beaukacz86.workers.dev";
     const board = document.getElementById("board");
     const installer = document.getElementById("installer");
@@ -250,6 +254,9 @@
 
     async function updateManifest() {
       const url = manifestUrl();
+      const imagePath = board.value.replace('manifest.json', 'firmware.bin');
+      document.getElementById('firmwareDownload').href = imagePath + '?v=' + updaterVersion;
+      document.getElementById('firmwareLink').value = 'https://raw.githubusercontent.com/numerik11/ESP32-Irrigation-Controller/main/web-flasher/' + imagePath;
       installer.setAttribute("manifest", url);
       availableVersion.textContent = "Loading...";
       try {
