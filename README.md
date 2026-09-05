@@ -11,6 +11,10 @@ A flexible, locally controlled irrigation system for **1–16 solenoid valves**.
 
 Schedules run on the controller, so watering continues even when the internet is unavailable.
 
+## Firmware 2.8
+
+System Setup now uses the home page's compact styling, with seven grouped settings sections and navigation that wraps on mobile. Firmware Updates starts collapsed. Updated ESP32 and ESP32-S3 images are available through the web flasher and Browser OTA downloads.
+
 ## 🚀 Install from your browser
 
 No Arduino IDE is required. Connect the ESP32 by USB and open the:
