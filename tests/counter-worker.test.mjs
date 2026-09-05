@@ -10,7 +10,7 @@ import {
 } from "./helpers/load-worker.mjs";
 
 const testDirectory = path.dirname(fileURLToPath(import.meta.url));
-const workerPath = path.resolve(testDirectory, "../counter-worker/worker.mjs");
+const workerPath = path.resolve(testDirectory, "../web_flasher/counter-worker/worker.mjs");
 const workerModule = await loadWorkerModule(workerPath);
 const worker = workerModule.default;
 

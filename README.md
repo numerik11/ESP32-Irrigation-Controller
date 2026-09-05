@@ -15,7 +15,7 @@ Schedules run on the controller, so watering continues even when the internet is
 
 No Arduino IDE is required. Connect the ESP32 by USB and open the:
 
-### 👉 [ESP32 Irrigation Web Flasher](https://hjennerway.github.io/ESP32-Irrigation-Controller/web-flasher/)
+### 👉 [ESP32 Irrigation Web Flasher](https://hjennerway.github.io/ESP32-Irrigation-Controller/web_flasher/)
 
 <p align="center">
 <img width="582" height="464" alt="image" src="https://github.com/user-attachments/assets/e68a9ddc-96ca-4974-9211-f4d3a9568ea1" />
@@ -220,7 +220,7 @@ The PowerShell helper builds with Minimal SPIFFS and keeps Arduino's normal
 persistent compilation cache enabled:
 
 ```powershell
-.\scripts\verify-ota.ps1
+.\tests\verify-ota.ps1
 ```
 
 The default checks the ESP32 Dev Module. Use `-Target esp32s3` for the S3 or
@@ -248,7 +248,7 @@ cache and should be substantially faster.
 
 ## 🔗 Links
 
-- [Web Flasher](https://hjennerway.github.io/ESP32-Irrigation-Controller/web-flasher/)
+- [Web Flasher](https://hjennerway.github.io/ESP32-Irrigation-Controller/web_flasher/)
 - [GitHub repository](https://github.com/hjennerway/ESP32-Irrigation-Controller)
 
 If this project helps you, consider giving it a ⭐ on GitHub. Bug reports, testing, and suggestions are welcome.

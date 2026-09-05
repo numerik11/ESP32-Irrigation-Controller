@@ -3,7 +3,7 @@
 Run the complete host-side suite from the repository root:
 
 ```sh
-npm test
+npm --prefix tests test
 ```
 
 The suite has no third-party dependencies and uses Node's built-in test runner
