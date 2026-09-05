@@ -54,7 +54,7 @@ extern "C" {
 // ---------- Hardware ----------
 static const char kFirmwareSignature[] __attribute__((used)) =
   "Original author: Beau Kaczmarek - https://github.com/numerik11/ESP32-Irrigation-Controller";
-static const char kFirmwareVersion[] = "2.6";
+static const char kFirmwareVersion[] = "2.8";
 static const char kFirmwareBuildDate[] = __DATE__ " " __TIME__;
 static const char kUpdateReportUrl[] =
   "https://irrigation-update-counter.beaukacz86.workers.dev/v1/report";
@@ -413,6 +413,11 @@ bool runZonesConcurrent = false;
 
 // Scheduling
 bool enableStartTime2[MAX_ZONES] = {false};
+// Preserve wind protection when loading older schedules.
+bool zoneWindDelayEnabled[MAX_ZONES] = {
+  true, true, true, true, true, true, true, true,
+  true, true, true, true, true, true, true, true
+};
 bool days[MAX_ZONES][7] = {{false}};
 bool zoneActive[MAX_ZONES] = {false};
 bool zoneStartedManual[MAX_ZONES] = {false};
@@ -1080,9 +1085,14 @@ void rebuildRuntimeCountersFromEvents() {
   f.close();
 }
 
+static bool windBlocksZone(int z) {
+  return z >= 0 && z < (int)MAX_ZONES && windActive && zoneWindDelayEnabled[z];
+}
+
 static void stopAutoZonesForBlock() {
   for (int z = 0; z < (int)zonesCount; ++z) {
-    if (zoneActive[z] && !zoneStartedManual[z]) turnOffZone(z);
+    if (zoneActive[z] && !zoneStartedManual[z] &&
+        (!systemMasterEnabled || isBlockedNow() || rainActive || windBlocksZone(z))) turnOffZone(z);
   }
 }
 
@@ -3617,9 +3627,13 @@ void loop() {
   const bool hardBlock = (!systemMasterEnabled || isPausedNow());
   const bool cooldownActive = isCooldownActiveNow();
   const bool manualDelayBypassActive = hasActiveManualZone();
+  bool windBypassRunning = false;
+  for (int z = 0; z < (int)zonesCount; ++z) {
+    if (zoneActive[z] && !zoneWindDelayEnabled[z]) windBypassRunning = true;
+  }
   const bool delayScreenActive = !manualActive &&
                                  !manualDelayBypassActive &&
-                                 (hardBlock || cooldownActive || rainActive || windActive);
+                                 (hardBlock || cooldownActive || rainActive || (windActive && !windBypassRunning));
 
   if (hardBlock || cooldownActive || rainActive || windActive) {
     stopAutoZonesForBlock();
@@ -3724,7 +3738,7 @@ void loop() {
           // Cancel when blocked/rain; queue during wind so it can run later.
           if (isBlockedNow()) { cancelStart(z, "BLOCKED", false); continue; }
           if (rainActive)     { cancelStart(z, "RAIN",    true ); continue; }
-          if (windActive)     { pendingStart[z] = true; logEvent(z,"QUEUED","WIND",false); continue; }
+          if (windBlocksZone(z)) { pendingStart[z] = true; logEvent(z,"QUEUED","WIND",false); continue; }
 
           if (!runZonesConcurrent) {
             // sequential: only start if nothing is running; else queue (still allowed)
@@ -3739,13 +3753,13 @@ void loop() {
 
       if (!runZonesConcurrent) {
         // sequential: drain one queued zone if nothing currently running
-        if (!anyActive && !rainActive && !windActive) {
-          for (int z=0; z<(int)zonesCount; z++) if (pendingStart[z]) { pendingStart[z]=false; turnOnZone(z); break; }
+        if (!anyActive && !rainActive) {
+          for (int z=0; z<(int)zonesCount; z++) if (pendingStart[z] && !windBlocksZone(z)) { pendingStart[z]=false; turnOnZone(z); break; }
         }
-      } else if (!rainActive && !windActive) {
+      } else if (!rainActive) {
         // concurrent: start any queued zones once delays clear
         for (int z=0; z<(int)zonesCount; z++) {
-          if (pendingStart[z]) { pendingStart[z]=false; turnOnZone(z); anyActive = true; }
+          if (pendingStart[z] && !windBlocksZone(z)) { pendingStart[z]=false; turnOnZone(z); anyActive = true; }
         }
       }
     }
@@ -3951,7 +3965,7 @@ void drawManualSelection() {
     statusText = "RAIN";
     statusColor = C_BAD;
     snprintf(detailLine, sizeof(detailLine), "Rain delay is active");
-  } else if (windActive) {
+  } else if (windBlocksZone(selectedZone)) {
     statusId = 7;
     statusText = "WIND";
     statusColor = C_WARN;
@@ -6118,7 +6132,7 @@ void turnOnZone(int z) {
 
   if (isBlockedNow())  { cancelStart(z, "BLOCKED", false); return; }
   if (rainActive)      { cancelStart(z, "RAIN",    true ); return; }
-  if (windActive)      { pendingStart[z] = true; logEvent(z, "QUEUED", "WIND", false); return; }
+  if (windBlocksZone(z)) { pendingStart[z] = true; logEvent(z, "QUEUED", "WIND", false); return; }
 
   const bool usePcf = useExpanderForZone(z);
   if (!usePcf) {
@@ -6191,7 +6205,7 @@ void turnOffZone(int z) {
   bool mainsOn=false, tankOn=false;
   chooseWaterSource(src, mainsOn, tankOn);
 
-  bool wasDelayed = rainActive || windActive || isPausedNow() ||
+  bool wasDelayed = rainActive || windBlocksZone(z) || isPausedNow() ||
                     !systemMasterEnabled ||
                     (rainCooldownUntilEpoch > time(nullptr));
   logEvent(z, "STOPPED", zoneStartedManual[z] ? "MANUAL" : src, wasDelayed);
@@ -7053,6 +7067,9 @@ void handleRoot() {
     html += F("</h4><form method='POST' action='/submit'>");
     html += F("<input type='hidden' name='onlyZone' value='"); html += String(z); html += F("'>");
 
+    html += F("<div class='rowx'><label>Wind Delay</label><div class='field'><label class='toggle-inline'><input type='checkbox' name='zoneWindDelay");
+    html += String(z); html += F("' "); html += (zoneWindDelayEnabled[z] ? "checked" : "");
+    html += F("> Enable</label><small>Uses the wind switch and threshold in Setup.</small></div></div>");
     // Name
     html += F("<div class='rowx'><label>Name</label><div class='field'>");
     html += F("<input class='in' type='text' name='zoneName"); html += String(z);
@@ -7432,7 +7449,7 @@ void handleRoot() {
   html += F("    const q=n=>document.querySelector(`[name='${n}']`);");
   html += F("    const add=(k)=>{const el=q(k); if(el){ if((el.type||'').toLowerCase()==='checkbox'){ if(el.checked) fd.append(k,'on'); } else { fd.append(k,el.value); } } };");
   html += F("    add('zoneName'+z); add('startHour'+z); add('startMin'+z); add('startHour2'+z); add('startMin2'+z); add('durationMin'+z); add('durationSec'+z); add('duration2Min'+z); add('duration2Sec'+z);");
-  html += F("    add('enableStartTime2'+z);");
+  html += F("    add('enableStartTime2'+z); add('zoneWindDelay'+z);");
   html += F("    for(let d=0; d<7; d++) add('day'+z+'_'+d);");
   html += F("  }");
   html += F("  try{ await fetch('/submit',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:fd.toString()}); location.reload(); }catch(e){ console.error(e); }");
@@ -7710,7 +7727,8 @@ void handleSetupPage() {
   html += F("details.collapse summary,html[data-theme='dark'] details.collapse summary{color:#ffffff}html[data-theme='light'] details.collapse summary{color:#000000}");
   html += F("@media(max-width:760px){.page-head{padding:10px 12px}.page-head h1{font-size:1.2rem}.setup-hero{grid-template-columns:1fr}.setup-badges{grid-template-columns:1fr 1fr}.setup-nav{top:8px;flex-wrap:nowrap;overflow:auto;padding-bottom:6px}.setup-nav a{white-space:nowrap}.setup-actions-top{top:8px;z-index:9;padding:10px;border-radius:14px;background:rgba(13,23,24,.88);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);border:1px solid rgba(92,131,125,.2)}.row{padding-top:8px;flex-direction:column;align-items:stretch}.row label{min-width:0;width:100%}.row .btn,.row .btn-alt{width:100%}.switchline{align-items:flex-start}}");
   html += F(":root{--setup-bg:#f3f7fc;--setup-panel:#ffffff;--setup-ink:#172033;--setup-muted:#68758a;--setup-line:#dbe4ef;--setup-blue:#2563eb}html[data-theme='dark']{--setup-bg:#0b1220;--setup-panel:#111c2e;--setup-ink:#e7eef9;--setup-muted:#9aa9bd;--setup-line:#293a54;--setup-blue:#60a5fa}.wrap{max-width:1180px;margin:0 auto;padding:0 20px}body{background:var(--setup-bg);color:var(--setup-ink)}.page-head{margin:0 -20px 16px;padding:16px 20px;border:0;border-bottom:1px solid var(--setup-line);border-radius:0;background:var(--setup-panel);box-shadow:0 4px 14px rgba(15,23,42,.06)}.page-kicker{color:var(--setup-blue)}.page-sub,.setup-hero-copy p,.card-intro,.row small{color:var(--setup-muted)}.setup-hero{display:block;margin:0 -20px 16px;padding:18px 20px;border-radius:0;background:var(--setup-panel);border:0;border-bottom:1px solid var(--setup-line);box-shadow:none}.setup-overview-title{color:var(--setup-blue);margin-bottom:10px}.setup-badges{grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}.setup-badge{border-radius:7px;padding:12px;background:var(--setup-bg);border:1px solid var(--setup-line)}.setup-badge-k{color:var(--setup-muted)}.setup-badge-v{color:var(--setup-ink)}.setup-nav{top:8px;margin:0 0 10px;padding:7px;border-radius:7px;background:var(--setup-panel);border:1px solid var(--setup-line);box-shadow:0 5px 14px rgba(15,23,42,.08)}.setup-nav a{border-radius:6px;background:transparent;color:var(--setup-muted);border-color:transparent;padding:8px 11px}.setup-nav a:hover{transform:none;background:rgba(37,99,235,.1);border-color:rgba(37,99,235,.22);color:var(--setup-blue);box-shadow:none}.setup-actions-top{top:61px;margin:0 0 16px;padding:8px;border-radius:7px;background:var(--setup-panel);border:1px solid var(--setup-line);box-shadow:0 5px 14px rgba(15,23,42,.08)}.card{border-radius:7px;background:var(--setup-panel);border:1px solid var(--setup-line);box-shadow:0 6px 18px rgba(15,23,42,.06)}.card::before{height:2px;background:var(--setup-blue)}.card h3{color:var(--setup-ink)}details.collapse summary{color:var(--setup-ink);padding:7px 0;font-size:1rem}details.collapse summary:after{border-radius:6px;border-color:var(--setup-line);background:var(--setup-bg)}.collapse-body{border-top:1px solid var(--setup-line);padding-top:12px}.row{border-top-color:var(--setup-line)}label{color:var(--setup-ink)}input[type=text],input[type=number],select{background:var(--setup-bg);color:var(--setup-ink);border-color:var(--setup-line);border-radius:6px}.chip{background:var(--setup-bg);border-color:var(--setup-line);color:var(--setup-ink);border-radius:6px}.btn,.btn-alt{border-radius:6px}.btn-alt{background:var(--setup-bg);color:var(--setup-ink);border-color:var(--setup-line)}.save-confirm{margin-left:auto}@media(max-width:760px){.wrap{padding:0 12px}.page-head,.setup-hero{margin-left:-12px;margin-right:-12px;padding-left:12px;padding-right:12px}.setup-badges{grid-template-columns:repeat(2,minmax(0,1fr))}.setup-nav{top:8px}.setup-actions-top{top:58px}.setup-actions-top .save-confirm{margin-left:0}.row{padding-top:10px}}@media(max-width:440px){.setup-badges{grid-template-columns:1fr}.setup-actions-top .btn,.setup-actions-top .btn-alt{flex:1 1 100%}}</style></head><body>"); 
-  // The preceding CSS fragment already closes style/head and opens body.
+  // Setup-only compact styling uses the dashboard typography, palette and spacing.
+  html += F("<style>html,body,input,select,button{font-family:'Segoe UI',Arial,sans-serif}html body{background:var(--setup-bg)}.wrap{margin:12px auto;padding:0 14px}html[data-theme] .page-head{margin:0 0 10px;padding:10px 12px;border-radius:7px;background:#1e3a8a;border:0;color:#fff}html .page-head h1{font-size:1rem;margin:3px 0;color:#fff}html .page-head .page-kicker,html .page-head .page-sub{color:#dbeafe}.page-sub{font-size:.78rem}.page-head-copy{min-width:0}.theme-switch{flex-shrink:0}html[data-theme] .setup-hero{margin:0 0 10px;padding:10px 12px;border:1px solid var(--setup-line);border-radius:7px;background:var(--setup-panel)}.setup-overview-title{margin-bottom:7px;font-size:.68rem}.setup-badges{grid-template-columns:repeat(3,minmax(0,1fr));gap:6px}.setup-badge{padding:7px 9px;min-width:0}.setup-badge-k{font-size:.6rem;letter-spacing:.08em}.setup-badge-v{font-size:.85rem;overflow-wrap:anywhere}#setupForm>.setup-nav{position:static;flex-wrap:wrap;overflow:visible;gap:5px;padding:6px;margin-bottom:8px}.setup-nav a{flex:1 1 auto;padding:7px 9px;font-size:.75rem}#setupForm>.setup-actions-top{position:static;gap:6px;padding:7px;margin-bottom:8px}.setup-actions-top .btn,.setup-actions-top .btn-alt{flex:0 1 auto;padding:8px 10px;font-size:.78rem}#setupForm .card.narrow{box-sizing:border-box;width:100%;min-width:0;margin:0 0 8px;padding:8px 12px;animation:none}#setupForm details.collapse>summary{min-height:30px;padding:4px 0;font-size:.88rem}#setupForm .collapse-body{padding-top:8px}.card-intro{margin:0 0 8px;font-size:.8rem}.row{gap:8px;padding-top:8px;margin:8px 0}.setup-merged{border-top:1px solid var(--setup-line);margin-top:12px;padding-top:8px}.setup-merged h3{font-size:.85rem}#setupForm [id$='-card']{scroll-margin-top:12px}input,select{max-width:100%;box-sizing:border-box}@media(max-width:760px){.wrap{padding:0 10px;margin:10px auto}.setup-badges{grid-template-columns:repeat(2,minmax(0,1fr))}.page-head{gap:8px;flex-wrap:wrap}.setup-actions-top .btn,.setup-actions-top .btn-alt{flex:1 1 auto}.row label{min-width:0}.panel-split{grid-template-columns:minmax(0,1fr)}}</style>");
   flush();
 
   html += F("<div class='wrap'><div class='page-head'><div class='page-head-copy'><div class='page-kicker'>Controller configuration</div><h1>System Setup</h1><div class='page-sub'>Firmware v");
@@ -8235,7 +8253,7 @@ void handleSetupPage() {
   html += F("</div></details></div>");
 
 #if ENABLE_OTA
-  html += F("<div class='card narrow' id='ota-card'><details class='collapse' open><summary>Firmware Updates</summary><div class='collapse-body'><p class='card-intro'>Install a compiled application image directly from a browser, with ArduinoOTA retained as a second network update method.</p>");
+  html += F("<div class='card narrow' id='ota-card'><details class='collapse'><summary>Firmware Updates</summary><div class='collapse-body'><p class='card-intro'>Install a compiled application image directly from a browser, with ArduinoOTA retained as a second network update method.</p>");
   html += F("<div class='row'><label>Browser OTA</label><div class='sub'>");
   html += otaPassword.length() ? F("Password configured") : F("Disabled until a password is set");
   html += F("</div></div><div class='row'><label>OTA Username</label><div class='sub'><code>admin</code></div></div>");
@@ -8248,6 +8266,9 @@ void handleSetupPage() {
 
   // quick-actions + timezone JS
   html += F("<script>");
+  // Merge related sections without changing control names, IDs or form ownership.
+  html += F("[['smart-card','Watering & Delays',['delays-card']],['tank-card','Water & Rain',['rain-card']],['weather-card','Forecast & Time',['timezone-card']],['pins-card','Hardware & Buttons',['i2c-card','buttons-card']],['display-card','Display & TFT Pins',['advanced-card']]].forEach(([id,title,children])=>{const parent=document.getElementById(id);if(!parent)return;parent.querySelector('summary').textContent=title;const body=parent.querySelector('.collapse-body');children.forEach(childId=>{const child=document.getElementById(childId);if(!child)return;const heading=document.createElement('h3');heading.textContent=child.querySelector('summary').textContent;const content=child.querySelector('.collapse-body');const section=document.createElement('section');section.id=childId;section.className='setup-merged';if(child.hasAttribute('data-tft-only'))section.setAttribute('data-tft-only','');section.append(heading);while(content.firstChild)section.append(content.firstChild);body.append(section);child.remove();document.querySelector('.setup-nav a[href=\\\"#'+childId+'\\\"]')?.remove();});const link=document.querySelector('.setup-nav a[href=\\\"#'+id+'\\\"]');if(link)link.textContent=title;});");
+  html += F("function revealSetupSection(){const id=location.hash.slice(1);const target=document.getElementById(id);if(!target||!target.closest('#setupForm'))return;let node=target;while(node){if(node.tagName==='DETAILS')node.open=true;node=node.parentElement;}const details=target.querySelector('details');if(details)details.open=true;target.scrollIntoView({block:'start'});}document.querySelector('.setup-nav').addEventListener('click',event=>{const link=event.target.closest('a');if(!link)return;event.preventDefault();history.replaceState(null,'',link.hash);revealSetupSection();});window.addEventListener('hashchange',revealSetupSection);if(location.hash)revealSetupSection();");
   html += F("async function post(path, body){try{await fetch(path,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body});}catch(e){console.error(e)}}");
   html += F("const g=id=>document.getElementById(id);");
   html += F("let setupTempUnit='"); html += temperatureUnitChar(); html += F("';const tempUnitSel=g('tempUnitSelect');");
@@ -8470,6 +8491,7 @@ void handleSubmit() {
       if (server.hasArg("duration2Min"+String(z))) duration2Min[z]=clampInt(server.arg("duration2Min"+String(z)).toInt(), 0, 600);
       if (server.hasArg("duration2Sec"+String(z))) duration2Sec[z]=clampInt(server.arg("duration2Sec"+String(z)).toInt(), 0, 59);
       enableStartTime2[z] = server.hasArg("enableStartTime2"+String(z));
+      zoneWindDelayEnabled[z] = server.hasArg("zoneWindDelay"+String(z));
       // Days
       for (int d=0; d<7; d++) days[z][d] = server.hasArg("day"+String(z)+"_"+String(d));
 
@@ -8495,6 +8517,7 @@ void handleSubmit() {
     if (server.hasArg("duration2Min"+String(z))) duration2Min[z]=clampInt(server.arg("duration2Min"+String(z)).toInt(), 0, 600);
     if (server.hasArg("duration2Sec"+String(z))) duration2Sec[z]=clampInt(server.arg("duration2Sec"+String(z)).toInt(), 0, 59);
     enableStartTime2[z] = server.hasArg("enableStartTime2"+String(z));
+    zoneWindDelayEnabled[z] = server.hasArg("zoneWindDelay"+String(z));
   }
   saveSchedule(); saveConfig();
   server.sendHeader("Location","/",true); server.send(302,"text/plain","");
@@ -9316,6 +9339,7 @@ void loadSchedule() {
     int enIdx = (tcount >= 9) ? 8 : 6; // compatibility when duration2 fields absent
     enableStartTime2[i] = (tok(enIdx, enableStartTime2[i]) == 1);
 
+    zoneWindDelayEnabled[i] = tok(16, 1) == 1;
     int dayStart = enIdx + 1;
     for (int d=0; d<7; d++) {
       days[i][d] = (tok(dayStart + d, days[i][d]) == 1);
@@ -9338,6 +9362,7 @@ void saveSchedule() {
     f.print(duration2Sec[i]);f.print(',');
     f.print(enableStartTime2[i] ? '1' : '0');
     for (int d=0; d<7; d++){ f.print(','); f.print(days[i][d] ? '1' : '0'); }
+    f.print(','); f.print(zoneWindDelayEnabled[i] ? '1' : '0');
     f.println();
   }
   f.close();
