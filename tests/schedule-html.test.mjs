@@ -6,6 +6,7 @@ function page(overrides={}){
   const response={headers:{}};
   const state={MAX_ZONES:3,zonesCount:3,days:[[false,false,false,true,false,false,false],[false,false,false,true,false,false,false],[true,false,false,false,false,false,false]],
     zoneNames:['Audrey <II> & herbs','Tomatoes','Other day'],startHour:[17,23,10],startMin:[30,50,0],startHour2:[11,0,0],startMin2:[30,0,0],enableStartTime2:[true,false,false],
+    scheduleHtmlCustomCss:'',
     durationForSlot:()=>1800,smartWateringDurationForSlot:()=>1800,
     time:()=>Date.UTC(2026,8,9,18)/1000,F:v=>v,String,sizeof:()=>40,
     server:{sendHeader:(k,v)=>response.headers[k]=v,send:(code,type,html)=>Object.assign(response,{code,type,html})},
@@ -43,4 +44,16 @@ test('unsynchronized controller clock renders an explicit waiting message',()=>{
   const {response}=page({time:()=>0});
   assert.match(response.html,/Waiting for the controller clock/);
   assert.ok(!response.html.includes('<table>'));
+});
+test('schedule renders configured custom CSS after its built-in styles in the head',()=>{
+  const css='.schedule-heading { color: rebeccapurple; }';
+  const {response}=page({scheduleHtmlCustomCss:css});
+  assert.match(response.html,/<style id='schedule-custom-styles'>\.schedule-heading \{ color: rebeccapurple; \}<\/style><\/head>/);
+  assert.ok(response.html.indexOf("id='schedule-custom-styles'")>response.html.indexOf(':root{color-scheme'));
+});
+test('setup exposes and persists a custom schedule CSS textarea',()=>{
+  assert.match(source,/id='schedule-html-card'/);
+  assert.match(source,/textarea id='scheduleHtmlCss' name='scheduleHtmlCss' maxlength='4096'/);
+  assert.match(source,/scheduleHtmlCustomCss = sanitizeScheduleHtmlCss\(server\.arg\("scheduleHtmlCss"\)\)/);
+  assert.match(source,/f\.println\(String\("css:"\) \+ encodeConfigLine\(scheduleHtmlCustomCss\)\)/);
 });

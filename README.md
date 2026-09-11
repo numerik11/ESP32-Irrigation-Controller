@@ -216,7 +216,7 @@ Open `http://espirrigation.local/schedule-html` (or use the controller's IP addr
 
 Each zone shows up to two enabled start/end ranges in chronological order, for example `11:30 - 12:00` and `17:30 - 18:00`. Enable the second start in the zone's schedule to show both runs. The compact page omits the explanatory footer.
 
-For custom styling, the page exposes `.schedule-page`, `.schedule-content`, `.schedule-heading`, `.schedule-date`, `.schedule-table`, `.schedule-columns`, `.schedule-zone`, `.schedule-zone-name`, `.schedule-times`, `.schedule-time`, and `.schedule-status`. Styles must be applied inside the schedule page; CSS in a parent dashboard does not cross into an iframe.
+For custom styling, open **Setup → Schedule HTML Styles** and enter CSS in the Custom CSS box. The saved rules are added after the built-in styles in the `/schedule-html` page header, so they can override the defaults. The page exposes `.schedule-page`, `.schedule-content`, `.schedule-heading`, `.schedule-date`, `.schedule-table`, `.schedule-columns`, `.schedule-zone`, `.schedule-zone-name`, `.schedule-times`, `.schedule-time`, and `.schedule-status`. CSS in a parent dashboard does not cross into an iframe.
 
 The page refreshes every 60 seconds and follows the browser's light/dark preference. End times use current Smart Watering durations, with zero-duration adjustments marked as skipped. Times are estimates rather than run history: rain, wind, pauses and other delays can change actual watering. An end after midnight includes its date. An unsynchronized controller shows a waiting message.
 

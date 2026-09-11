@@ -475,6 +475,8 @@ String zoneNames[MAX_ZONES] = {
   "Zone 7","Zone 8","Zone 9","Zone 10","Zone 11","Zone 12",
   "Zone 13","Zone 14","Zone 15","Zone 16"
 };
+String scheduleHtmlCustomCss;
+static const size_t SCHEDULE_HTML_CSS_MAX_LENGTH = 4096;
 
 unsigned long zoneStartMs[MAX_ZONES] = {0};
 unsigned long zoneRunTotalSec[MAX_ZONES] = {0}; // actual duration for current run
@@ -600,6 +602,7 @@ void handleClearEvents();
 void handleDiagnosticsPage();
 void handleDiagnosticsJson();
 void handleTankCalibration();
+static String htmlEscape(const String& s);
 String fetchWeather();
 String fetchWeatherHourlyForCurrent(const String& model, float lat, float lon, bool useForecastEndpoint);
 bool buildCurrentFromHourlyPayload(const String& hourlyPayload, String& outPayload);
@@ -7629,9 +7632,9 @@ void handleSetupPage() {
   html += F("padding-bottom:6px;border-bottom:2px solid #2563eb;display:flex;align-items:center;gap:8px}");
   html += F("label{display:inline-block;min-width:200px;font-size:.95rem;font-weight:600;color:#d5e4de;text-align:left}");
   // Inputs + select share the same theme
-  html += F("input[type=text],input[type=number],select{background:#0c1618;color:#e7f1ec;border:1px solid #294b73;border-radius:12px;padding:9px 12px;font-size:.95rem;text-align:left}");
+  html += F("input[type=text],input[type=number],select,textarea{background:#0c1618;color:#e7f1ec;border:1px solid #294b73;border-radius:12px;padding:9px 12px;font-size:.95rem;text-align:left}");
   html += F("option{background:#ffffff;color:#14232b}html[data-theme='dark'] option{background:#0c1618;color:#e7f1ec}");
-  html += F("input[type=text],select{width:100%;max-width:520px}");
+  html += F("input[type=text],select,textarea{width:100%;max-width:520px}");
   html += F("input[type=number]{width:100%;max-width:200px}");
   html += F("input[type=text].in-wide,select.in-wide{max-width:600px}");
   html += F("input[type=text].in-med,select.in-med{max-width:440px}");
@@ -7707,7 +7710,7 @@ void handleSetupPage() {
   html += F("html[data-theme='light'] .card h3{color:#14232b;border-bottom-color:#2563eb}");
   html += F("html[data-theme='light'] label{color:#213433}");
   html += F("html[data-theme='light'] .row small{color:#607571}");
-  html += F("html[data-theme='light'] input[type=text],html[data-theme='light'] input[type=number],html[data-theme='light'] select{background:#f7faf8;color:#14232b;border-color:#c9d9d0}");
+  html += F("html[data-theme='light'] input[type=text],html[data-theme='light'] input[type=number],html[data-theme='light'] select,html[data-theme='light'] textarea{background:#f7faf8;color:#14232b;border-color:#c9d9d0}");
   html += F("html[data-theme='light'] .chip{background:#eef6f2;border-color:#c9d9d0;color:#213433}");
   html += F("html[data-theme='light'] input[type=checkbox]:not(#themeToggle),html[data-theme='light'] input[type=radio]{border-color:#8aa59c;background:rgba(255,255,255,.78);box-shadow:inset 0 1px 0 rgba(255,255,255,.75)}");
   html += F("html[data-theme='light'] input[type=checkbox]:not(#themeToggle)::before{border-right-color:#1e40af;border-bottom-color:#1e40af}");
@@ -7755,7 +7758,7 @@ void handleSetupPage() {
   html += F(".card{position:relative;overflow:hidden}");
   html += F(".card::before{content:'';position:absolute;left:0;right:0;top:0;height:3px;background:linear-gradient(90deg,#2563eb,#38bdf8)}");
   html += F("input[type=text],input[type=number],select{font-family:'Sora','Trebuchet MS',sans-serif}");
-  html += F("input[type=text]:focus-visible,input[type=number]:focus-visible,select:focus-visible{outline:2px solid #2563eb;outline-offset:1px;box-shadow:0 0 0 3px rgba(37,99,235,.18)}");
+  html += F("input[type=text]:focus-visible,input[type=number]:focus-visible,select:focus-visible,textarea:focus-visible{outline:2px solid #2563eb;outline-offset:1px;box-shadow:0 0 0 3px rgba(37,99,235,.18)}");
   html += F(".btn,.btn-alt{font-weight:760;letter-spacing:.16px}");
   html += F(".chip{font-weight:620}");
   html += F("details.collapse summary{display:flex;align-items:center;justify-content:space-between}");
@@ -7779,7 +7782,7 @@ void handleSetupPage() {
   html += F("html[data-theme='light'] input[type=checkbox]:not(#themeToggle):focus-visible,html[data-theme='light'] input[type=radio]:focus-visible{border-color:#2563eb;box-shadow:0 0 0 3px rgba(37,99,235,.14)}html[data-theme='light'] .setup-nav a:hover{background:#eef5ff;border-color:#bfdbfe;box-shadow:0 10px 24px rgba(37,99,235,.08)}");
   html += F("details.collapse summary,html[data-theme='dark'] details.collapse summary{color:#ffffff}html[data-theme='light'] details.collapse summary{color:#000000}");
   html += F("@media(max-width:760px){.page-head{padding:10px 12px}.page-head h1{font-size:1.2rem}.setup-hero{grid-template-columns:1fr}.setup-badges{grid-template-columns:1fr 1fr}.setup-nav{top:8px;flex-wrap:nowrap;overflow:auto;padding-bottom:6px}.setup-nav a{white-space:nowrap}.setup-actions-top{top:8px;z-index:9;padding:10px;border-radius:14px;background:rgba(13,23,24,.88);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);border:1px solid rgba(92,131,125,.2)}.row{padding-top:8px;flex-direction:column;align-items:stretch}.row label{min-width:0;width:100%}.row .btn,.row .btn-alt{width:100%}.switchline{align-items:flex-start}}");
-  html += F(":root{--setup-bg:#f3f7fc;--setup-panel:#ffffff;--setup-ink:#172033;--setup-muted:#68758a;--setup-line:#dbe4ef;--setup-blue:#2563eb}html[data-theme='dark']{--setup-bg:#0b1220;--setup-panel:#111c2e;--setup-ink:#e7eef9;--setup-muted:#9aa9bd;--setup-line:#293a54;--setup-blue:#60a5fa}.wrap{max-width:1180px;margin:0 auto;padding:0 20px}body{background:var(--setup-bg);color:var(--setup-ink)}.page-head{margin:0 -20px 16px;padding:16px 20px;border:0;border-bottom:1px solid var(--setup-line);border-radius:0;background:var(--setup-panel);box-shadow:0 4px 14px rgba(15,23,42,.06)}.page-kicker{color:var(--setup-blue)}.page-sub,.setup-hero-copy p,.card-intro,.row small{color:var(--setup-muted)}.setup-hero{display:block;margin:0 -20px 16px;padding:18px 20px;border-radius:0;background:var(--setup-panel);border:0;border-bottom:1px solid var(--setup-line);box-shadow:none}.setup-overview-title{color:var(--setup-blue);margin-bottom:10px}.setup-badges{grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}.setup-badge{border-radius:7px;padding:12px;background:var(--setup-bg);border:1px solid var(--setup-line)}.setup-badge-k{color:var(--setup-muted)}.setup-badge-v{color:var(--setup-ink)}.setup-nav{top:8px;margin:0 0 10px;padding:7px;border-radius:7px;background:var(--setup-panel);border:1px solid var(--setup-line);box-shadow:0 5px 14px rgba(15,23,42,.08)}.setup-nav a{border-radius:6px;background:transparent;color:var(--setup-muted);border-color:transparent;padding:8px 11px}.setup-nav a:hover{transform:none;background:rgba(37,99,235,.1);border-color:rgba(37,99,235,.22);color:var(--setup-blue);box-shadow:none}.setup-actions-top{top:61px;margin:0 0 16px;padding:8px;border-radius:7px;background:var(--setup-panel);border:1px solid var(--setup-line);box-shadow:0 5px 14px rgba(15,23,42,.08)}.card{border-radius:7px;background:var(--setup-panel);border:1px solid var(--setup-line);box-shadow:0 6px 18px rgba(15,23,42,.06)}.card::before{height:2px;background:var(--setup-blue)}.card h3{color:var(--setup-ink)}details.collapse summary{color:var(--setup-ink);padding:7px 0;font-size:1rem}details.collapse summary:after{border-radius:6px;border-color:var(--setup-line);background:var(--setup-bg)}.collapse-body{border-top:1px solid var(--setup-line);padding-top:12px}.row{border-top-color:var(--setup-line)}label{color:var(--setup-ink)}input[type=text],input[type=number],select{background:var(--setup-bg);color:var(--setup-ink);border-color:var(--setup-line);border-radius:6px}.chip{background:var(--setup-bg);border-color:var(--setup-line);color:var(--setup-ink);border-radius:6px}.btn,.btn-alt{border-radius:6px}.btn-alt{background:var(--setup-bg);color:var(--setup-ink);border-color:var(--setup-line)}.save-confirm{margin-left:auto}@media(max-width:760px){.wrap{padding:0 12px}.page-head,.setup-hero{margin-left:-12px;margin-right:-12px;padding-left:12px;padding-right:12px}.setup-badges{grid-template-columns:repeat(2,minmax(0,1fr))}.setup-nav{top:8px}.setup-actions-top{top:58px}.setup-actions-top .save-confirm{margin-left:0}.row{padding-top:10px}}@media(max-width:440px){.setup-badges{grid-template-columns:1fr}.setup-actions-top .btn,.setup-actions-top .btn-alt{flex:1 1 100%}}</style></head><body>"); 
+  html += F(":root{--setup-bg:#f3f7fc;--setup-panel:#ffffff;--setup-ink:#172033;--setup-muted:#68758a;--setup-line:#dbe4ef;--setup-blue:#2563eb}html[data-theme='dark']{--setup-bg:#0b1220;--setup-panel:#111c2e;--setup-ink:#e7eef9;--setup-muted:#9aa9bd;--setup-line:#293a54;--setup-blue:#60a5fa}.wrap{max-width:1180px;margin:0 auto;padding:0 20px}body{background:var(--setup-bg);color:var(--setup-ink)}.page-head{margin:0 -20px 16px;padding:16px 20px;border:0;border-bottom:1px solid var(--setup-line);border-radius:0;background:var(--setup-panel);box-shadow:0 4px 14px rgba(15,23,42,.06)}.page-kicker{color:var(--setup-blue)}.page-sub,.setup-hero-copy p,.card-intro,.row small{color:var(--setup-muted)}.setup-hero{display:block;margin:0 -20px 16px;padding:18px 20px;border-radius:0;background:var(--setup-panel);border:0;border-bottom:1px solid var(--setup-line);box-shadow:none}.setup-overview-title{color:var(--setup-blue);margin-bottom:10px}.setup-badges{grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}.setup-badge{border-radius:7px;padding:12px;background:var(--setup-bg);border:1px solid var(--setup-line)}.setup-badge-k{color:var(--setup-muted)}.setup-badge-v{color:var(--setup-ink)}.setup-nav{top:8px;margin:0 0 10px;padding:7px;border-radius:7px;background:var(--setup-panel);border:1px solid var(--setup-line);box-shadow:0 5px 14px rgba(15,23,42,.08)}.setup-nav a{border-radius:6px;background:transparent;color:var(--setup-muted);border-color:transparent;padding:8px 11px}.setup-nav a:hover{transform:none;background:rgba(37,99,235,.1);border-color:rgba(37,99,235,.22);color:var(--setup-blue);box-shadow:none}.setup-actions-top{top:61px;margin:0 0 16px;padding:8px;border-radius:7px;background:var(--setup-panel);border:1px solid var(--setup-line);box-shadow:0 5px 14px rgba(15,23,42,.08)}.card{border-radius:7px;background:var(--setup-panel);border:1px solid var(--setup-line);box-shadow:0 6px 18px rgba(15,23,42,.06)}.card::before{height:2px;background:var(--setup-blue)}.card h3{color:var(--setup-ink)}details.collapse summary{color:var(--setup-ink);padding:7px 0;font-size:1rem}details.collapse summary:after{border-radius:6px;border-color:var(--setup-line);background:var(--setup-bg)}.collapse-body{border-top:1px solid var(--setup-line);padding-top:12px}.row{border-top-color:var(--setup-line)}label{color:var(--setup-ink)}input[type=text],input[type=number],select,textarea{background:var(--setup-bg);color:var(--setup-ink);border-color:var(--setup-line);border-radius:6px}.chip{background:var(--setup-bg);border-color:var(--setup-line);color:var(--setup-ink);border-radius:6px}.btn,.btn-alt{border-radius:6px}.btn-alt{background:var(--setup-bg);color:var(--setup-ink);border-color:var(--setup-line)}.save-confirm{margin-left:auto}@media(max-width:760px){.wrap{padding:0 12px}.page-head,.setup-hero{margin-left:-12px;margin-right:-12px;padding-left:12px;padding-right:12px}.setup-badges{grid-template-columns:repeat(2,minmax(0,1fr))}.setup-nav{top:8px}.setup-actions-top{top:58px}.setup-actions-top .save-confirm{margin-left:0}.row{padding-top:10px}}@media(max-width:440px){.setup-badges{grid-template-columns:1fr}.setup-actions-top .btn,.setup-actions-top .btn-alt{flex:1 1 100%}}</style></head><body>");
   // Setup-only compact styling uses the dashboard typography, palette and spacing.
   html += F("<style>html,body,input,select,button{font-family:'Segoe UI',Arial,sans-serif}html body{background:var(--setup-bg)}.wrap{margin:12px auto;padding:0 14px}html[data-theme] .page-head{margin:0 0 10px;padding:10px 12px;border-radius:7px;background:#1e3a8a;border:0;color:#fff}html .page-head h1{font-size:1rem;margin:3px 0;color:#fff}html .page-head .page-kicker,html .page-head .page-sub{color:#dbeafe}.page-sub{font-size:.78rem}.page-head-copy{min-width:0}.theme-switch{flex-shrink:0}html[data-theme] .setup-hero{margin:0 0 10px;padding:10px 12px;border:1px solid var(--setup-line);border-radius:7px;background:var(--setup-panel)}.setup-overview-title{margin-bottom:7px;font-size:.68rem}.setup-badges{grid-template-columns:repeat(3,minmax(0,1fr));gap:6px}.setup-badge{padding:7px 9px;min-width:0}.setup-badge-k{font-size:.6rem;letter-spacing:.08em}.setup-badge-v{font-size:.85rem;overflow-wrap:anywhere}#setupForm>.setup-nav{position:static;flex-wrap:wrap;overflow:visible;gap:5px;padding:6px;margin-bottom:8px}.setup-nav a{flex:1 1 auto;padding:7px 9px;font-size:.75rem}#setupForm>.setup-actions-top{position:static;gap:6px;padding:7px;margin-bottom:8px}.setup-actions-top .btn,.setup-actions-top .btn-alt{flex:0 1 auto;padding:8px 10px;font-size:.78rem}#setupForm .card.narrow{box-sizing:border-box;width:100%;min-width:0;margin:0 0 8px;padding:8px 12px;animation:none}#setupForm details.collapse>summary{min-height:30px;padding:4px 0;font-size:.88rem}#setupForm .collapse-body{padding-top:8px}.card-intro{margin:0 0 8px;font-size:.8rem}.row{gap:8px;padding-top:8px;margin:8px 0}.setup-merged{border-top:1px solid var(--setup-line);margin-top:12px;padding-top:8px}.setup-merged h3{font-size:.85rem}#setupForm [id$='-card']{scroll-margin-top:12px}input,select{max-width:100%;box-sizing:border-box}@media(max-width:760px){.wrap{padding:0 10px;margin:10px auto}.setup-badges{grid-template-columns:repeat(2,minmax(0,1fr))}.page-head{gap:8px;flex-wrap:wrap}.setup-actions-top .btn,.setup-actions-top .btn-alt{flex:1 1 auto}.row label{min-width:0}.panel-split{grid-template-columns:minmax(0,1fr)}}</style>");
   flush();
@@ -7797,9 +7800,9 @@ void handleSetupPage() {
   html += F("<div class='setup-badge'><div class='setup-badge-k'>Forecast Site</div><div class='setup-badge-v'>"); html += setupWeatherLabel; html += F("</div></div>");
   html += F("<div class='setup-badge'><div class='setup-badge-k'>Forecast Model</div><div class='setup-badge-v'>"); html += setupModelLabel; html += F("</div></div>");
   html += F("</div></div>");
-  html += F("<style>#setupForm{display:flex;flex-direction:column}.card.narrow{width:300mm;max-width:100%;align-self:center}#setupForm>.setup-nav{order:0}#setupForm>.setup-actions-top{order:1}#smart-card{order:10}#delays-card{order:20}#weather-card{order:30}#tank-card{order:40}#rain-card{order:50}#timezone-card{order:60}#pins-card{order:70}#i2c-card{order:80}#buttons-card{order:90}#display-card{order:100}#advanced-card{order:110}#mqtt-card{order:120}#ota-card{order:130}</style>");
+  html += F("<style>#setupForm{display:flex;flex-direction:column}.card.narrow{width:300mm;max-width:100%;align-self:center}#setupForm>.setup-nav{order:0}#setupForm>.setup-actions-top{order:1}#smart-card{order:10}#delays-card{order:20}#weather-card{order:30}#tank-card{order:40}#rain-card{order:50}#timezone-card{order:60}#pins-card{order:70}#i2c-card{order:80}#buttons-card{order:90}#display-card{order:100}#advanced-card{order:110}#schedule-html-card{order:120}#mqtt-card{order:130}#ota-card{order:140}#scheduleHtmlCss{max-width:none;min-height:220px;resize:vertical;font:13px/1.45 ui-monospace,SFMono-Regular,Consolas,monospace}</style>");
   html += F("<form id='setupForm' action='/configure' method='POST' novalidate>");
-  html += F("<div class='setup-nav'><a href='#smart-card'>Smart Watering</a><a href='#delays-card'>Delays &amp; Pause</a><a href='#weather-card'>Forecast</a><a href='#tank-card'>Water &amp; Tank</a><a href='#rain-card'>Rain Inputs</a><a href='#timezone-card'>Timezone</a><a href='#pins-card'>GPIO</a><a href='#i2c-card'>I2C</a><a href='#buttons-card'>Buttons</a><a href='#display-card'>Display</a><a href='#advanced-card'>TFT Pins</a><a href='#mqtt-card'>MQTT</a><a href='#ota-card'>Firmware</a></div>");
+  html += F("<div class='setup-nav'><a href='#smart-card'>Smart Watering</a><a href='#delays-card'>Delays &amp; Pause</a><a href='#weather-card'>Forecast</a><a href='#tank-card'>Water &amp; Tank</a><a href='#rain-card'>Rain Inputs</a><a href='#timezone-card'>Timezone</a><a href='#pins-card'>GPIO</a><a href='#i2c-card'>I2C</a><a href='#buttons-card'>Buttons</a><a href='#display-card'>Display</a><a href='#advanced-card'>TFT Pins</a><a href='#schedule-html-card'>Schedule CSS</a><a href='#mqtt-card'>MQTT</a><a href='#ota-card'>Firmware</a></div>");
   html += F("<div class='setup-actions-top'><button class='btn' type='submit' id='btn-save-setup'>Save Changes</button><a class='btn-alt' href='/'>Home</a><a class='btn-alt' href='https://numerik11.github.io/ESP32-Irrigation-Controller/web-flasher/?current=");
   html += kFirmwareVersion;
   html += F("' target='_blank' rel='noopener'>Web Flasher</a><a class='btn-alt' href='/update'>Browser OTA</a><button class='btn-alt' type='button' id='btn-clear-cooldown'>Clear After-Rain Delay</button><button class='btn btn-danger' type='button' onclick=\"if(confirm('Reboot controller now?'))fetch('/reboot',{method:'POST'})\">Reboot</button><span class='save-confirm' id='save-confirm'>Saved</span></div>");
@@ -8315,6 +8318,13 @@ void handleSetupPage() {
   
 
   flush();
+  // Custom styles for the embeddable schedule page
+  html += F("<div class='card narrow' id='schedule-html-card'><details class='collapse'><summary>Schedule HTML Styles</summary><div class='collapse-body'><p class='card-intro'>Add CSS rules to customise the embeddable <code>/schedule-html</code> page. These rules are placed after the built-in styles in the page header.</p>");
+  html += F("<div class='row'><label for='scheduleHtmlCss'>Custom CSS</label><textarea id='scheduleHtmlCss' name='scheduleHtmlCss' maxlength='4096' rows='10' spellcheck='false' placeholder='.schedule-heading { color: #2563eb; }'>");
+  html += htmlEscape(scheduleHtmlCustomCss);
+  html += F("</textarea><small>Up to 4096 characters. Leave blank to use only the built-in styles.</small></div></div></details></div>");
+
+  flush();
   // MQTT
   html += F("<div class='card narrow' id='mqtt-card'><details class='collapse'><summary>MQTT Integration</summary><div class='collapse-body'><p class='card-intro'>Publish controller status and accept simple commands from Home Assistant or another MQTT client.</p>");
   html += F("<div class='row switchline'><label>Enable MQTT</label><input type='checkbox' name='mqttEnabled' "); html += (mqttEnabled ? "checked" : ""); html += F("></div>");
@@ -8679,7 +8689,13 @@ void handleScheduleHtml() {
   String html;
   html.reserve(6000);
   html += F("<!doctype html><html lang='en'><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'><meta http-equiv='refresh' content='60'><title>Today's Schedule</title><style>");
-  html += F(":root{color-scheme:light dark}*{box-sizing:border-box}body{margin:0;padding:16px;font:15px/1.5 system-ui,sans-serif;background:#fff;color:#202b33}main{max-width:800px;margin:auto}h1{font-size:1.3rem;margin:0 0 4px}p{margin:4px 0 12px;color:#52616b}table{width:100%;border-collapse:collapse}th,td{text-align:left;vertical-align:top;padding:10px 8px;border-bottom:1px solid #dce2e6}th{overflow-wrap:anywhere}th:first-child{width:35%}.time{display:inline-block;margin-right:12px}@media(prefers-color-scheme:dark){body{background:#1c2228;color:#edf2f5}p{color:#b5c1ca}th,td{border-color:#394650}}</style></head><body class='schedule-page'><main class='schedule-content'><h1 class='schedule-heading'>Today's Schedule</h1>");
+  html += F(":root{color-scheme:light dark}*{box-sizing:border-box}body{margin:0;padding:16px;font:15px/1.5 system-ui,sans-serif;background:#fff;color:#202b33}main{max-width:800px;margin:auto}h1{font-size:1.3rem;margin:0 0 4px}p{margin:4px 0 12px;color:#52616b}table{width:100%;border-collapse:collapse}th,td{text-align:left;vertical-align:top;padding:10px 8px;border-bottom:1px solid #dce2e6}th{overflow-wrap:anywhere}th:first-child{width:35%}.time{display:inline-block;margin-right:12px}@media(prefers-color-scheme:dark){body{background:#1c2228;color:#edf2f5}p{color:#b5c1ca}th,td{border-color:#394650}}</style>");
+  if (scheduleHtmlCustomCss.length()) {
+    html += F("<style id='schedule-custom-styles'>");
+    html += scheduleHtmlCustomCss;
+    html += F("</style>");
+  }
+  html += F("</head><body class='schedule-page'><main class='schedule-content'><h1 class='schedule-heading'>Today's Schedule</h1>");
   if (!clockReady) {
     html += F("<p class='schedule-status'>Waiting for the controller clock to synchronize.</p>");
   } else {
@@ -9074,6 +9090,49 @@ static String _safeReadLine(File& f) {
   return s;
 }
 
+static String encodeConfigLine(const String& value) {
+  String encoded;
+  encoded.reserve(value.length() + 8);
+  for (size_t i = 0; i < value.length(); ++i) {
+    const char c = value[i];
+    if (c == '\\') encoded += F("\\\\");
+    else if (c == '\n') encoded += F("\\n");
+    else if (c != '\r') encoded += c;
+  }
+  return encoded;
+}
+
+static String decodeConfigLine(const String& value) {
+  String decoded;
+  decoded.reserve(value.length());
+  for (size_t i = 0; i < value.length(); ++i) {
+    const char c = value[i];
+    if (c == '\\' && i + 1 < value.length()) {
+      const char next = value[++i];
+      decoded += next == 'n' ? '\n' : next;
+    } else {
+      decoded += c;
+    }
+  }
+  return decoded;
+}
+
+static String sanitizeScheduleHtmlCss(String css) {
+  css.replace("\r", "");
+  if (css.length() > SCHEDULE_HTML_CSS_MAX_LENGTH) {
+    css.remove(SCHEDULE_HTML_CSS_MAX_LENGTH);
+  }
+  String lower = css;
+  lower.toLowerCase();
+  int closingTag = lower.indexOf("</style");
+  while (closingTag >= 0) {
+    css.remove(closingTag, 1);
+    lower.remove(closingTag, 1);
+    closingTag = lower.indexOf("</style");
+  }
+  return css;
+}
+
 void loadConfig() {
   g_configLoadedFromFs = false;
   if (!LittleFS.exists("/config.txt")) return;
@@ -9348,6 +9407,9 @@ void loadConfig() {
     smartZoneVeryHotPct[z]=smartVeryHotAdjustPct;
     if (nextTail(s) && s.length()) { int v=s.toInt(); if (v >= -100 && v <= 300) smartZoneVeryHotPct[z]=v; }
   }
+  if (nextTail(s) && s.startsWith("css:")) {
+    scheduleHtmlCustomCss = sanitizeScheduleHtmlCss(decodeConfigLine(s.substring(4)));
+  }
   smartRuleState=-1;
 
 
@@ -9512,7 +9574,7 @@ void saveConfig() {
     f.println(smartZoneHotPct[z]);
     f.println(smartZoneVeryHotPct[z]);
   }
-
+  f.println(String("css:") + encodeConfigLine(scheduleHtmlCustomCss));
 
   f.close();
 }
@@ -10060,6 +10122,10 @@ void handleConfigure() {
   }
   if (server.hasArg("tzFixed")) {
     tzFixedOffsetMin = (int16_t)server.arg("tzFixed").toInt();
+  }
+
+  if (server.hasArg("scheduleHtmlCss")) {
+    scheduleHtmlCustomCss = sanitizeScheduleHtmlCss(server.arg("scheduleHtmlCss"));
   }
 
   // MQTT
