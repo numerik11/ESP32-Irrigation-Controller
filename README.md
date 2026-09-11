@@ -278,3 +278,9 @@ cache and should be substantially faster.
 If this project helps you, consider giving it a ⭐ on GitHub. Bug reports, testing, and suggestions are welcome.
 
 Beau
+
+## No-watering periods
+
+In Setup, select **No-Watering Periods** to configure up to three optional periods. Select days, set start and end times, enable the period, and save changes. For weekends from 11 am to 5 pm, select Saturday and Sunday and enter `11:00` and `17:00`. Settings survive a restart; all periods default to disabled.
+
+Periods use controller local time, include the start, and exclude the end. An overnight period continues into the day after each selected day. Equal start/end times block the whole selected day. Overlapping periods combine. Automatic runs stop during these periods, and scheduled or queued runs are cancelled rather than postponed until the period ends. Manual watering remains available. The daily schedule page still lists configured runs, not actual watering history.

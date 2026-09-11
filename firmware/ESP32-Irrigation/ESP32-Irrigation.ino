@@ -475,6 +475,11 @@ String zoneNames[MAX_ZONES] = {
   "Zone 7","Zone 8","Zone 9","Zone 10","Zone 11","Zone 12",
   "Zone 13","Zone 14","Zone 15","Zone 16"
 };
+static const int NO_WATER_PERIODS = 3;
+bool noWaterEnabled[NO_WATER_PERIODS] = {false};
+int noWaterDays[NO_WATER_PERIODS] = {65, 65, 65};
+int noWaterStart[NO_WATER_PERIODS] = {660, 660, 660};
+int noWaterEnd[NO_WATER_PERIODS] = {1020, 1020, 1020};
 String scheduleHtmlCustomCss;
 static const size_t SCHEDULE_HTML_CSS_MAX_LENGTH = 4096;
 
@@ -1098,6 +1103,37 @@ void rebuildRuntimeCountersFromEvents() {
   }
 
   f.close();
+}
+
+// Selected days are the days on which a period starts. End is exclusive.
+static bool noWaterPeriodMatches(int mask, int start, int end, int weekday, int minute) {
+  if (weekday < 0 || weekday > 6 || minute < 0 || minute >= 1440) return false;
+  if (start < 0 || start >= 1440 || end < 0 || end >= 1440) return false;
+  if (start == end) return (mask & (1 << weekday)) != 0;
+  if (start < end) return (mask & (1 << weekday)) != 0 && minute >= start && minute < end;
+  return ((mask & (1 << weekday)) != 0 && minute >= start) ||
+         ((mask & (1 << ((weekday + 6) % 7))) != 0 && minute < end);
+}
+
+static bool noWaterPeriodActiveNow() {
+  const time_t epoch = time(nullptr);
+  struct tm local;
+  if (epoch < 1609459200 || !localtime_r(&epoch, &local)) return false;
+  for (int i = 0; i < NO_WATER_PERIODS; ++i) {
+    if (noWaterEnabled[i] && noWaterPeriodMatches(noWaterDays[i], noWaterStart[i], noWaterEnd[i], local.tm_wday, local.tm_hour * 60 + local.tm_min)) return true;
+  }
+  return false;
+}
+
+static void enforceNoWaterPeriod() {
+  if (!noWaterPeriodActiveNow()) return;
+  for (int z = 0; z < (int)zonesCount; ++z) {
+    if (pendingStart[z]) {
+      pendingStart[z] = false;
+      logEvent(z, "CANCELLED", "NO WATERING", false);
+    }
+    if (zoneActive[z] && !zoneStartedManual[z]) turnOffZone(z);
+  }
 }
 
 static bool windBlocksZone(int z) {
@@ -3660,6 +3696,7 @@ void loop() {
 
   tickUpdateReport();
 
+  enforceNoWaterPeriod();
   checkWindRain();
   mqttEnsureConnected();
   if (mqttEnabled) _mqtt.loop();
@@ -6160,6 +6197,10 @@ bool shouldStartZone(int zone) {
   if (match1 || match2) {
     lastCheckedMinute[zone] = mn;
     lastStartSlot[zone] = match2 ? 2 : 1;
+    if (noWaterPeriodActiveNow()) {
+      cancelStart(zone, "NO WATERING", false);
+      return false;
+    }
     unsigned long base = durationForSlot(zone, lastStartSlot[zone]);
     if (base == 0) return false;
     unsigned long adjusted = smartWateringDurationForSlot(zone, lastStartSlot[zone]);
@@ -6186,6 +6227,7 @@ void turnOnZone(int z) {
   Serial.printf("[VALVE] Request ON Z%d rain=%d wind=%d blocked=%d\n",
                 z+1, rainActive?1:0, windActive?1:0, isBlockedNow()?1:0);
 
+  if (noWaterPeriodActiveNow()) { cancelStart(z, "NO WATERING", false); return; }
   if (isBlockedNow())  { cancelStart(z, "BLOCKED", false); return; }
   if (rainActive)      { cancelStart(z, "RAIN",    true ); return; }
   if (windBlocksZone(z)) { pendingStart[z] = true; logEvent(z, "QUEUED", "WIND", false); return; }
@@ -6264,7 +6306,7 @@ void turnOffZone(int z) {
   bool wasDelayed = rainActive || windBlocksZone(z) || isPausedNow() ||
                     !systemMasterEnabled ||
                     (rainCooldownUntilEpoch > time(nullptr));
-  logEvent(z, "STOPPED", zoneStartedManual[z] ? "MANUAL" : src, wasDelayed);
+  logEvent(z, "STOPPED", zoneStartedManual[z] ? "MANUAL" : (noWaterPeriodActiveNow() ? "NO WATERING" : src), wasDelayed);
 
   const bool usePcf = useExpanderForZone(z);
 
@@ -7800,9 +7842,9 @@ void handleSetupPage() {
   html += F("<div class='setup-badge'><div class='setup-badge-k'>Forecast Site</div><div class='setup-badge-v'>"); html += setupWeatherLabel; html += F("</div></div>");
   html += F("<div class='setup-badge'><div class='setup-badge-k'>Forecast Model</div><div class='setup-badge-v'>"); html += setupModelLabel; html += F("</div></div>");
   html += F("</div></div>");
-  html += F("<style>#setupForm{display:flex;flex-direction:column}.card.narrow{width:300mm;max-width:100%;align-self:center}#setupForm>.setup-nav{order:0}#setupForm>.setup-actions-top{order:1}#smart-card{order:10}#delays-card{order:20}#weather-card{order:30}#tank-card{order:40}#rain-card{order:50}#timezone-card{order:60}#pins-card{order:70}#i2c-card{order:80}#buttons-card{order:90}#display-card{order:100}#advanced-card{order:110}#schedule-html-card{order:120}#mqtt-card{order:130}#ota-card{order:140}#scheduleHtmlCss{max-width:none;min-height:220px;resize:vertical;font:13px/1.45 ui-monospace,SFMono-Regular,Consolas,monospace}</style>");
+  html += F("<style>#setupForm{display:flex;flex-direction:column}.card.narrow{width:300mm;max-width:100%;align-self:center}#setupForm>.setup-nav{order:0}#setupForm>.setup-actions-top{order:1}#smart-card{order:10}#delays-card{order:20}#no-water-card{order:25}#weather-card{order:30}#tank-card{order:40}#rain-card{order:50}#timezone-card{order:60}#pins-card{order:70}#i2c-card{order:80}#buttons-card{order:90}#display-card{order:100}#advanced-card{order:110}#schedule-html-card{order:120}#mqtt-card{order:130}#ota-card{order:140}#scheduleHtmlCss{max-width:none;min-height:220px;resize:vertical;font:13px/1.45 ui-monospace,SFMono-Regular,Consolas,monospace}</style>");
   html += F("<form id='setupForm' action='/configure' method='POST' novalidate>");
-  html += F("<div class='setup-nav'><a href='#smart-card'>Smart Watering</a><a href='#delays-card'>Delays &amp; Pause</a><a href='#weather-card'>Forecast</a><a href='#tank-card'>Water &amp; Tank</a><a href='#rain-card'>Rain Inputs</a><a href='#timezone-card'>Timezone</a><a href='#pins-card'>GPIO</a><a href='#i2c-card'>I2C</a><a href='#buttons-card'>Buttons</a><a href='#display-card'>Display</a><a href='#advanced-card'>TFT Pins</a><a href='#schedule-html-card'>Schedule CSS</a><a href='#mqtt-card'>MQTT</a><a href='#ota-card'>Firmware</a></div>");
+  html += F("<div class='setup-nav'><a href='#smart-card'>Smart Watering</a><a href='#delays-card'>Delays &amp; Pause</a><a href='#no-water-card'>No-Watering Periods</a><a href='#weather-card'>Forecast</a><a href='#tank-card'>Water &amp; Tank</a><a href='#rain-card'>Rain Inputs</a><a href='#timezone-card'>Timezone</a><a href='#pins-card'>GPIO</a><a href='#i2c-card'>I2C</a><a href='#buttons-card'>Buttons</a><a href='#display-card'>Display</a><a href='#advanced-card'>TFT Pins</a><a href='#schedule-html-card'>Schedule CSS</a><a href='#mqtt-card'>MQTT</a><a href='#ota-card'>Firmware</a></div>");
   html += F("<div class='setup-actions-top'><button class='btn' type='submit' id='btn-save-setup'>Save Changes</button><a class='btn-alt' href='/'>Home</a><a class='btn-alt' href='https://numerik11.github.io/ESP32-Irrigation-Controller/web-flasher/?current=");
   html += kFirmwareVersion;
   html += F("' target='_blank' rel='noopener'>Web Flasher</a><a class='btn-alt' href='/update'>Browser OTA</a><button class='btn-alt' type='button' id='btn-clear-cooldown'>Clear After-Rain Delay</button><button class='btn btn-danger' type='button' onclick=\"if(confirm('Reboot controller now?'))fetch('/reboot',{method:'POST'})\">Reboot</button><span class='save-confirm' id='save-confirm'>Saved</span></div>");
@@ -8317,6 +8359,25 @@ void handleSetupPage() {
 
   
 
+  flush();
+  html += F("<div class='card narrow' id='no-water-card'><details class='collapse'><summary>No-Watering Periods</summary><div class='collapse-body'><p class='card-intro'>Keep the garden free of automatic watering at chosen times. Scheduled and queued runs are skipped, and running automatic zones stop. Manual watering remains available. Times use the controller timezone. Overnight periods continue into the next day; equal start and end times block the entire selected day.</p><input type='hidden' name='noWaterPresent' value='1'>");
+  const char* noWaterDayNames[] = {"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"};
+  for (int i = 0; i < NO_WATER_PERIODS; ++i) {
+    String key = String("noWater") + i;
+    html += F("<fieldset><legend>Period "); html += i + 1; html += F("</legend><label><input type='checkbox' name='"); html += key + "Enabled";
+    html += "'"; if (noWaterEnabled[i]) html += " checked"; html += F("> Enabled</label><div class='row'>");
+    for (int d = 0; d < 7; ++d) {
+      html += F("<label style='min-width:70px'><input type='checkbox' name='"); html += key + "Day" + d; html += "'";
+      if (noWaterDays[i] & (1 << d)) html += " checked";
+      html += "> "; html += noWaterDayNames[d]; html += "</label>";
+    }
+    char start[6], end[6];
+    snprintf(start, sizeof(start), "%02d:%02d", noWaterStart[i] / 60, noWaterStart[i] % 60);
+    snprintf(end, sizeof(end), "%02d:%02d", noWaterEnd[i] / 60, noWaterEnd[i] % 60);
+    html += F("</div><div class='row'><label>Start <input type='time' required name='"); html += key + "Start"; html += "' value='"; html += start;
+    html += F("'></label><label>End <input type='time' required name='"); html += key + "End"; html += "' value='"; html += end; html += F("'></label></div></fieldset>");
+  }
+  html += F("</div></details></div>");
   flush();
   // Custom styles for the embeddable schedule page
   html += F("<div class='card narrow' id='schedule-html-card'><details class='collapse'><summary>Schedule HTML Styles</summary><div class='collapse-body'><p class='card-intro'>Add CSS rules to customise the embeddable <code>/schedule-html</code> page. These rules are placed after the built-in styles in the page header.</p>");
@@ -9410,6 +9471,14 @@ void loadConfig() {
   if (nextTail(s) && s.startsWith("css:")) {
     scheduleHtmlCustomCss = sanitizeScheduleHtmlCss(decodeConfigLine(s.substring(4)));
   }
+  for (int i = 0; i < NO_WATER_PERIODS; ++i) {
+    if (!nextTail(s)) break;
+    int enabled, mask, start, end;
+    if (sscanf(s.c_str(), "nw:%d,%d,%d,%d", &enabled, &mask, &start, &end) == 4 &&
+        (enabled == 0 || enabled == 1) && mask >= 0 && mask <= 127 && start >= 0 && start < 1440 && end >= 0 && end < 1440) {
+      noWaterEnabled[i] = enabled; noWaterDays[i] = mask; noWaterStart[i] = start; noWaterEnd[i] = end;
+    }
+  }
   smartRuleState=-1;
 
 
@@ -9575,6 +9644,9 @@ void saveConfig() {
     f.println(smartZoneVeryHotPct[z]);
   }
   f.println(String("css:") + encodeConfigLine(scheduleHtmlCustomCss));
+  for (int i = 0; i < NO_WATER_PERIODS; ++i) {
+    f.printf("nw:%d,%d,%d,%d\n", noWaterEnabled[i] ? 1 : 0, noWaterDays[i], noWaterStart[i], noWaterEnd[i]);
+  }
 
   f.close();
 }
@@ -10122,6 +10194,21 @@ void handleConfigure() {
   }
   if (server.hasArg("tzFixed")) {
     tzFixedOffsetMin = (int16_t)server.arg("tzFixed").toInt();
+  }
+
+  if (server.hasArg("noWaterPresent")) {
+    for (int i = 0; i < NO_WATER_PERIODS; ++i) {
+      String key = String("noWater") + i;
+      int sh, sm, eh, em;
+      if (sscanf(server.arg(key + "Start").c_str(), "%d:%d", &sh, &sm) != 2 ||
+          sscanf(server.arg(key + "End").c_str(), "%d:%d", &eh, &em) != 2 ||
+          sh < 0 || sh > 23 || eh < 0 || eh > 23 || sm < 0 || sm > 59 || em < 0 || em > 59) continue;
+      int mask = 0;
+      for (int d = 0; d < 7; ++d) if (server.hasArg(key + "Day" + d)) mask |= 1 << d;
+      noWaterEnabled[i] = server.hasArg(key + "Enabled") && mask != 0;
+      noWaterDays[i] = mask; noWaterStart[i] = sh * 60 + sm; noWaterEnd[i] = eh * 60 + em;
+    }
+    enforceNoWaterPeriod();
   }
 
   if (server.hasArg("scheduleHtmlCss")) {
