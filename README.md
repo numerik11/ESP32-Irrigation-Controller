@@ -85,6 +85,12 @@ Scheduled watering can be blocked by:
 
 Manual watering remains available where permitted. Optional temperature and moisture rules can also adjust runtimes for current conditions.
 
+## No-watering periods
+
+In Setup, select **No-Watering Periods** to configure up to three optional periods. Select days, set start and end times, enable the period, and save changes. For weekends from 11 am to 5 pm, select Saturday and Sunday and enter `11:00` and `17:00`. 
+
+Periods use controller local time, include the start, and exclude the end. Equal start/end times block the whole selected day. Automatic runs stop during these periods, and scheduled or queued runs are cancelled rather than postponed until the period ends. 
+
 ## 💧 Tank and mains control
 
 An optional level sensor can help select between a rainwater tank and mains supply. Available modes include **Auto: Tank**, **Auto: Mains**, **Force Tank**, and **Force Mains**.
@@ -273,14 +279,10 @@ cache and should be substantially faster.
 ## 🔗 Links
 
 - [Web Flasher](https://numerik11.github.io/ESP32-Irrigation-Controller/web-flasher/)
-- [GitHub repository](https://github.com/hjennerway/ESP32-Irrigation-Controller)
+- [GitHub repository](https://github.com/numerik11/ESP32-Irrigation-Controller)
 
 If this project helps you, consider giving it a ⭐ on GitHub. Bug reports, testing, and suggestions are welcome.
 
 Beau
 
-## No-watering periods
 
-In Setup, select **No-Watering Periods** to configure up to three optional periods. Select days, set start and end times, enable the period, and save changes. For weekends from 11 am to 5 pm, select Saturday and Sunday and enter `11:00` and `17:00`. Settings survive a restart; all periods default to disabled.
-
-Periods use controller local time, include the start, and exclude the end. An overnight period continues into the day after each selected day. Equal start/end times block the whole selected day. Overlapping periods combine. Automatic runs stop during these periods, and scheduled or queued runs are cancelled rather than postponed until the period ends. Manual watering remains available. The daily schedule page still lists configured runs, not actual watering history.
