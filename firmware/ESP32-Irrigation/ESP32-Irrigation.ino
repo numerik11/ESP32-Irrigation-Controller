@@ -7165,9 +7165,6 @@ void handleRoot() {
     html += F("</h4><form method='POST' action='/submit'>");
     html += F("<input type='hidden' name='onlyZone' value='"); html += String(z); html += F("'>");
 
-    html += F("<div class='rowx'><label>Wind Delay</label><div class='field'><label class='toggle-inline'><input type='checkbox' name='zoneWindDelay");
-    html += String(z); html += F("' "); html += (zoneWindDelayEnabled[z] ? "checked" : "");
-    html += F("> Enable</label><small>Pauses watering until windspeed is below threshold set in <strong>Setup</strong>.</small></div></div>");
     // Name
     html += F("<div class='rowx'><label>Name</label><div class='field'>");
     html += F("<input class='in' type='text' name='zoneName"); html += String(z);
@@ -7239,7 +7236,9 @@ void handleRoot() {
     html += F("</div></div>");
 
     // Actions
-    html += F("<div class='toolbar' style='justify-content:flex-end'><button class='btn' type='submit'>Save Zone</button></div>");
+    html += F("<div class='toolbar' style='align-items:flex-start;justify-content:space-between;gap:10px'><div style='flex:1;min-width:150px'><label class='toggle-inline'><input type='checkbox' name='zoneWindDelay");
+    html += String(z); html += F("' "); html += (zoneWindDelayEnabled[z] ? "checked" : "");
+    html += F("> Wind Delay</label><small style='display:block;margin-top:6px'>Pauses watering until windspeed is below threshold set in <strong>Setup</strong>.</small></div><button class='btn' style='flex-shrink:0;margin-left:auto' type='submit'>Save Zone</button></div>");
     html += F("</form></div>");
     flush();
   }

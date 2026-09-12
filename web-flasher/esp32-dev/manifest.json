@@ -6,10 +6,10 @@
     {
       "chipFamily": "ESP32",
       "parts": [
-        { "path": "bootloader.bin?v=3.1-647977c3", "offset": 4096 },
-        { "path": "partitions.bin?v=3.1-647977c3", "offset": 32768 },
-        { "path": "boot_app0.bin?v=3.1-647977c3", "offset": 57344 },
-        { "path": "firmware.bin?v=3.1-647977c3", "offset": 65536 }
+        { "path": "bootloader.bin?v=3.1-fb087b69", "offset": 4096 },
+        { "path": "partitions.bin?v=3.1-fb087b69", "offset": 32768 },
+        { "path": "boot_app0.bin?v=3.1-fb087b69", "offset": 57344 },
+        { "path": "firmware.bin?v=3.1-fb087b69", "offset": 65536 }
       ]
     }
   ]
