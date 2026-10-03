@@ -89,6 +89,27 @@ test('The complete generated Home script parses', () => {
   new vm.Script(javascript);
 });
 
+test('Home polling speeds up to 1s while any zone is running', async () => {
+  const start = javascript.indexOf('let homeStatusBusy=');
+  const polling = javascript.slice(start, javascript.indexOf('const ZC=', start));
+  const timers = new Map();
+  const context = vm.createContext({
+    document: { hidden: false }, AbortController,
+    setTimeout(fn, ms) { const id = Symbol('timer'); timers.set(id, { fn, ms }); return id; },
+    clearTimeout(key) { timers.delete(key); },
+    window: { addEventListener() {} },
+    fetch() {
+      return Promise.resolve({
+        ok: true,
+        json: async () => ({ zones: [{ active: false }, { active: true }] }),
+      });
+    },
+  });
+  vm.runInContext(polling, context);
+  await context.refreshStatus();
+  assert.ok([...timers.values()].some(t => t.ms === 1000), 'running zones should use a 1s polling cadence');
+});
+
 test('Home polling waits for completion and cancels outstanding requests on navigation', async () => {
   const start = javascript.indexOf('let homeStatusBusy=');
   // The polling block ends immediately before the zone-count declaration.
