@@ -57,7 +57,7 @@ extern "C" {
 // ---------- Hardware ----------
 static const char kFirmwareSignature[] __attribute__((used)) =
   "Original author: Beau Kaczmarek - https://github.com/numerik11/ESP32-Irrigation-Controller";
-static const char kFirmwareVersion[] = "3.2.6";
+static const char kFirmwareVersion[] = "3.2.7";
 static const char kFirmwareBuildDate[] = __DATE__ " " __TIME__;
 static const char kUpdateReportUrl[] =
   "https://irrigation-update-counter.beaukacz86.workers.dev/v1/report";
@@ -7307,6 +7307,7 @@ void handleRoot() {
   flush();
   html += F(".summary-subhead{display:flex;align-items:center;gap:9px;margin-top:2px;color:var(--summary-accent)}.summary-subhead::after{content:'';height:1px;flex:1;background:var(--line)}");
   html += F(".status-pills .badge{position:relative;border-radius:8px;background:var(--panel);font-weight:650}.status-pills .badge::before{content:'';width:8px;height:8px;border-radius:50%;background:currentColor;box-shadow:0 0 0 3px color-mix(in srgb,currentColor 13%,transparent)}.status-pills .b-ok{color:#2563eb}.status-pills .b-warn{color:#b45309}.status-pills .b-bad{color:#b91c1c}.status-pills .badge b{color:var(--ink)}");
+  html += F("html[data-theme='light'] .zone-row.is-active{box-shadow:inset 3px 0 #15803d,0 6px 16px rgba(21,128,61,.1)}html[data-theme='dark'] .zone-row.is-active{box-shadow:inset 3px 0 #4ade80,0 6px 16px rgba(74,222,128,.12)}.zone-dot.on{background:#16a34a;box-shadow:0 0 0 3px rgba(22,163,74,.14)}html[data-theme='dark'] .zone-dot.on{background:#4ade80;box-shadow:0 0 0 3px rgba(74,222,128,.16)}");
   html += F(".next-card .summary-note{margin-top:auto;border-left:3px solid var(--summary-accent);background:color-mix(in srgb,var(--summary-accent) 6%,var(--panel));line-height:1.55}.next-card .summary-note strong{color:var(--ink)}");
   html += F("html[data-theme='dark'] .summary-shell{background:linear-gradient(135deg,rgba(37,99,235,.09),rgba(8,145,178,.035) 46%,rgba(96,165,250,.06))}html[data-theme='dark'] .summary-card{background:var(--card)}");
   html += F("@media(max-width:720px){.summary-shell{padding:8px}.summary-card{border-left-width:3px}.summary-card h3{min-height:38px}.summary-heading-icon{width:31px;height:31px;flex-basis:31px}.summary-card .metric-tile:hover{border-color:var(--line)}}@media(max-width:440px){.summary-shell{padding:6px}.summary-card{padding:12px}.summary-card::after{display:none}.summary-meta.status-pills{grid-template-columns:repeat(2,minmax(0,1fr))}.status-pills .badge{padding:7px 6px;font-size:.76rem}}");
@@ -7755,8 +7756,8 @@ function updateDaylightCards(st){
   if(hint)hint.textContent=known?(seconds===0?'Same as yesterday':(delta>0?'Longer':'Shorter')+' than yesterday'):'Compared with yesterday';
 }
 )DAYLIGHTJS");
-  html += F("let homeStatusBusy=false,homeStatusTimer=null,homeStatusController=null,homeStatusPaused=false;");
-  html += F("async function refreshStatus(){if(homeStatusPaused||homeStatusBusy)return;clearTimeout(homeStatusTimer);if(document.hidden){homeStatusTimer=setTimeout(refreshStatus,2000);return;}homeStatusBusy=true;homeStatusController=new AbortController();const timeout=setTimeout(()=>homeStatusController?.abort(),8000);try{const r=await fetch('/status',{cache:'no-store',signal:homeStatusController.signal});if(!r.ok)throw Error('Status unavailable');const st=await r.json();");
+  html += F("const HOME_STATUS_REFRESH_MS=5000;let homeStatusBusy=false,homeStatusTimer=null,homeStatusController=null,homeStatusPaused=false;");
+  html += F("async function refreshStatus(){if(homeStatusPaused||homeStatusBusy)return;clearTimeout(homeStatusTimer);if(document.hidden)return;homeStatusBusy=true;homeStatusController=new AbortController();const timeout=setTimeout(()=>homeStatusController?.abort(),8000);try{const r=await fetch('/status',{cache:'no-store',signal:homeStatusController.signal});if(!r.ok)throw Error('Status unavailable');const st=await r.json();");
   html += F("updateWifiSummary(st);");
   html += F("if(typeof st.deviceEpoch==='number' && st.deviceEpoch>0 && _devEpoch===null){ startDeviceClock(st.deviceEpoch); }");
   html += F("const rb=document.getElementById('rainBadge');const wb=document.getElementById('windBadge');");
@@ -7863,7 +7864,7 @@ function updateDaylightCards(st){
   html += F("if(hs) hs.textContent=masterOff?'Automation blocked':(epoch?(name+(dur>0?(' - '+fmtDur(dur)):'')):(st.rainDelayActive?'Waiting for rain delay to clear':'No queued run'));");
   html += F("})();");
 
-  html += F("}catch(e){}finally{clearTimeout(timeout);homeStatusBusy=false;homeStatusController=null;if(!homeStatusPaused)homeStatusTimer=setTimeout(refreshStatus,2000);} } window.addEventListener('pagehide',()=>{homeStatusPaused=true;clearTimeout(homeStatusTimer);homeStatusController?.abort();});window.addEventListener('pageshow',e=>{if(e.persisted){homeStatusPaused=false;refreshStatus();}});refreshStatus();");
+  html += F("}catch(e){}finally{clearTimeout(timeout);homeStatusBusy=false;homeStatusController=null;if(!homeStatusPaused&&!document.hidden)homeStatusTimer=setTimeout(refreshStatus,HOME_STATUS_REFRESH_MS);} } document.addEventListener('visibilitychange',()=>{if(document.hidden){clearTimeout(homeStatusTimer);}else if(!homeStatusPaused){refreshStatus();}});window.addEventListener('pagehide',()=>{homeStatusPaused=true;clearTimeout(homeStatusTimer);homeStatusController?.abort();});window.addEventListener('pageshow',e=>{if(e.persisted){homeStatusPaused=false;refreshStatus();}});refreshStatus();");
 
   // expose zonesCount & Save All
   html += F("const ZC="); html += String(zonesCount); html += F(";");

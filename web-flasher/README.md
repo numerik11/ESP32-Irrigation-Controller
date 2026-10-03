@@ -55,3 +55,5 @@ Also include `boot_app0.bin` from:
 ```text
 %USERPROFILE%\.platformio\packages\framework-arduinoespressif32\tools\partitions\boot_app0.bin
 ```
+
+Set both manifest `version` values and `updaterVersion` in `index.html` to the firmware version. Update `updaterBuild` and each manifest part's `?v=` token whenever publishing new binaries so browsers fetch the refreshed files.
