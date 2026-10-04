@@ -18,6 +18,8 @@ Schedules run locally on the controller. Internet access is needed for online we
 No Arduino IDE is required. Connect the ESP32 by USB and open the:
 
 ### 👉 [ESP32 Irrigation Web Flasher](https://numerik11.github.io/ESP32-Irrigation-Controller/web-flasher/)
+### 👉 [Android App]([(https://github.com/numerik11/ESP32-Irrigation-Controller/releases/tag/AndroidAPK)])
+
 After flashing:
 
 1. Connect to the **ESPIrrigationAP** Wi-Fi network.
