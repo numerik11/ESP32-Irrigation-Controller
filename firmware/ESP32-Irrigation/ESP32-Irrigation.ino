@@ -57,7 +57,7 @@ extern "C" {
 // ---------- Hardware ----------
 static const char kFirmwareSignature[] __attribute__((used)) =
   "Original author: Beau Kaczmarek - https://github.com/numerik11/ESP32-Irrigation-Controller";
-static const char kFirmwareVersion[] = "3.2.7";
+static const char kFirmwareVersion[] = "3.2.8";
 static const char kFirmwareBuildDate[] = __DATE__ " " __TIME__;
 static const char kUpdateReportUrl[] =
   "https://irrigation-update-counter.beaukacz86.workers.dev/v1/report";
@@ -7756,8 +7756,8 @@ function updateDaylightCards(st){
   if(hint)hint.textContent=known?(seconds===0?'Same as yesterday':(delta>0?'Longer':'Shorter')+' than yesterday'):'Compared with yesterday';
 }
 )DAYLIGHTJS");
-  html += F("const HOME_STATUS_REFRESH_MS=5000;let homeStatusBusy=false,homeStatusTimer=null,homeStatusController=null,homeStatusPaused=false;");
-  html += F("async function refreshStatus(){if(homeStatusPaused||homeStatusBusy)return;clearTimeout(homeStatusTimer);if(document.hidden)return;homeStatusBusy=true;homeStatusController=new AbortController();const timeout=setTimeout(()=>homeStatusController?.abort(),8000);try{const r=await fetch('/status',{cache:'no-store',signal:homeStatusController.signal});if(!r.ok)throw Error('Status unavailable');const st=await r.json();");
+  html += F("const HOME_STATUS_REFRESH_MS=5000,HOME_STATUS_ACTIVE_REFRESH_MS=1000;function homeStatusRefreshInterval(st){return Array.isArray(st.zones)&&st.zones.some(z=>z&&z.active)?HOME_STATUS_ACTIVE_REFRESH_MS:HOME_STATUS_REFRESH_MS;}let homeStatusRefreshMs=HOME_STATUS_REFRESH_MS,homeStatusBusy=false,homeStatusTimer=null,homeStatusController=null,homeStatusPaused=false;");
+  html += F("async function refreshStatus(){if(homeStatusPaused||homeStatusBusy)return;clearTimeout(homeStatusTimer);if(document.hidden)return;homeStatusBusy=true;homeStatusController=new AbortController();const timeout=setTimeout(()=>homeStatusController?.abort(),8000);try{const r=await fetch('/status',{cache:'no-store',signal:homeStatusController.signal});if(!r.ok)throw Error('Status unavailable');const st=await r.json();homeStatusRefreshMs=homeStatusRefreshInterval(st);");
   html += F("updateWifiSummary(st);");
   html += F("if(typeof st.deviceEpoch==='number' && st.deviceEpoch>0 && _devEpoch===null){ startDeviceClock(st.deviceEpoch); }");
   html += F("const rb=document.getElementById('rainBadge');const wb=document.getElementById('windBadge');");
@@ -7864,7 +7864,7 @@ function updateDaylightCards(st){
   html += F("if(hs) hs.textContent=masterOff?'Automation blocked':(epoch?(name+(dur>0?(' - '+fmtDur(dur)):'')):(st.rainDelayActive?'Waiting for rain delay to clear':'No queued run'));");
   html += F("})();");
 
-  html += F("}catch(e){}finally{clearTimeout(timeout);homeStatusBusy=false;homeStatusController=null;if(!homeStatusPaused&&!document.hidden)homeStatusTimer=setTimeout(refreshStatus,HOME_STATUS_REFRESH_MS);} } document.addEventListener('visibilitychange',()=>{if(document.hidden){clearTimeout(homeStatusTimer);}else if(!homeStatusPaused){refreshStatus();}});window.addEventListener('pagehide',()=>{homeStatusPaused=true;clearTimeout(homeStatusTimer);homeStatusController?.abort();});window.addEventListener('pageshow',e=>{if(e.persisted){homeStatusPaused=false;refreshStatus();}});refreshStatus();");
+  html += F("}catch(e){}finally{clearTimeout(timeout);homeStatusBusy=false;homeStatusController=null;if(!homeStatusPaused&&!document.hidden)homeStatusTimer=setTimeout(refreshStatus,homeStatusRefreshMs);} } document.addEventListener('visibilitychange',()=>{if(document.hidden){clearTimeout(homeStatusTimer);}else if(!homeStatusPaused){refreshStatus();}});window.addEventListener('pagehide',()=>{homeStatusPaused=true;clearTimeout(homeStatusTimer);homeStatusController?.abort();});window.addEventListener('pageshow',e=>{if(e.persisted){homeStatusPaused=false;refreshStatus();}});refreshStatus();");
 
   // expose zonesCount & Save All
   html += F("const ZC="); html += String(zonesCount); html += F(";");

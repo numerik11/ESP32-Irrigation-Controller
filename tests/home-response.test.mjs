@@ -90,18 +90,18 @@ test('The complete generated Home script parses', () => {
 });
 
 test('Home polling waits for completion and cancels outstanding requests on navigation', async () => {
-  const start = javascript.indexOf('let homeStatusBusy=');
+  const start = javascript.indexOf('const HOME_STATUS_REFRESH_MS=');
   // The polling block ends immediately before the zone-count declaration.
   const polling = javascript.slice(start, javascript.indexOf('const ZC=', start));
   const timers = new Map(), listeners = {}, documentListeners = {};
-  const pollInterval = Number(/const HOME_STATUS_REFRESH_MS=(\d+);/.exec(javascript)?.[1]);
+  const pollInterval = Number(/const HOME_STATUS_REFRESH_MS=(\d+),/.exec(javascript)?.[1]);
   let calls = 0, id = 0, signal;
   const document = {
     hidden: false,
     addEventListener(name, fn) { documentListeners[name] = fn; },
   };
   const context = vm.createContext({
-    document, AbortController, HOME_STATUS_REFRESH_MS: pollInterval,
+    document, AbortController,
     setTimeout(fn, ms) { timers.set(++id, { fn, ms }); return id; },
     clearTimeout(key) { timers.delete(key); },
     window: { addEventListener(name, fn) { listeners[name] = fn; } },
@@ -129,4 +129,33 @@ test('Home polling waits for completion and cancels outstanding requests on navi
   await new Promise(resolve => setImmediate(resolve));
   assert.equal(signal.aborted, true);
   assert.equal(timers.size, 0);
+});
+
+test('Home polling uses one-second cadence while zones run and returns to five seconds when idle', async () => {
+  const start = javascript.indexOf('const HOME_STATUS_REFRESH_MS=');
+  const polling = javascript.slice(start, javascript.indexOf('const ZC=', start));
+  const timers = new Map(), listeners = {};
+  let calls = 0, id = 0;
+  let status = { zones: [{ active: true }] };
+  const context = vm.createContext({
+    document: { hidden: false, addEventListener() {} }, AbortController,
+    setTimeout(fn, ms) { timers.set(++id, { fn, ms }); return id; },
+    clearTimeout(key) { timers.delete(key); },
+    window: { addEventListener(name, fn) { listeners[name] = fn; } },
+    fetch() {
+      calls += 1;
+      return Promise.resolve({ ok: true, json: async () => status });
+    },
+    updateWifiSummary() { throw new Error('Stop after selecting the polling interval'); },
+  });
+  vm.runInContext(polling, context);
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(calls, 1);
+  assert.ok([...timers.values()].some(timer => timer.ms === 1000), 'running zones should poll every second');
+
+  status = { zones: [{ active: false }] };
+  await context.refreshStatus();
+  assert.equal(calls, 2);
+  assert.ok([...timers.values()].some(timer => timer.ms === 5000), 'idle zones should return to five-second polling');
+  assert.equal([...timers.values()].some(timer => timer.ms === 1000), false);
 });
