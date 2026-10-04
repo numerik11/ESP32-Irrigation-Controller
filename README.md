@@ -25,7 +25,7 @@ After flashing:
 1. Connect to the **ESPIrrigationAP** Wi-Fi network.
 2. Open `http://192.168.4.1` and enter your Wi-Fi details.
 3. Wait for the controller to restart.
-4. Open `http://espirrigation.local` or use the IP address assigned by your router.
+4. Use App, Open `http://espirrigation.local` or use the IP address assigned by your router.
 5. Configure the zone count, GPIO assignments, relay polarity, timezone, weather location, and schedules.
 6. Manually test every output before enabling automatic watering.
 
