@@ -93,10 +93,15 @@ test('Home polling waits for completion and cancels outstanding requests on navi
   const start = javascript.indexOf('let homeStatusBusy=');
   // The polling block ends immediately before the zone-count declaration.
   const polling = javascript.slice(start, javascript.indexOf('const ZC=', start));
-  const timers = new Map(), listeners = {};
+  const timers = new Map(), listeners = {}, documentListeners = {};
+  const pollInterval = Number(/const HOME_STATUS_REFRESH_MS=(\d+);/.exec(javascript)?.[1]);
   let calls = 0, id = 0, signal;
+  const document = {
+    hidden: false,
+    addEventListener(name, fn) { documentListeners[name] = fn; },
+  };
   const context = vm.createContext({
-    document: { hidden: false }, AbortController,
+    document, AbortController, HOME_STATUS_REFRESH_MS: pollInterval,
     setTimeout(fn, ms) { timers.set(++id, { fn, ms }); return id; },
     clearTimeout(key) { timers.delete(key); },
     window: { addEventListener(name, fn) { listeners[name] = fn; } },
@@ -106,16 +111,22 @@ test('Home polling waits for completion and cancels outstanding requests on navi
     },
   });
   vm.runInContext(polling, context);
+  const initialRefresh = context.refreshStatus();
   await context.refreshStatus();
   assert.equal(calls, 1, 'a second refresh must not overlap the first');
-  assert.equal([...timers.values()].filter(t => t.ms === 2000).length, 0);
+  assert.equal(pollInterval, 5000, 'home polling should use the current five-second interval');
+  assert.equal([...timers.values()].filter(t => t.ms === pollInterval).length, 0);
   [...timers.values()].find(t => t.ms === 8000).fn();
-  await new Promise(resolve => setImmediate(resolve));
-  assert.equal([...timers.values()].filter(t => t.ms === 2000).length, 1);
-  const pending = context.refreshStatus();
+  await initialRefresh;
+  assert.equal([...timers.values()].filter(t => t.ms === pollInterval).length, 1);
+  document.hidden = true;
+  documentListeners.visibilitychange();
+  assert.equal([...timers.values()].filter(t => t.ms === pollInterval).length, 0);
+  document.hidden = false;
+  documentListeners.visibilitychange();
   assert.equal(calls, 2);
   listeners.pagehide();
-  await pending;
+  await new Promise(resolve => setImmediate(resolve));
   assert.equal(signal.aborted, true);
   assert.equal(timers.size, 0);
 });

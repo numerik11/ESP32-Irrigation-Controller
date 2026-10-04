@@ -84,6 +84,75 @@ test("web flasher publishes one version and links both manifests", async () => {
   assert.equal(firmwareVersion[1], manifests[0].version, "firmware and updater versions match");
 });
 
+test('firmware updater compares numeric versions and distinguishes newer installs', async () => {
+  const index = await readFile(path.join(webFlasherDirectory, 'index.html'), 'utf8');
+  const start = index.indexOf('    function normalizeVersion(');
+  const end = index.indexOf('    function manifestUrl()', start);
+  const definitions = index.slice(start, end);
+  const currentVersion = { textContent: '' };
+  const availableVersion = { textContent: '' };
+  const classes = new Set();
+  const versionStatus = {
+    textContent: '',
+    classList: {
+      remove(...names) { names.forEach(name => classes.delete(name)); },
+      add(name) { classes.add(name); },
+    },
+  };
+  const updater = new Function(
+    'current', 'currentVersion', 'availableVersion', 'versionStatus',
+    `${definitions}; return { setStatus, compareVersions };`,
+  )('3.2.6', currentVersion, availableVersion, versionStatus);
+
+  updater.setStatus('3.2.7');
+  assert.equal(versionStatus.textContent, 'Update available');
+  assert.ok(classes.has('update'));
+  assert.equal(updater.compareVersions('3.10.0', '3.9.9'), 1);
+  assert.equal(updater.compareVersions('3.2.7', '3.2.7'), 0);
+  assert.equal(updater.compareVersions('3.x', '3.2.7'), null);
+
+  const newer = new Function(
+    'current', 'currentVersion', 'availableVersion', 'versionStatus',
+    `${definitions}; return setStatus;`,
+  )('3.10.0', currentVersion, availableVersion, versionStatus);
+  newer('3.2.7');
+  assert.equal(versionStatus.textContent, 'Installed firmware is newer than this release.');
+  assert.ok(classes.has('ok'));
+});
+
+test('manifest HTTP errors are not parsed as valid firmware updates', async () => {
+  const index = await readFile(path.join(webFlasherDirectory, 'index.html'), 'utf8');
+  const manifestStart = index.indexOf('    function manifestUrl()');
+  const countStart = index.indexOf('    async function loadUpdateCount(', manifestStart);
+  const updateStart = index.indexOf('    async function updateManifest()', countStart);
+  const updateEnd = index.indexOf('    board.addEventListener', updateStart);
+  const definitions = index.slice(manifestStart, countStart) + index.slice(updateStart, updateEnd);
+  const elements = {
+    firmwareDownload: { href: '' },
+    firmwareLink: { value: '' },
+  };
+  const state = {};
+  const updateManifest = new Function(
+    'board', 'updaterBuild', 'document', 'installer', 'availableVersion', 'fetch', 'setStatus', 'loadUpdateCount',
+    `${definitions}; return updateManifest;`,
+  )(
+    { value: 'esp32-dev/manifest.json' },
+    '3.2.7-test-build',
+    { getElementById(id) { return elements[id]; } },
+    { setAttribute(name, value) { state.manifest = value; } },
+    { textContent: '' },
+    async () => ({ ok: false, status: 404, async json() { state.parsed = true; return {}; } }),
+    version => { state.version = version; },
+    version => { state.countVersion = version; },
+  );
+
+  await updateManifest();
+  assert.equal(state.parsed, undefined);
+  assert.equal(state.version, '');
+  assert.equal(state.countVersion, '');
+  assert.match(state.manifest, /v=3\.2\.7-test-build/);
+});
+
 test('online updater opens the controller OTA URL and rejects unsafe schemes', async () => {
   const index = await readFile(path.join(webFlasherDirectory, 'index.html'), 'utf8');
   const definition = index.slice(index.indexOf('    function controllerOtaUrl('), index.indexOf('    const controllerAddress ='));

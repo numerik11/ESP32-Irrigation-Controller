@@ -247,23 +247,50 @@
       return String(value || "").trim().replace(/^v/i, "");
     }
 
+    function compareVersions(left, right) {
+      const leftVersion = normalizeVersion(left);
+      const rightVersion = normalizeVersion(right);
+      if (!/^\d+(?:\.\d+)*$/.test(leftVersion) || !/^\d+(?:\.\d+)*$/.test(rightVersion)) {
+        return null;
+      }
+
+      const leftParts = leftVersion.split(".").map(Number);
+      const rightParts = rightVersion.split(".").map(Number);
+      const partCount = Math.max(leftParts.length, rightParts.length);
+      for (let index = 0; index < partCount; index += 1) {
+        const difference = (leftParts[index] || 0) - (rightParts[index] || 0);
+        if (difference !== 0) return Math.sign(difference);
+      }
+      return 0;
+    }
+
     function setStatus(nextVersion) {
       const installed = normalizeVersion(current);
       const available = normalizeVersion(nextVersion);
+      const comparison = compareVersions(installed, available);
 
       currentVersion.textContent = installed ? `v${installed}` : "Unknown";
       availableVersion.textContent = available ? `v${available}` : "Unknown";
 
       versionStatus.classList.remove("ok", "update", "unknown");
-      if (!installed || !available) {
+      if (!installed) {
         versionStatus.textContent = "Open this page from the controller Setup page to compare versions.";
         versionStatus.classList.add("unknown");
-      } else if (installed === available) {
+      } else if (!available) {
+        versionStatus.textContent = "Could not load update information.";
+        versionStatus.classList.add("unknown");
+      } else if (comparison === null) {
+        versionStatus.textContent = "Firmware version format is not recognized.";
+        versionStatus.classList.add("unknown");
+      } else if (comparison === 0) {
         versionStatus.textContent = "Up to date";
         versionStatus.classList.add("ok");
-      } else {
+      } else if (comparison < 0) {
         versionStatus.textContent = "Update available";
         versionStatus.classList.add("update");
+      } else {
+        versionStatus.textContent = "Installed firmware is newer than this release.";
+        versionStatus.classList.add("ok");
       }
     }
 
@@ -299,7 +326,9 @@
       availableVersion.textContent = "Loading...";
       try {
         const response = await fetch(url, { cache: "reload" });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
         const manifest = await response.json();
+        if (typeof manifest.version !== "string") throw new Error("Manifest version is missing");
         setStatus(manifest.version);
         loadUpdateCount(manifest.version);
       } catch (error) {
