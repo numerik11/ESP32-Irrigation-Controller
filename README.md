@@ -391,27 +391,6 @@ Zone paths use a **zero-based index**: `0` means zone 1, `1` means zone 2, and s
 
 Use the dashboard for normal operation. Typing a POST endpoint into the browser address bar sends a GET request and does not perform the action.
 
-## Troubleshooting
-
-Start with **`/diagnostics`** for controller health and **`/events`** for watering history and delay reasons.
-
-| Problem | What to check |
-| --- | --- |
-| `espirrigation.local` will not open | Try the Android app or use the IP from your router's connected-device list. Confirm both devices are on a network that permits communication. |
-| App cannot find the controller | Check power and Wi-Fi. Use Enter IP if the controller is outside the scanned range. Guest/client isolation can block access. |
-| Setup page at `192.168.4.1` will not open | Join ESPIrrigationAP first and stay connected despite any no-internet warning. This address is for the setup hotspot. |
-| App controls have disappeared | They hide when connected. Press Android Back to show them again. |
-| ESP32 resets when a valve switches | Check supply capacity, inductive-load suppression, grounding, relay ratings and cable separation. |
-| Relay works backwards | Check active HIGH/LOW polarity in Setup. |
-| Wrong valve operates | Check zone numbering, GPIO assignments, relay wiring and output polarity. |
-| Weather does not update | Check internet access, latitude/longitude, timezone and DNS. Local schedules need a valid controller clock. |
-| Smart Watering does not shorten a run | Check Minimum Adjusted Runtime and the current adjustment factor. |
-| Automatic watering is skipped | Check master/pause state, weather delays, no-watering periods, selected days and controller local time. |
-| Embedded schedule does not load | Check reachability from the viewing browser and HTTP/HTTPS restrictions. |
-| Browser firmware update is unavailable | Check that the installed firmware includes `/update`, OTA is supported and the partition layout has two application slots. |
-
-When reporting a problem, include your board model, firmware version, symptoms and relevant diagnostic or event-log entries.
-
 ## Project links
 
 - [GitHub repository](https://github.com/numerik11/ESP32-Irrigation-Controller)
