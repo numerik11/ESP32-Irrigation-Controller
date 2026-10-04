@@ -5,13 +5,15 @@
 ![OTA](https://img.shields.io/badge/Updates-OTA-informational)
 ![MQTT](https://img.shields.io/badge/MQTT-Supported-purple)
 
-# 🌱 ESP32 Irrigation: 1–16 Zone irrigation control
+# ESP32 Irrigation Controller
 
 A flexible, locally controlled irrigation system for **1–16 solenoid valves**. It combines per-zone scheduling, weather-aware delays, optional tank/mains switching, sensor support, MQTT, and a responsive web dashboard.
 
-Schedules run on the controller, so watering continues even when the internet is unavailable.
+Schedules run locally on the controller. Internet access is needed for online weather updates; the controller also needs the correct local time to run schedules.
 
-## 🚀 Install from your browser
+**Quick links:** [Install](#install-from-your-browser) | [Scheduling](#scheduling-and-smart-watering) | [No-watering periods](#no-watering-periods) | [Home Assistant](#home-assistant-and-embedded-schedules) | [Firmware updates](#browser-ota-updates) | [Troubleshooting](#troubleshooting)
+
+## Install from your browser
 
 No Arduino IDE is required. Connect the ESP32 by USB and open the:
 
@@ -22,17 +24,17 @@ After flashing:
 2. Open `http://192.168.4.1` and enter your Wi-Fi details.
 3. Wait for the controller to restart.
 4. Open `http://espirrigation.local` or use the IP address assigned by your router.
-5. Configure the zones, GPIO pins, weather location, and schedules.
+5. Configure the zone count, GPIO assignments, relay polarity, timezone, weather location, and schedules.
 6. Manually test every output before enabling automatic watering.
 
-## 📸 Interface
+## Interface
 
 ### Dashboard
 
 See controller status, active and upcoming zones, progress, weather, tank level, water source, and delay reasons at a glance.
 
 <p align="center">
-<img width="862" height="899" alt="image" src="https://github.com/user-attachments/assets/cf75fb58-65f0-445e-abe4-f65609e4c525" />
+<img width="862" height="899" alt="ESP32 irrigation web interface" src="https://github.com/user-attachments/assets/cf75fb58-65f0-445e-abe4-f65609e4c525" />
 </p>
 
 ### Setup
@@ -40,7 +42,7 @@ See controller status, active and upcoming zones, progress, weather, tank level,
 Configure zones, schedules, GPIO assignments, relay polarity, weather rules, sensors, MQTT, and displays from your browser.
 
 <p align="center">
-<img width="694" height="799" alt="image" src="https://github.com/user-attachments/assets/446509b8-eeec-40c7-93b4-62bde1730a58" />
+<img width="694" height="799" alt="ESP32 irrigation web interface" src="https://github.com/user-attachments/assets/446509b8-eeec-40c7-93b4-62bde1730a58" />
 </p>
 
 ### Events
@@ -48,15 +50,16 @@ Configure zones, schedules, GPIO assignments, relay polarity, weather rules, sen
 Review watering and system activity, including weather-related delays, and export the log as CSV.
 
 <p align="center">
-<img width="650" height="492" alt="image" src="https://github.com/user-attachments/assets/1bc1d7e9-1449-4f20-a51b-a0eaa4b347e2" />
+<img width="650" height="492" alt="ESP32 irrigation web interface" src="https://github.com/user-attachments/assets/1bc1d7e9-1449-4f20-a51b-a0eaa4b347e2" />
 </p>
 
-## ✨ Features
+## Features
 
 - 1–16 named irrigation zones
 - Two start times per zone, with independent runtimes
 - Seven-day schedules with minute-and-second runtime control
 - Sequential or concurrent operation
+- Up to three no-watering periods, including overnight periods
 - Manual zone and master controls
 - Rain, 24-hour rainfall, cooldown, and wind delays
 - Cool, Normal, Hot, and Very Hot runtime adjustment
@@ -64,14 +67,16 @@ Review watering and system activity, including weather-related delays, and expor
 - Optional tank-level monitoring and automatic tank/mains selection
 - Live weather data from Open-Meteo
 - Next-event calculation, event logging, and CSV export
+- Embeddable daily schedule with custom CSS
+- Browser diagnostics and JSON diagnostics for troubleshooting
 - Local web dashboard, MQTT, and OTA updates
 - Optional TFT, I²C OLED, and I²C LCD displays
 - ESP32, ESP32-S3, KC868-A6, and KC868-A8 support
 - Local schedules continue without internet access
 
-## ⏱️ Scheduling and smart watering
+## Scheduling and smart watering
 
-Version **3.1.1** exposes **Minimum Adjusted Runtime (minutes)** in Setup. Set it to **0** to apply the full Smart Watering reduction. Existing saved minimums are preserved during upgrades; a five-minute minimum keeps a five-minute schedule unchanged even at an 11% global factor. New configurations default to zero.
+In Setup, **Minimum Adjusted Runtime (minutes)** controls the lower limit for Smart Watering adjustments. Set it to **0** to apply the full Smart Watering reduction. Existing saved minimums are preserved during upgrades; a five-minute minimum keeps a five-minute schedule unchanged even at an 11% global factor. New configurations default to zero.
 
 Each zone has editable days, two start times, and separate durations. **Sequential mode** runs one valve at a time and suits most systems. **Concurrent mode** can run multiple valves, but only when the transformer, relays, pipework, and water supply can handle the combined load.
 
@@ -84,28 +89,33 @@ Scheduled watering can be blocked by:
 - The after-rain cooldown period
 - Excessive wind
 - Master OFF or system pause
+- An active no-watering period
 
 Manual watering remains available where permitted. Optional temperature and moisture rules can also adjust runtimes for current conditions.
 
 ## No-watering periods
 
-In Setup, select **No-Watering Periods** to configure up to three optional periods. Select days, set start and end times, enable the period, and save changes. For weekends from 11 am to 5 pm, select Saturday and Sunday and enter `11:00` and `17:00`. 
+In Setup, select **No-Watering Periods** to configure up to three optional periods. Select days, set start and end times, enable the period, and save changes. For weekends from 11 am to 5 pm, select Saturday and Sunday and enter `11:00` and `17:00`.
 
-Periods use controller local time, include the start, and exclude the end. Equal start/end times block the whole selected day. Automatic runs stop during these periods, and scheduled or queued runs are cancelled rather than postponed until the period ends. 
+Periods use controller local time, include the start, and exclude the end. Overnight periods continue into the next day; equal start/end times block the whole selected day. Automatic runs stop during these periods, and scheduled or queued runs are cancelled rather than postponed until the period ends. Manual watering remains available.
 
-## 💧 Tank and mains control
+## Tank and mains control
 
 An optional level sensor can help select between a rainwater tank and mains supply. Available modes include **Auto: Tank**, **Auto: Mains**, **Force Tank**, and **Force Mains**.
 
-## Today's schedule in a dashboard (Home Assistant Setup)
+## Home Assistant and embedded schedules
 
 Open `http://espirrigation.local/schedule-html` (or use the controller's IP address) for a compact, read-only page that can be embedded in an iframe. It lists all zones scheduled on the controller's current local day, including earlier starts, using the saved zone names and both enabled start times. Empty names fall back to the zone number.
 
 Each zone shows up to two enabled start/end ranges in chronological order, for example `11:30 - 12:00` and `17:30 - 18:00`. Enable the second start in the zone's schedule to show both runs. The compact page omits the explanatory footer.
 
+### Custom schedule styling
+
 For custom styling, open **Setup → Schedule HTML Styles** and enter CSS in the Custom CSS box. The saved rules are added after the built-in styles in the `/schedule-html` page header, so they can override the defaults. The page exposes `.schedule-page`, `.schedule-content`, `.schedule-heading`, `.schedule-date`, `.schedule-table`, `.schedule-columns`, `.schedule-zone`, `.schedule-zone-name`, `.schedule-times`, `.schedule-time`, and `.schedule-status`. CSS in a parent dashboard does not cross into an iframe.
 
 The page refreshes every 60 seconds and follows the browser's light/dark preference. End times use current Smart Watering durations, with zero-duration adjustments marked as skipped. Times are estimates rather than run history: rain, wind, pauses and other delays can change actual watering. An end after midnight includes its date. An unsynchronized controller shows a waiting message.
+
+### Add the schedule to a dashboard
 
 For a Home Assistant [Webpage card](https://www.home-assistant.io/dashboards/iframe/):
 
@@ -125,7 +135,7 @@ For another dashboard:
 
 The browser viewing the dashboard must be able to reach the controller. For an HTTPS dashboard, serve the controller page through an HTTPS reverse proxy; browsers block an HTTP iframe inside an HTTPS page. Keep Home Assistant's default iframe sandbox enabled.
 
-## 🔌 Wiring
+## Wiring
 
 ### Controller wiring diagram
 
@@ -142,12 +152,12 @@ The browser viewing the dashboard must be able to reach the controller. For an H
 ### TFT Display
 
 <p align="center">
-<img width="215" height="113" alt="PXL_20260808_043755753~2" src="https://github.com/user-attachments/assets/42fbe90b-aeb4-48c1-9cfa-cd5753487815" />
+<img width="215" height="113" alt="TFT display showing irrigation controller status" src="https://github.com/user-attachments/assets/42fbe90b-aeb4-48c1-9cfa-cd5753487815" />
 </p>
 
 > ⚠️ Wiring and available GPIOs vary between boards, relay modules, and irrigation systems. Confirm pin assignments, relay polarity, and voltage requirements before applying power.
 
-## 🖥️ Supported hardware
+## Supported hardware
 
 | Hardware | Description |
 | --- | --- |
@@ -177,7 +187,7 @@ KC868 configurations use PCF8574 I/O expanders with automatic detection, configu
 
 Manual compilation requires the [Kincony PCF8574 library](https://www.kincony.com/forum/attachment.php?aid=1697).
 
-## 🌐 Networking and integration
+## Networking and integration
 
 | Service | Address or hostname |
 | --- | --- |
@@ -196,24 +206,33 @@ configured names and existing `espirrigation/cmd/zone/<index>` command topics.
 
 ### Web endpoints
 
-| Path | Description |
-| --- | --- |
-| `/` | Main dashboard |
-| `/setup` | Controller configuration |
-| `/status` | JSON system status |
-| `/events` | Event log |
-| `/tank` | Tank sensor calibration |
-| `/update` | Password-protected browser OTA uploader |
-| `/download/events.csv` | Download event log |
-| `/i2c-test` | I²C/relay test |
-| `/stopall` | Stop all active zones |
-| `/valve/on/<z>` | Start a zone manually |
-| `/valve/off/<z>` | Stop a zone manually |
-| `/reboot` | Reboot the controller |
+| Method | Path | Description |
+| --- | --- | --- |
+| GET | `/` | Main dashboard |
+| GET | `/setup` | Controller configuration |
+| GET | `/schedule-html` | Read-only daily schedule for embedding |
+| GET | `/status` | JSON system status |
+| GET | `/diagnostics` | Browser diagnostics |
+| GET | `/diagnostics.json` | JSON diagnostics |
+| GET | `/events` | Event log |
+| GET | `/tank` | Tank sensor calibration |
+| GET / POST | `/update` | Password-protected OTA page / upload; requires OTA support |
+| GET | `/download/config.txt` | Saved configuration; OTA credentials required when an OTA password is configured |
+| GET | `/download/schedule.txt` | Saved schedule |
+| GET | `/download/events.csv` | Event log as CSV |
+| GET | `/i2c-test` | Pulses relay outputs; requires debug routes to be enabled |
+| POST | `/stopall` | Stop all active zones |
+| POST | `/valve/on/<z>` | Start a zone manually |
+| POST | `/valve/off/<z>` | Stop a zone manually |
+| POST | `/reboot` | Reboot the controller |
 
-## 🛠️ Manual installation
+Zone control paths use a **zero-based index**: `<z> = 0` controls zone 1. A manual start returns HTTP `409` if rejected. Use the dashboard for normal operation; opening a POST endpoint in the browser address bar does not perform the action.
 
-To compile with Arduino IDE:
+## Manual installation
+
+Open [the ESP32 sketch](firmware/ESP32-Irrigation/ESP32-Irrigation.ino) in Arduino IDE for ESP32 and ESP32-S3 builds. The [ESP8266 sketch](firmware/ESP8266-Irrigation/ESP8266-Irrigation.ino) is a separate variant; the ESP32 board and partition selections below do not apply to it.
+
+To compile the ESP32 sketch:
 
 1. Add `https://dl.espressif.com/dl/package_esp32_index.json` to **Additional Boards Manager URLs**.
 2. Install **ESP32 by Espressif Systems**.
@@ -222,7 +241,7 @@ To compile with Arduino IDE:
 
 > Do not select **Huge APP** or **No OTA** if you intend to update firmware over the network; those layouts normally provide only one application slot.
 
-### Browser OTA (ArduinoOTA alternative)
+### Browser OTA updates
 
 The firmware also provides an HTTP updater, so Arduino IDE network discovery and
 the ArduinoOTA protocol are not required:
@@ -240,7 +259,7 @@ configuration just like the MQTT password.
 
 An existing installation can use this route only after firmware containing the
 route has been installed. In particular, an older ESP32 image using a single-app
-partition cannot convert itself to an OTA layout. Flash the full Minimal SPIFFS
+partition cannot convert itself to an OTA layout. Download your configuration and schedule and record your settings before erasing; an erase removes saved data. Flash the full Minimal SPIFFS
 image once over USB/Web Serial (erasing the device so the partition table is
 replaced); subsequent application updates can use `/update`. ArduinoOTA remains
 available as a fallback when it works on the local network.
@@ -260,7 +279,7 @@ The default checks the ESP32 Dev Module. Use `-Target esp32s3` for the S3 or
 minutes; later builds with the same board core and partition setting reuse the
 cache and should be substantially faster.
 
-## ⚠️ Electrical safety
+## Electrical safety
 
 - Use a transformer or power supply that matches the valve rating and can support every valve that may run concurrently.
 - Never apply more than **3.3 V** directly to an ESP32 GPIO. Use a voltage divider, level converter, or suitable signal-conditioning circuit for 5 V, 10 V, or 0–10 V sensor outputs.
@@ -268,7 +287,9 @@ cache and should be substantially faster.
 - Keep solenoid wiring away from ESP32 and sensor wiring to reduce resets, interference, and electrical noise.
 - Enclose, insulate, and protect any mains wiring according to local requirements. Keep it physically separated from low-voltage wiring and use a qualified person where required.
 
-## 🛠️ Troubleshooting
+## Troubleshooting
+
+Start with `/diagnostics` for controller diagnostics and `/events` for watering history and delay reasons. Include the board model, firmware version, symptoms, and relevant log entries when reporting a problem.
 
 | Problem | Checks |
 | --- | --- |
@@ -276,9 +297,11 @@ cache and should be substantially faster.
 | Relay operates backwards | Change the output polarity in **Setup**. |
 | `espirrigation.local` does not open | Use the IP address shown in your router's connected-device list. |
 | Weather does not update | Check internet access, latitude, longitude, timezone, and DNS. Local schedules still operate. |
+| Smart Watering does not shorten a run | Check **Minimum Adjusted Runtime (minutes)** and the current adjustment factor. |
+| Automatic watering is skipped | Check master/pause state, weather delays, no-watering periods, selected days, and controller local time. |
 | Wrong valve activates | Check zone numbering, GPIO assignments, relay wiring, and HIGH/LOW polarity. |
 
-## 🔗 Links
+## Links
 
 - [Web Flasher](https://numerik11.github.io/ESP32-Irrigation-Controller/web-flasher/)
 - [GitHub repository](https://github.com/numerik11/ESP32-Irrigation-Controller)
@@ -286,6 +309,3 @@ cache and should be substantially faster.
 If this project helps you, consider giving it a ⭐ on GitHub. Bug reports, testing, and suggestions are welcome.
 
 Beau
-
-
-
