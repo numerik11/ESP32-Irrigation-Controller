@@ -43,6 +43,8 @@ For compiling and uploading the source yourself, see [Manual installation](#manu
 
 On first setup, or when the controller enters its configuration portal:
 
+**[Android app release page](https://github.com/numerik11/ESP32-Irrigation-Controller/releases/tag/AndroidAPK)**
+
 1. On your phone or computer, join the **ESPIrrigationAP** Wi-Fi network.
 2. If your device reports **no internet**, choose to stay connected.
 3. Open **[http://192.168.4.1](http://192.168.4.1)**.
@@ -68,37 +70,6 @@ Open **Setup** and configure:
 4. **Optional features:** weather location, delay rules, sensors, tank/mains control, display and MQTT.
 
 Save your changes, then manually test each output before enabling automatic watering. Confirm that the intended valve opens and closes correctly.
-
-## Using the Android app
-
-Download the APK from the **[Android app release page](https://github.com/numerik11/ESP32-Irrigation-Controller/releases/tag/AndroidAPK)** and install it on your phone. Android may ask you to allow installation from the browser or file manager used to open the APK.
-
-The app displays the controller's existing web interface. It does not require a separate set of schedules or controls.
-
-### Find a controller on your normal Wi-Fi
-
-Connect your phone to the controller's network and open the app. It checks for the setup portal, then tries the saved controller address and local hostnames. If needed, it scans the connected Wi-Fi network for a matching irrigation controller.
-
-- A single match opens automatically; multiple scan matches let you choose a controller.
-- The app remembers the normal-network IP for the next launch.
-- Use **Enter IP** when you already know the address.
-- Once connected, the app header and buttons hide. Press **Android Back** to reveal them, then tap the connected status text to hide them again.
-
-Addresses such as `172.16.99.103` are supported. Discovery depends on your phone's network and subnet, not on addresses starting with `192.168`. The app scans subnets containing up to 1,024 addresses; on larger networks, it limits scanning to the phone's local `/24` range. Use **Enter IP** for a reachable controller outside that range.
-
-### Open the setup hotspot
-
-In app version **1.2**, the app can recognise the **ESPIrrigationAP** setup portal at `http://192.168.4.1`, even though that portal does not provide the normal irrigation status API.
-
-1. Tap **Connect to ESPIrrigationAP / Wi-Fi settings**.
-2. In Android's Wi-Fi settings, select **ESPIrrigationAP**.
-3. Stay connected if Android warns that the network has no internet.
-4. Return to the app. It checks again and opens the recognised setup portal.
-5. After saving the controller's Wi-Fi details, reconnect your phone to your normal network and tap **Find controller**.
-
-The app opens Wi-Fi settings; you select the network yourself. Joining the setup hotspot does not overwrite the saved normal-network controller address.
-
-> The phone must be able to communicate with the ESP. Guest Wi-Fi or client isolation can prevent both discovery and direct IP access.
 
 ## Web interface
 
