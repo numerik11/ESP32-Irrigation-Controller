@@ -9,7 +9,7 @@
 
 Control **1–16 watering zones** from your phone, tablet or computer. Create schedules, turn valves on and off, and adjust watering to suit the weather.
 
-[Install Firmware](https://numerik11.github.io/ESP32-Irrigation-Controller/web-flasher/) · [Android App](https://github.com/numerik11/ESP32-Irrigation-Controller/releases/tag/AndroidAPK) · [GitHub](https://github.com/numerik11/ESP32-Irrigation-Controller)
+[Install Firmware](https://numerik11.github.io/ESP32-Irrigation-Controller/web-flasher/) · [Android App](https://github.com/numerik11/ESP32-Irrigation-Controller/releases/tag/AndroidAPK) 
 
 ## What can it do?
 
