@@ -23,41 +23,6 @@ Control **1–16 watering zones** from your phone, tablet or computer. Create sc
 
 Schedules run on the controller without internet once programed.
 
-## Getting started
-
-### 1. Install the firmware
-
-Connect your board to your computer by USB and open the **[Web Flasher](https://numerik11.github.io/ESP32-Irrigation-Controller/web-flasher/)**.
-
-Choose the firmware for your board and follow the instructions. No Arduino IDE is needed.
-
-### 2. Connect to your Wi-Fi
-
-1. Join the **ESPIrrigationAP** Wi-Fi network from your phone or computer.
-2. If it says “no internet”, choose to stay connected.
-3. Open **http://192.168.4.1**.
-4. Select your home Wi-Fi and enter its password.
-5. Once setup finishes, reconnect your phone or computer to your home Wi-Fi.
-
-The address `192.168.4.1` is only used during setup.
-
-### 3. Open the controller
-
-Use the **[Android app](https://github.com/numerik11/ESP32-Irrigation-Controller/releases/tag/AndroidAPK)** or open **http://espirrigation.local** while connected to the same network.
-
-If that address does not work, use the controller’s IP address from the app or your router’s connected-device list.
-
-### 4. Set up your zones
-
-Open **Setup** and enter:
-
-- Your zone names, output pins and relay polarity.
-- Your timezone and correct local time.
-- Watering days, start times and durations.
-- Any optional weather, sensor, tank or display settings.
-
-**Save your settings and manually test each valve before enabling automatic watering.**
-
 ## Using the controller
 
 ### Dashboard
@@ -112,6 +77,41 @@ Automatic watering stops during these periods, and affected runs are cancelled. 
 Connect a compatible tank-level sensor to monitor your water supply. With the required valve outputs, the controller can select tank or mains water automatically, or let you choose manually.
 
 Use the **tank calibration page** to set the sensor’s empty and full readings.
+
+## Getting started
+
+### 1. Install the firmware
+
+Connect your board to your computer by USB and open the **[Web Flasher](https://numerik11.github.io/ESP32-Irrigation-Controller/web-flasher/)**.
+
+Choose the firmware for your board and follow the instructions. No Arduino IDE is needed.
+
+### 2. Connect to your Wi-Fi
+
+1. Join the **ESPIrrigationAP** Wi-Fi network from your phone or computer.
+2. If it says “no internet”, choose to stay connected.
+3. Open **http://192.168.4.1**.
+4. Select your home Wi-Fi and enter its password.
+5. Once setup finishes, reconnect your phone or computer to your home Wi-Fi.
+
+The address `192.168.4.1` is only used during setup.
+
+### 3. Open the controller
+
+Use the **[Android app](https://github.com/numerik11/ESP32-Irrigation-Controller/releases/tag/AndroidAPK)** or open **http://espirrigation.local** while connected to the same network.
+
+If that address does not work, use the controller’s IP address from the app or your router’s connected-device list.
+
+### 4. Set up your zones
+
+Open **Setup** and enter:
+
+- Your zone names, output pins and relay polarity.
+- Your timezone and correct local time.
+- Watering days, start times and durations.
+- Any optional weather, sensor, tank or display settings.
+
+**Save your settings and manually test each valve before enabling automatic watering.**
 
 ## Hardware and wiring
 
