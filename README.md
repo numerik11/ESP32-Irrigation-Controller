@@ -29,7 +29,8 @@ Schedules run on the controller without internet once programed.
 
 See which zones are running, what is scheduled next, current weather and any watering delays. Start or stop watering from here.
 
-![ESP32 irrigation dashboard](https://github.com/user-attachments/assets/cf75fb58-65f0-445e-abe4-f65609e4c525)
+![ESP32 irrigation dashboard](<img width="854" height="904" alt="image" src="https://github.com/user-attachments/assets/4cdd231b-0e64-4a7c-abfc-d61ae9cf1c0d" />
+)
 
 ### Setup
 
