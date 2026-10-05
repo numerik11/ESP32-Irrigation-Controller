@@ -21,7 +21,7 @@ Control **1–16 watering zones** from your phone, tablet or computer. Create sc
 - Connect to **Home Assistant using MQTT**.
 - Support optional displays and firmware updates over Wi-Fi.
 
-Schedules run on the controller without internet, as long as its clock is correct. Online weather updates require internet access.
+Schedules run on the controller without internet once programed.
 
 ## Getting started
 
