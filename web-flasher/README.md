@@ -11,6 +11,17 @@ Goto: https://numerik11.github.io/ESP32-Irrigation-Controller/web-flasher/
 
 ## Use
 
+### Version 3.2.10: KC868-A6 I2C fix
+
+I2C now starts after the saved pin settings load. Relay expanders use those same
+pins, initialize their outputs OFF before starting, and report initialization
+failure. OLED initialization preserves the configured bus.
+
+For KC868-A6, choose **ESP32 Dev Module**. The ESP32 defaults are now SDA **4**
+and SCL **15**. Existing saved settings are preserved: after updating, set these
+values in Setup, save, and reboot. The onboard inputs and relays should appear
+at **0x22** and **0x24**; the configured SSD1306 address is **0x3C**.
+
 Use Chrome or Edge. ESP Web Tools needs Web Serial, so Firefox and Safari will not work.
 
 When GitHub Pages is enabled for this repository, open:

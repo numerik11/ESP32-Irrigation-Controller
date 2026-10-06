@@ -57,7 +57,7 @@ extern "C" {
 // ---------- Hardware ----------
 static const char kFirmwareSignature[] __attribute__((used)) =
   "Original author: Beau Kaczmarek - https://github.com/numerik11/ESP32-Irrigation-Controller";
-static const char kFirmwareVersion[] = "3.2.9";
+static const char kFirmwareVersion[] = "3.2.10";
 static const char kFirmwareBuildDate[] = __DATE__ " " __TIME__;
 static const char kUpdateReportUrl[] =
   "https://irrigation-update-counter.beaukacz86.workers.dev/v1/report";
@@ -69,8 +69,9 @@ static bool updateReportPending = false;
 static uint32_t updateReportNextAttemptMs = 0;
 static const uint8_t MAX_ZONES = 16;
 #if defined(CONFIG_IDF_TARGET_ESP32)
-static const int I2C_SDA_DEFAULT = 21;
-static const int I2C_SCL_DEFAULT = 22;
+// KC868-A6 onboard input and relay expanders share this bus.
+static const int I2C_SDA_DEFAULT = 4;
+static const int I2C_SCL_DEFAULT = 15;
 #else
 static const int I2C_SDA_DEFAULT = 8;
 static const int I2C_SCL_DEFAULT = 9;
@@ -2423,16 +2424,26 @@ static NextWaterInfo computeNextWatering();
 
 // ---------- I2C init ----------
 bool initExpanders() {
+  // Match the saved bus pins when the expander library calls begin().
+  pcfIn = PCF8574(&I2Cbus, 0x22, i2cSdaPin, i2cSclPin);
+  pcfOut = PCF8574(&I2Cbus, 0x24, i2cSdaPin, i2cSclPin);
   bool haveIn  = i2cPing(0x22);
   bool haveOut = i2cPing(0x24);
   Serial.printf("[I2C] ping 0x22=%d 0x24=%d\n", haveIn, haveOut);
   if (!haveOut) return false;
 
-  for (int i=0;i<3 && !pcfOut.begin();++i) delay(5);
-  for (int i=0;i<3 && !pcfIn.begin(); ++i) delay(5);
-
-  for (uint8_t ch=P0; ch<=P5; ch++) { pcfOut.pinMode(ch, OUTPUT); pcfOut.digitalWrite(ch, HIGH); }
-  for (uint8_t ch=P0; ch<=P5; ch++) { pcfIn.pinMode (ch, INPUT);  pcfIn.digitalWrite(ch, HIGH); }
+  // begin() writes the initial pin state; configure active-low relays OFF first.
+  for (uint8_t ch=P0; ch<=P5; ch++) pcfOut.pinMode(ch, OUTPUT, HIGH);
+  for (uint8_t ch=P0; ch<=P5; ch++) pcfIn.pinMode(ch, INPUT);
+  bool outputReady = false;
+  for (int i=0; i<3 && !outputReady; ++i) {
+    outputReady = pcfOut.begin();
+    if (!outputReady) delay(5);
+  }
+  if (!outputReady) return false;
+  if (haveIn) {
+    for (int i=0;i<3 && !pcfIn.begin(); ++i) delay(5);
+  }
   return true;
 }
 
@@ -3290,10 +3301,6 @@ void setup() {
   // Route larger heap allocations to PSRAM before long-lived page/cache buffers reserve.
   configurePsramForLargeBuffers();
 
-  // I2C bus
-  I2Cbus.begin(i2cSdaPin, i2cSclPin, 100000);
-  I2Cbus.setTimeOut(20);
-
   bootMillis = millis();
 
   // Pre-size hot Strings to reduce heap churn over long runtimes.
@@ -3322,6 +3329,11 @@ void setup() {
   loadRainHistoryState();
   sanitizePinConfig();
   validatePinMap();
+  // Start the bus only after loading the persisted pin configuration.
+  bool i2cStarted = I2Cbus.begin(i2cSdaPin, i2cSclPin, 100000);
+  I2Cbus.setTimeOut(20);
+  Serial.printf("[I2C] SDA=%d SCL=%d start=%s\n",
+                i2cSdaPin, i2cSclPin, i2cStarted ? "OK" : "FAILED");
   if (!LittleFS.exists("/schedule.txt")) saveSchedule();
   loadSchedule();
   initManualButtons();
@@ -3367,7 +3379,7 @@ void setup() {
       showTftBootSplash();
     }
   } else {
-    if (!display.begin(SSD1306_SWITCHCAPVCC, SCREEN_ADDRESS)) {
+    if (!display.begin(SSD1306_SWITCHCAPVCC, SCREEN_ADDRESS, true, false)) {
       Serial.println("SSD1306 init failed");
       while (true) delay(100);
     }

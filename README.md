@@ -195,6 +195,10 @@ The [ESP8266 firmware](firmware/ESP8266-Irrigation/ESP8266-Irrigation.ino) is a 
 
 ## Troubleshooting
 
+For development checks, run `npm --prefix tests test` from the repository root.
+With Arduino CLI and the required board cores and libraries installed, run
+`.\tests\verify-ota.ps1 -Target all` to compile both ESP32 targets with OTA support.
+
 | Problem | What to check |
 | --- | --- |
 | Dashboard will not open | Connect to the same Wi-Fi and try the controller’s IP address. |
