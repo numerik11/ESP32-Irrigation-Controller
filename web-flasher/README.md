@@ -11,6 +11,13 @@ Goto: https://numerik11.github.io/ESP32-Irrigation-Controller/web-flasher/
 
 ## Use
 
+### Version 3.3.0: independent source relay disabling
+
+Setting City Water Relay GPIO or Tank Relay GPIO to **-1** now keeps that
+source relay OFF on the KC868-A6 onboard expander as well as direct GPIO.
+Each relay can be disabled independently. The **Enable Tank** option still
+controls water-source selection: unchecked selects mains.
+
 ### Version 3.2.10: KC868-A6 I2C fix
 
 I2C now starts after the saved pin settings load. Relay expanders use those same

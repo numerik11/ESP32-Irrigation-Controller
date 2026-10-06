@@ -57,7 +57,7 @@ extern "C" {
 // ---------- Hardware ----------
 static const char kFirmwareSignature[] __attribute__((used)) =
   "Original author: Beau Kaczmarek - https://github.com/numerik11/ESP32-Irrigation-Controller";
-static const char kFirmwareVersion[] = "3.2.10";
+static const char kFirmwareVersion[] = "3.3.0";
 static const char kFirmwareBuildDate[] = __DATE__ " " __TIME__;
 static const char kUpdateReportUrl[] =
   "https://irrigation-update-counter.beaukacz86.workers.dev/v1/report";
@@ -1913,6 +1913,9 @@ inline void gpioPowerSupplyWrite(bool on) {
 }
 
 inline void setWaterSourceRelays(bool mainsOn, bool tankOn) {
+  // -1 disables the source output on both GPIO and onboard PCF relays.
+  mainsOn = mainsOn && mainsPin != -1;
+  tankOn = tankOn && tankPin != -1;
   if (mainsOn || tankOn) gpioPowerSupplyWrite(true);
 
   // Prefer PCF outputs for the classic wiring; otherwise drive the configured GPIO pins.
