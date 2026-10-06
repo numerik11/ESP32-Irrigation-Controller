@@ -1920,6 +1920,10 @@ inline void setWaterSourceRelays(bool mainsOn, bool tankOn) {
 
   // Prefer PCF outputs for the classic wiring; otherwise drive the configured GPIO pins.
   if (!useGpioFallback) {
+    // Disabled source outputs are available to zones 5 and 6.
+    // Preserve those zone states when another zone changes the water source.
+    if (mainsPin == -1) mainsOn = zonesCount > 4 && zoneActive[4];
+    if (tankPin == -1) tankOn = zonesCount > 5 && zoneActive[5];
     // PCF8574: active-LOW
     pcfOut.digitalWrite(mainsChannel, mainsOn ? LOW : HIGH);
     pcfOut.digitalWrite(tankChannel,  tankOn  ? LOW : HIGH);
@@ -1932,8 +1936,11 @@ inline void setWaterSourceRelays(bool mainsOn, bool tankOn) {
 
 inline bool useExpanderForZone(int z) {
   if (useGpioFallback) return false;
-  // Reserve PCF channels P4/P5 for mains/tank; only zones 0-3 use the expander
-  return (z >= 0 && z < 4);
+  // P4/P5 become zone outputs independently when their source relay is disabled.
+  if (z < 0 || z >= ALL_P) return false;
+  if (z == 4) return mainsPin == -1;
+  if (z == 5) return tankPin == -1;
+  return true;
 }
 
 // Duration helper: slot=1 (primary) or 2 (secondary) with fallback to primary
@@ -2903,7 +2910,7 @@ void handleDiagnosticsJson() {
     z["enabled"] = i < (int)zonesCount;
     z["gpio"] = zonePins[i];
     z["activeLow"] = zoneGpioActiveLow[i];
-    if (i < ALL_P) z["pcfChannel"] = PCH[i];
+    if (useExpanderForZone(i)) z["pcfChannel"] = PCH[i];
     else z["pcfChannel"] = nullptr;
   }
   JsonObject sensorPins = pins["sensors"].to<JsonObject>();
@@ -8700,11 +8707,11 @@ void handleSetupPage() {
   html += F("<div class='row switchline'><label>City Water Relay GPIO</label><input class='in-xs' type='number' min='-1' max='"); html += String(uiMaxGpio); html += F("' name='mainsPin' value='");
   html += String(mainsPin); html += F("'><label class='chip'><input type='checkbox' name='mainsPinLow' ");
   html += (mainsGpioActiveLow ? "checked" : "");
-  html += F("><span>LOW = ON</span></label><small>-1 disables. City water relay. Use a check/backflow prevention device.</small></div>");
+  html += F("><span>LOW = ON</span></label><small>-1 disables mains and frees onboard relay 5 for zone 5. City water relay. Use a check/backflow prevention device.</small></div>");
   html += F("<div class='row switchline'><label>Tank Relay GPIO</label><input class='in-xs' type='number' min='-1' max='"); html += String(uiMaxGpio); html += F("' name='tankPin' value='");
   html += String(tankPin); html += F("'><label class='chip'><input type='checkbox' name='tankPinLow' ");
   html += (tankGpioActiveLow ? "checked" : "");
-  html += F("><span>LOW = ON</span></label><small>-1 disables. Tank pump/source relay output.</small></div>");
+  html += F("><span>LOW = ON</span></label><small>-1 disables tank output and frees onboard relay 6 for zone 6.</small></div>");
   html += F("<div class='row switchline'><label>Power Supply Relay GPIO</label><input class='in-xs' type='number' min='-1' max='"); html += String(uiMaxGpio); html += F("' name='powerSupplyPin' value='");
   html += String(powerSupplyPin); html += F("'><label class='chip'><input type='checkbox' name='powerSupplyPinLow' ");
   html += (powerSupplyActiveLow ? "checked" : "");

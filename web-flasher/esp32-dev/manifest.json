@@ -7,19 +7,19 @@
       "chipFamily": "ESP32",
       "parts": [
         {
-          "path": "bootloader.bin?v=3.3.0-source-relay-disable",
+          "path": "bootloader.bin?v=3.3.0-zone56-fix",
           "offset": 4096
         },
         {
-          "path": "partitions.bin?v=3.3.0-source-relay-disable",
+          "path": "partitions.bin?v=3.3.0-zone56-fix",
           "offset": 32768
         },
         {
-          "path": "boot_app0.bin?v=3.3.0-source-relay-disable",
+          "path": "boot_app0.bin?v=3.3.0-zone56-fix",
           "offset": 57344
         },
         {
-          "path": "firmware.bin?v=3.3.0-source-relay-disable",
+          "path": "firmware.bin?v=3.3.0-zone56-fix",
           "offset": 65536
         }
       ]
