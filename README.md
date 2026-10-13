@@ -29,7 +29,7 @@ Schedules run on the controller without internet once programed.
 
 See which zones are running, what is scheduled next, current weather and any watering delays. Start or stop watering from here.
 
-<img width="859" height="909" alt="image" src="https://github.com/user-attachments/assets/d8eaf16b-4d82-4659-85c2-263f9811985c" />
+<img width="648" height="934" alt="image" src="https://github.com/user-attachments/assets/f4d12fca-5c51-458e-a044-fd8e81b27ed3" />
 
 ### Setup
 
@@ -47,10 +47,7 @@ Review watering activity and find out why a run was delayed or skipped. You can 
 
 Each zone supports selected watering days and **two start times**, each with its own duration.
 
-Choose how zones run:
-
-- **Sequential:** One zone at a time. Suitable for most systems.
-- **Concurrent:** Multiple zones together. Your water supply and electrical equipment must support the combined load.
+<img width="777" height="846" alt="image" src="https://github.com/user-attachments/assets/b39b3732-15fb-40ca-a5df-2bc8986acbe2" />
 
 ### Smart Watering
 
