@@ -1,0 +1,344 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ESP32 Irrigation Firmware Update</title>
+  <script type="module" src="https://unpkg.com/esp-web-tools@latest/dist/web/install-button.js?module"></script>
+  <style>
+    :root {
+      color-scheme: light dark;
+      font-family: Arial, Helvetica, sans-serif;
+      background: #f5f7f8;
+      color: #1f2933;
+    }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      display: grid;
+      place-items: center;
+      padding: 24px;
+    }
+
+    main {
+      width: min(100%, 520px);
+      background: #ffffff;
+      border: 1px solid #d8dee4;
+      border-radius: 8px;
+      padding: 24px;
+      box-shadow: 0 12px 30px rgba(15, 23, 42, 0.08);
+    }
+
+    h1 {
+      margin: 0 0 16px;
+      font-size: 24px;
+      line-height: 1.2;
+    }
+
+    .version-panel {
+      display: grid;
+      gap: 10px;
+      margin: 18px 0 0;
+      padding: 14px;
+      border: 1px solid #d8dee4;
+      border-radius: 8px;
+      background: #f8fafc;
+    }
+
+    .version-row {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      align-items: baseline;
+    }
+
+    .version-label {
+      color: #52606d;
+      font-size: 13px;
+      font-weight: 700;
+    }
+
+    .version-value {
+      font-weight: 800;
+      text-align: right;
+    }
+
+    .version-status {
+      padding-top: 10px;
+      border-top: 1px solid #d8dee4;
+      font-weight: 800;
+    }
+
+    .version-status.ok {
+      color: #2563eb;
+    }
+
+    .version-status.update {
+      color: #b45309;
+    }
+
+    .version-status.unknown {
+      color: #52606d;
+    }
+
+    .update-count {
+      padding-top: 10px;
+      border-top: 1px solid #d8dee4;
+      color: #52606d;
+      font-size: 14px;
+      font-weight: 700;
+    }
+
+    label {
+      display: block;
+      margin-bottom: 8px;
+      font-weight: 700;
+    }
+
+    select {
+      width: 100%;
+      min-height: 44px;
+      padding: 8px 10px;
+      border: 1px solid #b8c2cc;
+      border-radius: 6px;
+      font: inherit;
+      background: #ffffff;
+      color: #1f2933;
+    }
+
+    #otaConnect { margin-top: 20px; }
+    #controllerAddress { box-sizing: border-box; width: 100%; padding: 10px; font: inherit; color: inherit; background: transparent; border: 1px solid #b8c2cc; border-radius: 6px; }
+    #otaConnect button { margin-top: 10px; padding: 10px 16px; border: 0; border-radius: 6px; background: #2563eb; color: white; font: inherit; cursor: pointer; }
+    #otaConnect button:focus-visible { outline: 3px solid #60a5fa; outline-offset: 3px; }
+
+    .installer {
+      margin-top: 20px;
+    }
+
+    p {
+      margin: 16px 0 0;
+      color: #52606d;
+      line-height: 1.45;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        background: #111827;
+        color: #f3f4f6;
+      }
+
+      main {
+        background: #1f2937;
+        border-color: #374151;
+      }
+
+      select {
+        background: #111827;
+        color: #f3f4f6;
+        border-color: #4b5563;
+      }
+
+      .version-panel {
+        background: #111827;
+        border-color: #374151;
+      }
+
+      .version-label {
+        color: #cbd5e1;
+      }
+
+      .version-status {
+        border-top-color: #374151;
+      }
+
+      .update-count {
+        color: #cbd5e1;
+        border-top-color: #374151;
+      }
+
+      p {
+        color: #cbd5e1;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>ESP32 Irrigation Firmware Update</h1>
+
+    <label for="board">Board</label>
+    <select id="board">
+      <option value="esp32-dev/manifest.json">ESP32 Dev Module</option>
+      <option value="esp32-s3-devkitc-1/manifest.json">ESP32-S3 DevKitC-1</option>
+    </select>
+
+    <section class="version-panel" aria-label="Firmware versions">
+      <div class="version-row">
+        <span class="version-label">Current installed</span>
+        <span class="version-value" id="currentVersion">Unknown</span>
+      </div>
+      <div class="version-row">
+        <span class="version-label">Available update</span>
+        <span class="version-value" id="availableVersion">Loading...</span>
+      </div>
+      <div class="version-status unknown" id="versionStatus">Open this page from the controller Setup page to compare versions.</div>
+      <div class="update-count" id="updateCount" aria-live="polite">Loading successful updates...</div>
+    </section>
+
+    <div class="installer">
+      <esp-web-install-button id="installer"></esp-web-install-button>
+    </div>
+
+    <p><a id="firmwareDownload" href="esp32-dev/firmware.bin?v=3.3.0-zone56-fix" download>Download application .bin for Browser OTA</a></p>
+    <label for="firmwareLink">GitHub URL for Browser OTA</label>
+    <input id="firmwareLink" type="url" readonly style="width:100%;padding:10px" aria-label="GitHub firmware URL for selected board">
+    <p>Copy this URL into the controller's Browser OTA page, or download the .bin and upload it there.</p>
+    <form id="otaConnect">
+      <label for="controllerAddress">Controller IP address or hostname</label>
+      <input id="controllerAddress" type="text" value="espirrigation.local" placeholder="192.168.1.100" required spellcheck="false" autocapitalize="none" aria-describedby="otaConnectHelp">
+      <button type="submit">Open controller OTA</button>
+      <p id="otaConnectHelp">Opens the controller's Browser OTA page in a new tab. Use an address reachable from this browser and sign in with your OTA password.</p>
+    </form>
+    <p>Use Chrome or Edge. Connect the board by USB, choose the matching board, then install.</p>
+  </main>
+
+  <script>
+    const updaterVersion = "3.3.0";
+    const updaterBuild = "3.3.0-zone56-fix";
+    const counterUrl = "https://irrigation-update-counter.beaukacz86.workers.dev";
+    const board = document.getElementById("board");
+    const installer = document.getElementById("installer");
+    const currentVersion = document.getElementById("currentVersion");
+    const availableVersion = document.getElementById("availableVersion");
+    const versionStatus = document.getElementById("versionStatus");
+    const updateCount = document.getElementById("updateCount");
+    const params = new URLSearchParams(window.location.search);
+    const current = params.get("current") || "";
+
+    function controllerOtaUrl(value) {
+      const address = value.trim();
+      if (!address) throw new Error('Enter the controller IP address or hostname.');
+      const url = new URL(address.includes('://') ? address : 'http://' + address);
+      if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password) {
+        throw new Error('Use an HTTP or HTTPS controller address without a username or password.');
+      }
+      url.pathname = '/update';
+      url.search = '';
+      url.hash = '';
+      return url.href;
+    }
+
+    const controllerAddress = document.getElementById('controllerAddress');
+    controllerAddress.addEventListener('input', () => controllerAddress.setCustomValidity(''));
+    document.getElementById('otaConnect').addEventListener('submit', event => {
+      event.preventDefault();
+      try {
+        const url = controllerOtaUrl(controllerAddress.value);
+        controllerAddress.setCustomValidity('');
+        window.open(url, '_blank', 'noopener,noreferrer');
+      } catch (error) {
+        controllerAddress.setCustomValidity('Enter a valid controller IP address or HTTP/HTTPS URL.');
+        controllerAddress.reportValidity();
+      }
+    });
+
+    function normalizeVersion(value) {
+      return String(value || "").trim().replace(/^v/i, "");
+    }
+
+    function compareVersions(left, right) {
+      const leftVersion = normalizeVersion(left);
+      const rightVersion = normalizeVersion(right);
+      if (!/^\d+(?:\.\d+)*$/.test(leftVersion) || !/^\d+(?:\.\d+)*$/.test(rightVersion)) {
+        return null;
+      }
+
+      const leftParts = leftVersion.split(".").map(Number);
+      const rightParts = rightVersion.split(".").map(Number);
+      const partCount = Math.max(leftParts.length, rightParts.length);
+      for (let index = 0; index < partCount; index += 1) {
+        const difference = (leftParts[index] || 0) - (rightParts[index] || 0);
+        if (difference !== 0) return Math.sign(difference);
+      }
+      return 0;
+    }
+
+    function setStatus(nextVersion) {
+      const installed = normalizeVersion(current);
+      const available = normalizeVersion(nextVersion);
+      const comparison = compareVersions(installed, available);
+
+      currentVersion.textContent = installed ? `v${installed}` : "Unknown";
+      availableVersion.textContent = available ? `v${available}` : "Unknown";
+
+      versionStatus.classList.remove("ok", "update", "unknown");
+      if (!installed) {
+        versionStatus.textContent = "Open this page from the controller Setup page to compare versions.";
+        versionStatus.classList.add("unknown");
+      } else if (!available) {
+        versionStatus.textContent = "Could not load update information.";
+        versionStatus.classList.add("unknown");
+      } else if (comparison === null) {
+        versionStatus.textContent = "Firmware version format is not recognized.";
+        versionStatus.classList.add("unknown");
+      } else if (comparison === 0) {
+        versionStatus.textContent = "Up to date";
+        versionStatus.classList.add("ok");
+      } else if (comparison < 0) {
+        versionStatus.textContent = "Update available";
+        versionStatus.classList.add("update");
+      } else {
+        versionStatus.textContent = "Installed firmware is newer than this release.";
+        versionStatus.classList.add("ok");
+      }
+    }
+
+    function manifestUrl() {
+      return `${board.value}?v=${encodeURIComponent(updaterBuild)}`;
+    }
+
+    async function loadUpdateCount(version) {
+      const normalized = normalizeVersion(version);
+      if (!normalized) {
+        updateCount.textContent = "Update count unavailable.";
+        return;
+      }
+      updateCount.textContent = `Firmware ${normalized} — loading successful updates...`;
+      try {
+        const response = await fetch(`${counterUrl}/v1/count?version=${encodeURIComponent(normalized)}`, { cache: "no-store" });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const result = await response.json();
+        const count = Number(result.count);
+        if (!Number.isSafeInteger(count) || count < 0) throw new Error("Invalid count");
+        updateCount.textContent = `Firmware ${normalized} — ${count} successful ${count === 1 ? "update" : "updates"}.`;
+      } catch (error) {
+        updateCount.textContent = `Firmware ${normalized} — update count unavailable.`;
+      }
+    }
+
+    async function updateManifest() {
+      const url = manifestUrl();
+      const imagePath = board.value.replace('manifest.json', 'firmware.bin');
+      document.getElementById('firmwareDownload').href = imagePath + '?v=' + updaterBuild;
+      document.getElementById('firmwareLink').value = 'https://raw.githubusercontent.com/numerik11/ESP32-Irrigation-Controller/main/web-flasher/' + imagePath;
+      installer.setAttribute("manifest", url);
+      availableVersion.textContent = "Loading...";
+      try {
+        const response = await fetch(url, { cache: "reload" });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const manifest = await response.json();
+        if (typeof manifest.version !== "string") throw new Error("Manifest version is missing");
+        setStatus(manifest.version);
+        loadUpdateCount(manifest.version);
+      } catch (error) {
+        setStatus("");
+        loadUpdateCount("");
+      }
+    }
+
+    board.addEventListener("change", updateManifest);
+    updateManifest();
+  </script>
+</body>
+</html>
