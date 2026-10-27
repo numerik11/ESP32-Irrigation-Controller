@@ -1,13 +1,14 @@
-![Platform](https://img.shields.io/badge/Platform-ESP32%20%7C%20ESP32--S3-blue)
-![Zones](https://img.shields.io/badge/Zones-1%E2%80%9316-green)
-![Web UI](https://img.shields.io/badge/Web%20UI-Local-orange)
-![Weather](https://img.shields.io/badge/Weather-Aware-success)
-![OTA](https://img.shields.io/badge/Updates-OTA-informational)
-![MQTT](https://img.shields.io/badge/MQTT-Supported-purple)
+Platform Zones Web UI Weather OTA MQTT
 
-# ESP32 Irrigation Controller
+🌱 ESP32 Irrigation: 1–16 Zone irrigation control
+A flexible, locally controlled irrigation system for 1–16 solenoid valves. It combines per-zone scheduling, weather-aware delays, optional tank/mains switching, sensor support, MQTT, and a responsive web dashboard.
 
-Control **1–16 watering zones** from your phone, tablet or computer. Create schedules, turn valves on and off, and adjust watering to suit the weather.
+Schedules run on the controller, so watering continues even when the internet is unavailable.
+
+🚀 Install from your browser
+No Arduino IDE is required. Connect the ESP32 by USB and open the:
+
+👉 ESP32 Irrigation Web Flasher
 
 [![Install Firmware Online](https://img.shields.io/badge/⚡_Install_Firmware-2ea44f?style=for-the-badge)](https://numerik11.github.io/ESP32-Irrigation-Controller/web-flasher/) [![Android App](https://img.shields.io/badge/📱_Android_App-3ddc84?style=for-the-badge)](https://github.com/numerik11/ESP32-Irrigation-Controller/releases/tag/AndroidAPK)
 
