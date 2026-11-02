@@ -105,23 +105,22 @@ test("ESP32 smart watering skips, scales, and combines weather adjustments", () 
       smartCoolAdjustPct: -20,
       smartHotAdjustPct: 25,
       smartVeryHotAdjustPct: 50,
-      smartLightRainAdjustPct: -50,
       actualRain: 0,
-      soilWet: false,
+      moisturePct: -1,
       referenceTemp: 20,
       ...overrides,
     };
     const { smartWateringFactor } = compileFirmwareFunctions(
       esp32,
-      ["smartRuleForTemperature", "smartCurrentRule", "smartRuleAdjustment", "smartFactorForZone", "smartWateringFactor"],
+      ["smartRuleForTemperature", "smartCurrentRule", "smartRuleAdjustment", "smartActualRainReductionPct", "smartFactorForZone", "smartWateringFactor"],
       {
         ...state,
         smartRuleState: -1, smartHysteresisC: 0, smartSeasonalPct: 100,
-        smartMaximumIncreasePct: 100, MAX_ZONES: 16,
+        smartMaximumIncreasePct: 100, MAX_ZONES: 16, moistureSkipThresholdPct: 70,
         smartZoneMode: Array(16).fill(0), smartZoneCoolPct: [], smartZoneHotPct: [], smartZoneVeryHotPct: [],
         constrain: (v, low, high) => Math.max(low, Math.min(high, v)),
         last24hActualRain: () => state.actualRain,
-        isSoilWetForSmartSkip: () => state.soilWet,
+        moisturePercent: () => state.moisturePct,
         smartWateringReferenceTempC: () => state.referenceTemp,
       },
     );
@@ -131,11 +130,14 @@ test("ESP32 smart watering skips, scales, and combines weather adjustments", () 
   assert.equal(factor({ smartWateringEnabled: false }), 1);
   assert.equal(factor({ actualRain: 8.1 }), 0);
   assert.equal(factor({ rainNext24h_mm: 10.1 }), 0);
-  assert.equal(factor({ soilWet: true }), 0);
+  assert.equal(factor({ moisturePct: 70 }), 0);
+  assert.equal(factor({ moisturePct: 36 }), 0.64);
   assert.equal(factor({ referenceTemp: 10 }), 0.8);
   assert.equal(factor({ referenceTemp: 30 }), 1.25);
   assert.equal(factor({ referenceTemp: 40 }), 1.5);
-  assert.equal(factor({ referenceTemp: 30, actualRain: 2 }), 0.625);
+  assert.equal(factor({ referenceTemp: 30, actualRain: 2 }), 0.9375);
+  assert.equal(factor({ referenceTemp: 30, actualRain: 3 }), 0.625);
+  assert.equal(factor({ referenceTemp: 30, actualRain: 5 }), 0.3125);
 });
 
 test("ESP32 status LED pulse and wrapped flash windows honor boundaries", () => {

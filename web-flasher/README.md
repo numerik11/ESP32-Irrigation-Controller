@@ -11,6 +11,16 @@ Goto: https://numerik11.github.io/ESP32-Irrigation-Controller/web-flasher/
 
 ## Use
 
+### Version 3.3.1: Smart Watering and page layout
+
+Smart Watering now combines temperature, actual rainfall from the previous 24
+hours, and a valid selected ground-moisture reading. Rain reduces the runtime
+factor by 25% at 1 mm, 50% at 3 mm, and 75% at 5 mm. A moisture reading of
+36% wet keeps 64% of the temperature-and-rain factor; the configured rain and
+wet-soil skip limits still take priority. Home shows rain and the resulting
+global factor. Setup uses the renamed sections and equal-sized action buttons.
+The Home and Setup shortcut strips have been removed.
+
 ### Version 3.3.0: independent source relay disabling
 
 Setting City Water Relay GPIO to **-1** disables the mains source output and

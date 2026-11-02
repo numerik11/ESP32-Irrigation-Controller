@@ -57,7 +57,7 @@ extern "C" {
 // ---------- Hardware ----------
 static const char kFirmwareSignature[] __attribute__((used)) =
   "Original author: Beau Kaczmarek - https://github.com/numerik11/ESP32-Irrigation-Controller";
-static const char kFirmwareVersion[] = "3.3.0";
+static const char kFirmwareVersion[] = "3.3.1";
 static const char kFirmwareBuildDate[] = __DATE__ " " __TIME__;
 static const char kUpdateReportUrl[] =
   "https://irrigation-update-counter.beaukacz86.workers.dev/v1/report";
@@ -402,7 +402,6 @@ int      smartHotAdjustPct = 20;
 float    smartVeryHotTempC = 34.0f;
 int      smartVeryHotAdjustPct = 40;
 float    smartActualRainSkipMm = 5.0f;
-int      smartLightRainAdjustPct = -30;
 float    smartForecastRainSkipMm = 5.0f;
 // Basis: 0=current (legacy forecast fallback), 1=forecast max, 2=forecast min/max midpoint.
 int      smartTempBasis = 1;
@@ -2001,6 +2000,14 @@ static int smartRuleAdjustment(int rule, int cool, int hot, int veryHot) {
   return 0;
 }
 
+// Actual rainfall over the rolling 24-hour window reduces the temperature-adjusted runtime.
+static int smartActualRainReductionPct(float rainMm) {
+  if (rainMm >= 5.0f) return 75;
+  if (rainMm >= 3.0f) return 50;
+  if (rainMm >= 1.0f) return 25;
+  return 0;
+}
+
 static float smartFactorForZone(int z) {
   if (!smartWateringEnabled) return 1.0f;
 
@@ -2009,7 +2016,8 @@ static float smartFactorForZone(int z) {
 
   if (actualRain24h > smartActualRainSkipMm ||
       forecastRain24h > smartForecastRainSkipMm) return 0.0f;
-  if (isSoilWetForSmartSkip()) return 0.0f;
+  const int moisturePct = moisturePercent();
+  if (moisturePct >= 0 && moisturePct >= moistureSkipThresholdPct) return 0.0f;
 
   // Opt-out bypasses runtime adjustments, but keeps rain and wet-soil skip protection.
   if (z >= 0 && z < MAX_ZONES && smartZoneMode[z] == 1) return 1.0f;
@@ -2020,9 +2028,9 @@ static float smartFactorForZone(int z) {
                                      custom ? smartZoneVeryHotPct[z] : smartVeryHotAdjustPct);
   float factor = (100.0f + pct) / 100.0f * smartSeasonalPct / 100.0f;
 
-  if (actualRain24h > 0.0f && actualRain24h <= smartActualRainSkipMm) {
-    factor *= (100.0f + smartLightRainAdjustPct) / 100.0f;
-  }
+  factor *= (100.0f - smartActualRainReductionPct(actualRain24h)) / 100.0f;
+  // A valid 0% wet reading leaves runtime unchanged; 36% wet keeps 64%.
+  if (moisturePct >= 0) factor *= (100.0f - constrain(moisturePct, 0, 100)) / 100.0f;
   return constrain(factor, 0.0f, 1.0f + smartMaximumIncreasePct / 100.0f);
 }
 
@@ -7362,6 +7370,9 @@ void handleRoot() {
   // full-width tiles. The status badge already carries the delay cause.
   html += F("@media(max-width:480px){.next-card{gap:9px}.next-card .summary-meta.status-pills{grid-template-columns:repeat(2,minmax(0,1fr));gap:6px}.next-card .status-pills .badge{min-width:0;padding:7px 8px;overflow:hidden}.next-card .status-pills .badge b{display:block;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.next-card .summary-metric-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}.next-card .metric-wide{grid-column:1/-1}.next-card .delay-cause-tile{display:none}.next-card .metric-tile{min-height:66px;padding:9px 10px;gap:5px}.next-card .metric-k{font-size:.66rem;letter-spacing:.08em}.next-card .metric-v{font-size:.96rem}.next-card .summary-support{font-size:.76rem}.next-card .summary-note{margin-top:0;padding:9px 10px;font-size:.78rem;line-height:1.4}.next-card .smart-extra{display:none}}");
   html += F("@media(max-width:350px){.next-card .status-pills .badge{font-size:.7rem;padding-inline:6px}}");
+  // Keep the key watering signals visible without opening the detailed summary.
+  html += F(".dash-metrics{grid-template-columns:repeat(3,minmax(0,1fr));gap:1px;background:var(--line)}.dash-metric{border:0}.dash-metric-v{font-variant-numeric:tabular-nums}.dash-metric-sub{white-space:normal;overflow:visible;text-overflow:clip}.dash-metric-signal .dash-metric-v{color:var(--primary)}");
+  html += F("@media(max-width:760px){.dash-metrics{grid-template-columns:repeat(2,minmax(0,1fr))}.dash-metric:nth-child(n){border:0}}@media(max-width:360px){.dash-metric{padding:8px 6px}.dash-metric-k{font-size:.6rem}.dash-metric-v{font-size:.88rem}}");
   html += F("</style></head><body>");
   flush();
 
@@ -7412,8 +7423,15 @@ void handleRoot() {
   html += F("</span><span id='heroWeatherTrend' style='font-weight:900;'>&rarr;</span></span><span class='dash-metric-sub' id='heroWeatherSub'>");
   html += cond;
   html += F("</span></div>");
+  html += F("<div class='dash-metric dash-metric-signal'><span class='dash-metric-k'>Rain in 24h</span><span class='dash-metric-v'><span id='heroRain24h'>");
+  html += String(last24hActualRain(), 1);
+  html += F("</span> mm</span><span class='dash-metric-sub'>Actual rainfall</span></div>");
+  html += F("<div class='dash-metric dash-metric-signal'><span class='dash-metric-k'>Smart Watering</span><span class='dash-metric-v' id='heroSmartFactor'>");
+  html += String(smartWateringEnabled ? (int)lroundf(smartWateringFactor() * 100.0f) : 100);
+  html += F("%</span><span class='dash-metric-sub' id='heroSmartSub'>");
+  html += smartWateringEnabled ? F("Global runtime factor") : F("Disabled");
+  html += F("</span></div>");
   html += F("</div></section></div>");
-  html += F("<div class='wrap'><div class='dash-nav glass'><a href='#summary-section'>Summary</a><a href='#schedules-section'>Schedules</a><a href='#zones-section'>Zones</a><a href='#controls-section'>Controls</a></div></div>");
 
   // --- Summary cards ---
   html += F("<div class='wrap section-block' id='summary-section'><div class='section-head collapsible-section-head'><div class='section-head-copy'><div class='section-kicker'>Overview</div><h2>Controller summary</h2><p class='section-summary'>Live weather, delays and the next scheduled watering.</p></div>");
@@ -7812,7 +7830,7 @@ function updateDaylightCards(st){
   html += F("var acc1h=document.getElementById('acc1h');");
   html += F("if(acc1h){var v=(typeof st.rain1hNow==='number')?st.rain1hNow:NaN;acc1h.textContent=isNaN(v)?'--':v.toFixed(1);}");
   html += F("const forecastRain=document.getElementById('forecastRainChip');if(forecastRain){const v=st.forecastRain24h;forecastRain.textContent=(typeof v==='number'&&Number.isFinite(v))?v.toFixed(1)+' mm':'--';}");
-  html += F("const acc24=document.getElementById('acc24'); if(acc24){ const v=(typeof st.rain24hActual==='number')?st.rain24hActual:(typeof st.rain24h==='number'?st.rain24h:NaN); acc24.textContent=isNaN(v)?'--':v.toFixed(1);} ");
+  html += F("const acc24=document.getElementById('acc24'); const heroRain24h=document.getElementById('heroRain24h'); const rain24h=(typeof st.rain24hActual==='number')?st.rain24hActual:(typeof st.rain24h==='number'?st.rain24h:NaN); if(acc24)acc24.textContent=Number.isFinite(rain24h)?rain24h.toFixed(1):'--'; if(heroRain24h)heroRain24h.textContent=Number.isFinite(rain24h)?rain24h.toFixed(1):'--';");
 
   html += F("let activeCount=0; if(Array.isArray(st.zones)){ st.zones.forEach((z,idx)=>{");
   html += F("if(z.active){ activeCount++; }");
@@ -7868,6 +7886,7 @@ function updateDaylightCards(st){
   html += F("(function(){ const note=document.getElementById('smartNote'); const status=document.getElementById('smartStatusText'); const factor=document.getElementById('smartFactorText'); const skip=document.getElementById('smartSkipText'); const moisture=document.getElementById('smartMoistureText');");
   html += F("const enabled=!!st.smartWatering; const pct=(typeof st.smartFactor==='number')?Math.round(st.smartFactor*100):100;");
   html += F("if(note) note.classList.toggle('is-disabled',!enabled); if(status) status.textContent=enabled?'Enabled':'Disabled'; if(factor) factor.textContent=(enabled?pct:100)+'%';");
+  html += F("const heroFactor=document.getElementById('heroSmartFactor');const heroSub=document.getElementById('heroSmartSub');if(heroFactor)heroFactor.textContent=(enabled?pct:100)+'%';if(heroSub)heroSub.textContent=enabled?'Global runtime factor':'Disabled';");
   html += F("if(skip) skip.textContent=(enabled&&pct<=0)?' - global rules skip starts; zone overrides may differ':'';");
   html += F("if(moisture){ if(!st.moistureEnabled) moisture.textContent='Disabled'; else if(typeof st.moisturePct!=='number'||st.moisturePct<0) moisture.textContent='No valid reading'; else moisture.textContent=Math.round(st.moisturePct)+(st.moistureSource==='meteo'?'% water volume (Open-Meteo 0-1 cm)':'% wet')+(st.moistureSkip?' - skip active':''); }");
   html += F("})();");
@@ -8222,11 +8241,13 @@ void handleSetupPage() {
   html += F("<div class='setup-badge'><div class='setup-badge-k'>Forecast Model</div><div class='setup-badge-v'>"); html += setupModelLabel; html += F("</div></div>");
   html += F("</div></div>");
   html += F("<style>#setupForm{display:flex;flex-direction:column}.card.narrow{width:300mm;max-width:100%;align-self:center}#setupForm>.setup-nav{order:0}#setupForm>.setup-actions-top{order:1}#smart-card{order:10}#delays-card{order:20}#no-water-card{order:25}#weather-card{order:30}#tank-card{order:40}#rain-card{order:50}#timezone-card{order:60}#pins-card{order:70}#i2c-card{order:80}#buttons-card{order:90}#display-card{order:100}#advanced-card{order:110}#schedule-html-card{order:120}#mqtt-card{order:130}#ota-card{order:140}#scheduleHtmlCss{max-width:none;min-height:220px;resize:vertical;font:13px/1.45 ui-monospace,SFMono-Regular,Consolas,monospace}</style>");
+  html += F("<style>#setupForm>.setup-nav{flex-wrap:nowrap;overflow-x:auto;overscroll-behavior-inline:contain;scrollbar-width:thin;scroll-snap-type:x proximity}#setupForm>.setup-nav a{flex:0 0 auto;display:inline-flex;align-items:center;min-height:38px;white-space:nowrap;scroll-snap-align:start}.setup-nav a:focus-visible,.setup-more>summary:focus-visible{outline:2px solid var(--setup-blue);outline-offset:2px}#setupForm>.setup-actions-top{display:grid;grid-template-columns:auto auto 1fr;align-items:start}.setup-more{justify-self:end;min-width:0}.setup-more>summary{display:inline-flex;align-items:center;min-height:38px;cursor:pointer;list-style:none}.setup-more>summary::-webkit-details-marker{display:none}.setup-more>summary:after{content:' \\25BE';margin-left:8px}.setup-more[open]>summary:after{transform:rotate(180deg)}.setup-more-menu{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:6px;padding-top:7px}.setup-more-menu .btn,.setup-more-menu .btn-alt{white-space:normal;text-align:center}.setup-actions-top .save-confirm.show{grid-column:1/-1;margin:0}@media(max-width:600px){#setupForm>.setup-actions-top{grid-template-columns:repeat(2,minmax(0,1fr))}#setupForm>.setup-actions-top>.btn,#setupForm>.setup-actions-top>.btn-alt{width:100%;min-width:0;min-height:42px}.setup-more{grid-column:1/-1;justify-self:stretch}.setup-more>summary{display:flex;justify-content:center;width:100%}.setup-more-menu{display:grid;grid-template-columns:repeat(2,minmax(0,1fr))}.setup-more-menu .btn,.setup-more-menu .btn-alt{min-width:0;width:100%;min-height:42px}.setup-badges{grid-template-columns:repeat(2,minmax(0,1fr))}}@media(max-width:380px){.setup-more-menu{grid-template-columns:1fr}}</style>");
+  html += F("<style>.setup-more{width:100%;max-width:100%}.setup-more>summary{width:max-content;margin-left:auto}@media(max-width:600px){.setup-more>summary{width:100%}}</style>");
+  html += F("<style>#setupForm>.setup-actions-top{grid-template-columns:repeat(3,minmax(0,1fr));position:relative;margin-bottom:4px}#setupForm>.setup-actions-top>.btn,#setupForm>.setup-actions-top>.btn-alt,#setupForm .setup-more>summary{display:flex;align-items:center;justify-content:center;box-sizing:border-box;width:100%;min-width:0;min-height:42px;margin:0;padding:8px 10px;font-size:.82rem;line-height:1.2;text-align:center}.setup-more{position:relative;grid-column:auto;justify-self:stretch}.setup-more-menu{position:absolute;z-index:12;top:calc(100% + 6px);right:0;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));width:min(480px,calc(100vw - 32px));padding:10px;border:1px solid var(--setup-line);border-radius:8px;background:var(--setup-panel);box-shadow:0 12px 28px rgba(0,0,0,.2)}@media(max-width:420px){.setup-more-menu{grid-template-columns:1fr}}@media(max-width:360px){#setupForm>.setup-actions-top>.btn,#setupForm>.setup-actions-top>.btn-alt,#setupForm .setup-more>summary{padding:8px 5px;font-size:.74rem}}</style>");
   html += F("<form id='setupForm' action='/configure' method='POST' novalidate>");
-  html += F("<div class='setup-nav'><a href='#smart-card'>Smart Watering</a><a href='#delays-card'>Delays &amp; Pause</a><a href='#no-water-card'>No-Watering Periods</a><a href='#weather-card'>Forecast</a><a href='#tank-card'>Water &amp; Tank</a><a href='#rain-card'>Rain Inputs</a><a href='#timezone-card'>Timezone</a><a href='#pins-card'>GPIO</a><a href='#i2c-card'>I2C</a><a href='#buttons-card'>Buttons</a><a href='#display-card'>Display</a><a href='#advanced-card'>TFT Pins</a><a href='#schedule-html-card'>Schedule CSS</a><a href='#mqtt-card'>MQTT</a><a href='#ota-card'>Firmware</a></div>");
-  html += F("<div class='setup-actions-top'><button class='btn' type='submit' id='btn-save-setup'>Save Changes</button><a class='btn-alt' href='/'>Home</a><a class='btn-alt' href='https://numerik11.github.io/ESP32-Irrigation-Controller/web-flasher/?current=");
+  html += F("<div class='setup-actions-top'><button class='btn' type='submit' id='btn-save-setup'>Save Changes</button><a class='btn-alt' href='/'>Home</a><details class='setup-more'><summary class='btn-alt'>More actions</summary><div class='setup-more-menu'><a class='btn-alt' href='https://numerik11.github.io/ESP32-Irrigation-Controller/web-flasher/?current=");
   html += kFirmwareVersion;
-  html += F("' target='_blank' rel='noopener'>Web Flasher</a><a class='btn-alt' href='/update'>Browser OTA</a><button class='btn-alt' type='button' id='btn-clear-cooldown'>Clear After-Rain Delay</button><button class='btn btn-danger' type='button' onclick=\"if(confirm('Reboot controller now?'))fetch('/reboot',{method:'POST'})\">Reboot</button><span class='save-confirm' id='save-confirm'>Saved</span></div>");
+  html += F("' target='_blank' rel='noopener'>Web Flasher</a><a class='btn-alt' href='/update'>Browser OTA</a><button class='btn-alt' type='button' id='btn-clear-cooldown'>Clear After-Rain Delay</button><button class='btn btn-danger' type='button' onclick=\"if(confirm('Reboot controller now?'))fetch('/reboot',{method:'POST'})\">Reboot</button></div></details><span class='save-confirm' id='save-confirm'>Saved</span></div>");
 
   // Tank (available for all modes; water source switching works with any zone count)
   html += F("<div class='card narrow' id='tank-card'><details class='collapse'><summary>Water Source & Tank</summary><div class='collapse-body'><p class='card-intro'>Control how the controller chooses between tank and mains and where the tank sensor is connected.</p>");
@@ -8360,8 +8381,7 @@ void handleSetupPage() {
   html += String(smartMinimumMin);
   html += F("'><small>Use 0 to apply the full runtime reduction. A minimum of 5 keeps a five-minute schedule at five minutes even when the Global Runtime Factor is lower.</small></div>");
   html += F("<div class='row'><label>Actual Rain Skip Above (mm)</label><input class='in-sm' type='number' step='0.1' min='0' max='200' name='smartActualRainMm' value='");
-  html += String(smartActualRainSkipMm, 1); html += F("'><small>Light-rain adjustment up to this amount (%)</small><input class='in-sm' type='number' min='-100' max='300' name='smartLightRainPct' value='");
-  html += String(smartLightRainAdjustPct); html += F("'></div>");
+  html += String(smartActualRainSkipMm, 1); html += F("'><small>Rolling 24-hour actual rain reduces the temperature-adjusted factor by 25% at 1 mm, 50% at 3 mm, and 75% at 5 mm. Rain above this skip limit prevents watering.</small></div>");
   html += F("<div class='row'><label>Forecast Rain Skip Above (mm)</label><input class='in-sm' type='number' step='0.1' min='0' max='200' name='smartForecastRainMm' value='");
   html += String(smartForecastRainSkipMm, 1); html += F("'><small>Forecast total for the next 24 hours</small></div>");
   html += F("</div>");
@@ -8369,7 +8389,7 @@ void handleSetupPage() {
   html += F("<div class='subhead'>Ground Moisture</div><hr class='hr'>");
   html += F("<div class='row switchline'><label>Enable Ground Moisture</label><input type='checkbox' name='moistureProbeEnabled' ");
   html += (moistureProbeEnabled ? "checked" : "");
-  html += F("><small>Wet soil can skip scheduled and manual starts</small></div>");
+  html += F("><small>A valid wetness reading reduces the Smart Watering factor; wet soil can also skip starts.</small></div>");
   html += F("<div class='row'><label>Moisture Source</label><select name='moistureSource'>");
   html += F("<option value='probe'"); html += (!moistureUseMeteo ? " selected" : ""); html += F(">Physical soil moisture probe</option>");
   html += F("<option value='meteo'"); html += (moistureUseMeteo ? " selected" : ""); html += F(">Open-Meteo Soil Moisture (0-1 cm)</option>");
@@ -8405,7 +8425,7 @@ void handleSetupPage() {
   html += F("'><small>Raw ADC value measured in wet soil</small></div>");
   html += F("<div class='row'><label>Moisture Skip Above (%)</label><input class='in-sm' type='number' min='0' max='100' name='moistureSkipPct' value='");
   html += String(moistureSkipThresholdPct);
-  html += F("'><small>Skip starts at or above this level. Open-Meteo uses volumetric water percentage.</small></div>");
+  html += F("'><small>Below this level, 0% wet leaves runtime unchanged and 36% wet reduces the temperature-and-rain factor by 36%. At or above this level, watering is skipped. Open-Meteo uses volumetric water percentage.</small></div>");
   html += F("</div>");
   html += F("</div></div></details></div>");
 
@@ -8802,8 +8822,8 @@ void handleSetupPage() {
   // quick-actions + timezone JS
   html += F("<script>");
   // Merge related sections without changing control names, IDs or form ownership.
-  html += F("[['smart-card','Watering & Delays',['delays-card']],['tank-card','Water & Rain',['rain-card']],['weather-card','Forecast & Time',['timezone-card']],['pins-card','Hardware & Buttons',['i2c-card','buttons-card']],['display-card','Display & TFT Pins',['advanced-card']]].forEach(([id,title,children])=>{const parent=document.getElementById(id);if(!parent)return;parent.querySelector('summary').textContent=title;const body=parent.querySelector('.collapse-body');children.forEach(childId=>{const child=document.getElementById(childId);if(!child)return;const heading=document.createElement('h3');heading.textContent=child.querySelector('summary').textContent;const content=child.querySelector('.collapse-body');const section=document.createElement('section');section.id=childId;section.className='setup-merged';if(child.hasAttribute('data-tft-only'))section.setAttribute('data-tft-only','');section.append(heading);while(content.firstChild)section.append(content.firstChild);body.append(section);child.remove();document.querySelector('.setup-nav a[href=\\\"#'+childId+'\\\"]')?.remove();});const link=document.querySelector('.setup-nav a[href=\\\"#'+id+'\\\"]');if(link)link.textContent=title;});");
-  html += F("function revealSetupSection(){const id=location.hash.slice(1);const target=document.getElementById(id);if(!target||!target.closest('#setupForm'))return;let node=target;while(node){if(node.tagName==='DETAILS')node.open=true;node=node.parentElement;}const details=target.querySelector('details');if(details)details.open=true;target.scrollIntoView({block:'start'});}document.querySelector('.setup-nav').addEventListener('click',event=>{const link=event.target.closest('a');if(!link)return;event.preventDefault();history.replaceState(null,'',link.hash);revealSetupSection();});window.addEventListener('hashchange',revealSetupSection);if(location.hash)revealSetupSection();");
+  html += F("[['smart-card','Smart Watering And Weather Delays',['delays-card']],['tank-card','Tank and Rain Sensor Settings',['rain-card']],['weather-card','Set Forecast & Time',['timezone-card']],['pins-card','Set Pins(GPIO)',['i2c-card','buttons-card']],['display-card','Display & TFT Pins',['advanced-card']]].forEach(([id,title,children])=>{const parent=document.getElementById(id);if(!parent)return;parent.querySelector('summary').textContent=title;const body=parent.querySelector('.collapse-body');children.forEach(childId=>{const child=document.getElementById(childId);if(!child)return;const heading=document.createElement('h3');heading.textContent=child.querySelector('summary').textContent;const content=child.querySelector('.collapse-body');const section=document.createElement('section');section.id=childId;section.className='setup-merged';if(child.hasAttribute('data-tft-only'))section.setAttribute('data-tft-only','');section.append(heading);while(content.firstChild)section.append(content.firstChild);body.append(section);child.remove();document.querySelector('.setup-nav a[href=\\\"#'+childId+'\\\"]')?.remove();});const link=document.querySelector('.setup-nav a[href=\\\"#'+id+'\\\"]');if(link)link.textContent=title;});");
+  html += F("function revealSetupSection(){const id=location.hash.slice(1);const target=document.getElementById(id);if(!target||!target.closest('#setupForm'))return;let node=target;while(node){if(node.tagName==='DETAILS')node.open=true;node=node.parentElement;}const details=target.querySelector('details');if(details)details.open=true;target.scrollIntoView({block:'start'});}window.addEventListener('hashchange',revealSetupSection);if(location.hash)revealSetupSection();");
   html += F("async function post(path, body){try{await fetch(path,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body});}catch(e){console.error(e)}}");
   html += F("const g=id=>document.getElementById(id);");
   html += F("let setupTempUnit='"); html += temperatureUnitChar(); html += F("';const tempUnitSel=g('tempUnitSelect');");
@@ -9892,7 +9912,7 @@ void loadConfig() {
   if (nextTail(s) && s.length()) { float v=s.toFloat(); if (v >= -30.0f && v <= 60.0f) smartVeryHotTempC=v; }
   if (nextTail(s) && s.length()) { int v=s.toInt(); if (v >= -100 && v <= 300) smartVeryHotAdjustPct=v; }
   if (nextTail(s) && s.length()) { float v=s.toFloat(); if (v >= 0.0f && v <= 200.0f) smartActualRainSkipMm=v; }
-  if (nextTail(s) && s.length()) { int v=s.toInt(); if (v >= -100 && v <= 300) smartLightRainAdjustPct=v; }
+  nextTail(s); // Retired light-rain percentage; consume its slot for older config files.
   if (nextTail(s) && s.length()) { float v=s.toFloat(); if (v >= 0.0f && v <= 200.0f) smartForecastRainSkipMm=v; }
   if (nextTail(s) && s.length()) tempUseFahrenheit = (s.toInt() == 1);
   // NEW: ground moisture probe for Smart Watering (optional trailing lines)
@@ -10095,7 +10115,7 @@ void saveConfig() {
   f.println(String(smartVeryHotTempC, 2));
   f.println(smartVeryHotAdjustPct);
   f.println(String(smartActualRainSkipMm, 2));
-  f.println(smartLightRainAdjustPct);
+  f.println(0); // Preserve the retired light-rain slot in the config format.
   f.println(String(smartForecastRainSkipMm, 2));
   f.println(tempUseFahrenheit ? 1 : 0);
   // NEW: ground moisture probe for Smart Watering
@@ -10197,7 +10217,7 @@ void handleConfigure() {
   };
   bool smartValid=true;
   const bool smartF=server.hasArg("tempUnit") ? server.arg("tempUnit")=="F" : tempUseFahrenheit;
-  const char* pctFields[]={"smartCoolPct","smartHotPct","smartVeryHotPct","smartLightRainPct"};
+  const char* pctFields[]={"smartCoolPct","smartHotPct","smartVeryHotPct"};
   for (const char* name : pctFields) smartValid &= validSmartNumber(name,-100,300,true);
   smartValid &= validSmartNumber("smartTempBasis",0,2,true);
   smartValid &= validSmartNumber("smartMinimumMin",0,1440,true);
@@ -10382,10 +10402,6 @@ void handleConfigure() {
   if (server.hasArg("smartActualRainMm")) {
     float v = server.arg("smartActualRainMm").toFloat();
     if (v >= 0.0f && v <= 200.0f) smartActualRainSkipMm = v;
-  }
-  if (server.hasArg("smartLightRainPct")) {
-    int v = server.arg("smartLightRainPct").toInt();
-    if (v >= -100 && v <= 300) smartLightRainAdjustPct = v;
   }
   if (server.hasArg("smartForecastRainMm")) {
     float v = server.arg("smartForecastRainMm").toFloat();

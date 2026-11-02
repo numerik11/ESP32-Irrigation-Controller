@@ -48,12 +48,41 @@ function firmware(overrides={}){
     smartCoolAdjustPct:-50,smartHotAdjustPct:25,smartVeryHotAdjustPct:50,
     smartSeasonalPct:100,smartMaximumIncreasePct:100,smartMinimumMin:5,
     smartZoneMode:[0,1,2],smartZoneCoolPct:[0,0,-10],smartZoneHotPct:[0,0,30],smartZoneVeryHotPct:[0,0,60],
-    rainNext24h_mm:0,smartActualRainSkipMm:5,smartForecastRainSkipMm:5,smartLightRainAdjustPct:-30,
-    last24hActualRain:()=>0,isSoilWetForSmartSkip:()=>false,durationForSlot:()=>1800,
+    rainNext24h_mm:0,smartActualRainSkipMm:5,smartForecastRainSkipMm:5,
+    last24hActualRain:()=>0,moisturePercent:()=>-1,moistureSkipThresholdPct:70,durationForSlot:()=>1800,
     constrain:(v,a,b)=>Math.min(b,Math.max(a,v)),...overrides};
   return compileFirmwareFunctions(source,['smartWateringReferenceTempC','smartRuleForTemperature','smartCurrentRule',
-    'smartRuleAdjustment','smartFactorForZone','smartWateringFactor','smartLimitRuntime','smartWateringDurationForSlot'],state);
+    'smartRuleAdjustment','smartActualRainReductionPct','smartFactorForZone','smartWateringFactor','smartLimitRuntime','smartWateringDurationForSlot'],state);
 }
+
+test('rolling 24-hour rain tiers combine with temperature in the global factor',()=>{
+  const actualRain={mm:0};
+  const app=firmware({todayMax_C:20,smartMinimumMin:0,last24hActualRain:()=>actualRain.mm});
+  const cases=[[0,1],[0.9,1],[1,0.75],[2.9,0.75],[3,0.5],[4.9,0.5],[5,0.25],[5.1,0]];
+  for(const [mm,expected] of cases){
+    actualRain.mm=mm;
+    assert.equal(app.smartWateringFactor(),expected,`${mm} mm global factor`);
+    assert.equal(app.smartWateringDurationForSlot(0,1),Math.round(1800*expected),`${mm} mm runtime`);
+  }
+  actualRain.mm=3;
+  assert.equal(firmware({todayMax_C:34.2,last24hActualRain:()=>actualRain.mm}).smartWateringFactor(),0.625,
+    '25% hot temperature adjustment followed by 50% rain reduction');
+});
+
+test('selected ground moisture scales the global factor and wet soil still skips',()=>{
+  const wetness={pct:0};
+  const app=firmware({todayMax_C:20,smartMinimumMin:0,moisturePercent:()=>wetness.pct});
+  for(const [pct,expected] of [[-1,1],[0,1],[36,0.64],[69,0.31],[70,0]]){
+    wetness.pct=pct;
+    assert.ok(Math.abs(app.smartWateringFactor()-expected)<1e-6,`${pct}% wet global factor`);
+    assert.equal(app.smartWateringDurationForSlot(0,1),Math.round(1800*expected),`${pct}% wet runtime`);
+  }
+  wetness.pct=36;
+  assert.equal(firmware({todayMax_C:34.2,last24hActualRain:()=>3,moisturePercent:()=>wetness.pct}).smartWateringFactor(),0.4,
+    'temperature, rain and moisture reductions combine');
+  assert.equal(firmware({todayMax_C:20,moisturePercent:()=>36}).smartWateringDurationForSlot(1,1),1800,
+    'zone runtime opt-out still bypasses reductions below the skip threshold');
+});
 
 test('selected temperature source, explicit missing forecast, and legacy fallback',()=>{
   assert.equal(firmware().smartWateringReferenceTempC(),34.2);
@@ -91,7 +120,7 @@ test('zone opt-out and custom rules, seasonal scaling, and skip priority',()=>{
   assert.equal(firmware({smartSeasonalPct:200}).smartWateringDurationForSlot(0,1),3600);
   assert.equal(firmware({smartSeasonalPct:0}).smartWateringDurationForSlot(0,1),0);
   for(const z of [0,1,2]){
-    assert.equal(firmware({isSoilWetForSmartSkip:()=>true}).smartWateringDurationForSlot(z,1),0);
+    assert.equal(firmware({moisturePercent:()=>70}).smartWateringDurationForSlot(z,1),0);
     assert.equal(firmware({last24hActualRain:()=>6}).smartWateringDurationForSlot(z,1),0);
     assert.equal(firmware({rainNext24h_mm:6}).smartWateringDurationForSlot(z,1),0);
     assert.equal(firmware({smartWateringEnabled:false}).smartWateringDurationForSlot(z,1),1800);
