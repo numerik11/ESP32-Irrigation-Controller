@@ -7,7 +7,7 @@
 
 # 🌱 ESP32 Irrigation: 1–16 Zone irrigation control
 
-A flexible, locally controlled irrigation system for **1–16 solenoid valves**. It combines per-zone scheduling, weather-aware delays, optional tank/mains switching, sensor support, MQTT, and a responsive web dashboard.
+A flexible, locally controlled irrigation system for **1–16 solenoid valves**. It combines per-zone scheduling, optional weather-aware delays, optional tank/mains switching, sensor support, MQTT, and a responsive web dashboard.
 
 Schedules run on the controller, so watering continues even when the internet is unavailable.
 
