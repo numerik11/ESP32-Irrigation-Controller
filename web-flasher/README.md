@@ -11,6 +11,12 @@ Goto: https://numerik11.github.io/ESP32-Irrigation-Controller/web-flasher/
 
 ## Use
 
+### Version 3.3.2: TFT refresh recovery
+
+Before each full-screen TFT redraw, the controller restores normal color
+inversion and the configured rotation. This can recover display registers
+disturbed by flyback noise without rebooting the controller.
+
 ### Version 3.3.1: Smart Watering and page layout
 
 Smart Watering now combines temperature, actual rainfall from the previous 24
@@ -83,6 +89,10 @@ After rebuilding firmware, copy the generated files from `.pio/build/<env>/` int
 - `bootloader.bin`
 - `partitions.bin`
 - `firmware.bin`
+
+The published ESP32-S3 installer uses the 4 MB `min_spiffs.csv` OTA partition
+layout and DIO flash mode. Build its image with those settings so the firmware,
+bootloader, and partition table match the manifest.
 
 Also include `boot_app0.bin` from:
 

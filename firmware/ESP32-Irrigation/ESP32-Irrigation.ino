@@ -57,7 +57,7 @@ extern "C" {
 // ---------- Hardware ----------
 static const char kFirmwareSignature[] __attribute__((used)) =
   "Original author: Beau Kaczmarek - https://github.com/numerik11/ESP32-Irrigation-Controller";
-static const char kFirmwareVersion[] = "3.3.1";
+static const char kFirmwareVersion[] = "3.3.2";
 static const char kFirmwareBuildDate[] = __DATE__ " " __TIME__;
 static const char kUpdateReportUrl[] =
   "https://irrigation-update-counter.beaukacz86.workers.dev/v1/report";
@@ -131,6 +131,14 @@ static int16_t tftPanelHeight = TFT_H_DEFAULT;
 static uint8_t tftRotation = 0; // ST7789 rotation: 0..3
 
 Adafruit_ST7789 tft = Adafruit_ST7789(&SPI, -1, -1, -1);
+
+// Reassert panel registers before a full-screen repaint. Electrical noise from
+// the flyback can change them while the ESP32's cached rotation stays intact.
+static inline void tftRefreshAndFillScreen(uint16_t color) {
+  tft.invertDisplay(false);
+  tft.setRotation(tftRotation);
+  tft.fillScreen(color);
+}
 
 // ---------- OLED ----------
 #define SCREEN_ADDRESS 0x3C
@@ -2667,9 +2675,8 @@ static bool initTftDisplay() {
   SPI.begin(tftSclkPin, -1, tftMosiPin, tftCsPin);
   tftInitBacklightPwm();
   tft.init(tftPanelWidth, tftPanelHeight);
-  tft.setRotation(tftRotation);
   tft.setTextWrap(false);
-  tft.fillScreen(C_BG);
+  tftRefreshAndFillScreen(C_BG);
   tftBacklight(true);
   markTftScreensDirty();
   return true;
@@ -2679,7 +2686,7 @@ static void showTftBootSplash() {
   if (!displayEnabled || !displayUseTft) return;
   const int H = tft.height();
   const int titleSize = (tft.width() >= 300) ? 3 : 2;
-  tft.fillScreen(C_BG);
+  tftRefreshAndFillScreen(C_BG);
   tftPrintCentered("Irrigation", max(8, H / 8), titleSize, C_ACCENT);
   tftPrintCentered("AP: ESPIrrigationAP", max(44, H / 3), 1, C_TEXT);
   tftPrintCentered("http://192.168.4.1", max(62, H / 3 + 18), 1, C_MUTED);
@@ -2688,7 +2695,7 @@ static void showTftBootSplash() {
 static void showTftConnectedScreen() {
   if (!displayEnabled || !displayUseTft) return;
   const int H = tft.height();
-  tft.fillScreen(C_BG);
+  tftRefreshAndFillScreen(C_BG);
   tftPrintCentered("Connected", max(8, H / 10), (tft.width() >= 300) ? 3 : 2, C_ACCENT);
   tftPrintCentered("IP " + WiFi.localIP().toString(), max(42, H / 3), 1, C_TEXT);
   tftPrintCentered("espirrigation.local", max(60, H / 3 + 18), 1, C_MUTED);
@@ -3827,10 +3834,10 @@ void setup() {
 
     tftInitBacklightPwm();
 
-    tft.fillScreen(ST77XX_RED);   delay(120);
-    tft.fillScreen(ST77XX_GREEN); delay(120);
-    tft.fillScreen(ST77XX_BLUE);  delay(120);
-    tft.fillScreen(ST77XX_BLACK);
+    tftRefreshAndFillScreen(ST77XX_RED);   delay(120);
+    tftRefreshAndFillScreen(ST77XX_GREEN); delay(120);
+    tftRefreshAndFillScreen(ST77XX_BLUE);  delay(120);
+    tftRefreshAndFillScreen(ST77XX_BLACK);
     tft.setTextColor(ST77XX_WHITE, ST77XX_BLACK);
     tft.setTextSize(2);
     tft.setCursor(10, 10);
@@ -4110,7 +4117,7 @@ void loop() {
     if (!displayEnabled) {
       // No display to clear.
     } else if (displayUseTft) {
-      tft.fillScreen(C_BG);
+      tftRefreshAndFillScreen(C_BG);
     } else {
       display.clearDisplay();
       display.display();
@@ -4336,7 +4343,7 @@ void drawManualSelection() {
   }
 
   if (layoutChanged) {
-    tft.fillScreen(C_BG);
+    tftRefreshAndFillScreen(C_BG);
     drawTopBar("Manual", "BTN", C_ACCENT);
 
     int cardW = W - 24;
@@ -5371,7 +5378,7 @@ void updateLCDForZone(int zone) {
   int barH = 16;
 
   if (layoutChanged) {
-    tft.fillScreen(C_BG);
+    tftRefreshAndFillScreen(C_BG);
     lastRunRemBuf[0] = '\0';
     lastRunElapsedBuf[0] = '\0';
     lastRunTotalBuf[0] = '\0';
@@ -5564,7 +5571,7 @@ void RainScreen(){
 
   bool layoutChanged = (!init || lastW != W || lastH != H);
   if (layoutChanged) {
-    tft.fillScreen(C_BG);
+    tftRefreshAndFillScreen(C_BG);
     lastW = W;
     lastH = H;
     init = true;
@@ -5934,7 +5941,7 @@ void HomeScreen() {
     int headerH = 24;
 
     if (fullRedraw) {
-      tft.fillScreen(C_BG);
+      tftRefreshAndFillScreen(C_BG);
       modernInit = true;
       lastW = W;
       lastH = H;
@@ -6309,7 +6316,7 @@ void HomeScreen() {
     const int envH = max(48, H - envY - 8);
 
     if (fullRedraw) {
-      tft.fillScreen(C_BG);
+      tftRefreshAndFillScreen(C_BG);
       portraitInit = true;
       lastW = W;
       lastH = H;
@@ -6790,7 +6797,7 @@ bool turnOnValveManual(int z, String* error) {
   g_forceRunReset = true;
   lastScreenRefresh = 0;
   if (displayEnabled && displayUseTft) {
-    tft.fillScreen(C_BG);
+    tftRefreshAndFillScreen(C_BG);
     updateLCDForZone(z);
   } else {
     HomeScreen();
@@ -6841,7 +6848,7 @@ void turnOffValveManual(int z) {
     (manualScreenUntilMs != 0 && (int32_t)(manualScreenUntilMs - millis()) > 0);
 
   if (displayEnabled && displayUseTft) {
-    tft.fillScreen(C_BG);
+    tftRefreshAndFillScreen(C_BG);
     g_forceRunReset = true;
     if (!manualOverlayActive) g_forceHomeReset = true;
   } else if (displayEnabled) {
