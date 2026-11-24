@@ -11,11 +11,15 @@ Goto: https://numerik11.github.io/ESP32-Irrigation-Controller/web-flasher/
 
 ## Use
 
+### Version 3.3.3: ST7789 color correction
+
+The self-healing redraw now restores the ST7789's inversion-on setting used by
+the display library, so normal colors return after each full-screen refresh.
+
 ### Version 3.3.2: TFT refresh recovery
 
-Before each full-screen TFT redraw, the controller restores normal color
-inversion and the configured rotation. This can recover display registers
-disturbed by flyback noise without rebooting the controller.
+Introduced inversion and rotation register refresh before each full-screen TFT
+redraw. Version 3.3.3 corrects the ST7789 inversion setting used here.
 
 ### Version 3.3.1: Smart Watering and page layout
 

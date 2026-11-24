@@ -57,7 +57,7 @@ extern "C" {
 // ---------- Hardware ----------
 static const char kFirmwareSignature[] __attribute__((used)) =
   "Original author: Beau Kaczmarek - https://github.com/numerik11/ESP32-Irrigation-Controller";
-static const char kFirmwareVersion[] = "3.3.2";
+static const char kFirmwareVersion[] = "3.3.3";
 static const char kFirmwareBuildDate[] = __DATE__ " " __TIME__;
 static const char kUpdateReportUrl[] =
   "https://irrigation-update-counter.beaukacz86.workers.dev/v1/report";
@@ -135,7 +135,7 @@ Adafruit_ST7789 tft = Adafruit_ST7789(&SPI, -1, -1, -1);
 // Reassert panel registers before a full-screen repaint. Electrical noise from
 // the flyback can change them while the ESP32's cached rotation stays intact.
 static inline void tftRefreshAndFillScreen(uint16_t color) {
-  tft.invertDisplay(false);
+  tft.invertDisplay(true);
   tft.setRotation(tftRotation);
   tft.fillScreen(color);
 }
