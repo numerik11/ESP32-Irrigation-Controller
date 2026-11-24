@@ -11,6 +11,13 @@ Goto: https://numerik11.github.io/ESP32-Irrigation-Controller/web-flasher/
 
 ## Use
 
+### Latest 3.3.3 build: Setup section Save buttons
+
+Each Setup section now has a Save Changes button at the bottom. The Home page
+no longer shows the four redundant section headings, and Setup uses Timezone in
+place of Time. This keeps version 3.3.3; reinstall it to get these changes if
+you already installed an older 3.3.3 build.
+
 ### Version 3.3.3: ST7789 color correction
 
 The self-healing redraw now restores the ST7789's inversion-on setting used by

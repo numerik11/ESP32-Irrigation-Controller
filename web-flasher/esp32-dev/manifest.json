@@ -7,19 +7,19 @@
       "chipFamily": "ESP32",
       "parts": [
         {
-          "path": "bootloader.bin?v=3.3.3-st7789-colors",
+          "path": "bootloader.bin?v=3.3.3-setup-save-buttons",
           "offset": 4096
         },
         {
-          "path": "partitions.bin?v=3.3.3-st7789-colors",
+          "path": "partitions.bin?v=3.3.3-setup-save-buttons",
           "offset": 32768
         },
         {
-          "path": "boot_app0.bin?v=3.3.3-st7789-colors",
+          "path": "boot_app0.bin?v=3.3.3-setup-save-buttons",
           "offset": 57344
         },
         {
-          "path": "firmware.bin?v=3.3.3-st7789-colors",
+          "path": "firmware.bin?v=3.3.3-setup-save-buttons",
           "offset": 65536
         }
       ]

@@ -7441,7 +7441,7 @@ void handleRoot() {
   html += F("</div></section></div>");
 
   // --- Summary cards ---
-  html += F("<div class='wrap section-block' id='summary-section'><div class='section-head collapsible-section-head'><div class='section-head-copy'><div class='section-kicker'>Overview</div><h2>Controller summary</h2><p class='section-summary'>Live weather, delays and the next scheduled watering.</p></div>");
+  html += F("<div class='wrap section-block' id='summary-section'><div class='section-head collapsible-section-head'><div class='section-head-copy'><div class='section-kicker'>Overview</div><p class='section-summary'>Live weather, delays and the next scheduled watering.</p></div>");
   html += F("<button class='btn btn-secondary collapse-toggle' type='button' id='summaryToggle' aria-controls='summaryBody' aria-expanded='false'>Show Summary</button></div>");
   html += F("<div id='summaryBody' class='glass section summary-shell' style='display:none'><div class='grid summary-grid'>");
 
@@ -7537,7 +7537,7 @@ void handleRoot() {
     }
     return String(v);
   };
-  html += F("<div class='wrap section-block' id='schedules-section'><div class='section-head'><div><div class='section-kicker'>Scheduling</div><h2>Zone schedules</h2></div>");
+  html += F("<div class='wrap section-block' id='schedules-section'><div class='section-head'><div><div class='section-kicker'>Scheduling</div></div>");
   html += F("<p class='section-note'></p></div>");
   html += F("<div class='card sched sched-shell'><div class='sched-top'><div class='sched-top-copy'><div class='section-kicker'>Planner</div><h3>Weekly schedule editor</h3><p>Set watering days, start times and run duration for each zone.</p></div>");
   html += F("<div class='sched-tools'><button class='btn btn-secondary collapse-toggle' type='button' id='schedToggle' aria-controls='schedBody' aria-expanded='false'>Show Schedules</button><button class='btn' id='btn-save-all' title='Save all zone schedules'>Save All</button></div></div>");
@@ -7636,7 +7636,7 @@ void handleRoot() {
   flush();
 
   // --- Live Zones ---
-  html += F("<div class='wrap section-block' id='zones-section'><div class='section-head'><div><div class='section-kicker'>Live Control</div><h2>Zone overview</h2></div>");
+  html += F("<div class='wrap section-block' id='zones-section'><div class='section-head'><div><div class='section-kicker'>Live Control</div></div>");
   html += F("<p class='section-note'></p></div>");
   html += F("<div class='card zones-shell'>");
 
@@ -7712,7 +7712,7 @@ void handleRoot() {
   flush();
 
   // --- System Controls ---
-  html += F("<div class='wrap section-block controls-shell' id='controls-section'><div class='section-head'><div><div class='section-kicker'>Actions</div><h2>Controller controls</h2></div>");
+  html += F("<div class='wrap section-block controls-shell' id='controls-section'><div class='section-head'><div><div class='section-kicker'>Actions</div></div>");
   html += F("<p class='section-note'></p></div>");
   html += F("<div class='action-grid'>");
   html += F("<div class='card action-card'><div class='action-copy'><h3>Quick Actions</h3><p>Clear active delays, resume automation, or restart the controller.</p></div><div class='toolbar'><button class='btn btn-secondary' id='btn-clear-delays'>Clear Delays</button><button class='btn btn-secondary' id='btn-resume'>Resume</button><button class='btn btn-danger' id='rebootBtn'>Reboot</button></div></div>");
@@ -8243,16 +8243,17 @@ void handleSetupPage() {
   html += F("<div class='setup-badge'><div class='setup-badge-k'>Zone Count</div><div class='setup-badge-v'>"); html += String(zonesCount); html += F(" configured</div></div>");
   html += F("<div class='setup-badge'><div class='setup-badge-k'>Display</div><div class='setup-badge-v'>"); html += setupDisplayLabel; html += F("</div></div>");
   html += F("<div class='setup-badge'><div class='setup-badge-k'>Water Source</div><div class='setup-badge-v'>"); html += setupTankLabel; html += F("</div></div>");
-  html += F("<div class='setup-badge'><div class='setup-badge-k'>Time Mode</div><div class='setup-badge-v'>"); html += setupTzLabel; html += F("</div></div>");
+  html += F("<div class='setup-badge'><div class='setup-badge-k'>Timezone Mode</div><div class='setup-badge-v'>"); html += setupTzLabel; html += F("</div></div>");
   html += F("<div class='setup-badge'><div class='setup-badge-k'>Forecast Site</div><div class='setup-badge-v'>"); html += setupWeatherLabel; html += F("</div></div>");
   html += F("<div class='setup-badge'><div class='setup-badge-k'>Forecast Model</div><div class='setup-badge-v'>"); html += setupModelLabel; html += F("</div></div>");
   html += F("</div></div>");
   html += F("<style>#setupForm{display:flex;flex-direction:column}.card.narrow{width:300mm;max-width:100%;align-self:center}#setupForm>.setup-nav{order:0}#setupForm>.setup-actions-top{order:1}#smart-card{order:10}#delays-card{order:20}#no-water-card{order:25}#weather-card{order:30}#tank-card{order:40}#rain-card{order:50}#timezone-card{order:60}#pins-card{order:70}#i2c-card{order:80}#buttons-card{order:90}#display-card{order:100}#advanced-card{order:110}#schedule-html-card{order:120}#mqtt-card{order:130}#ota-card{order:140}#scheduleHtmlCss{max-width:none;min-height:220px;resize:vertical;font:13px/1.45 ui-monospace,SFMono-Regular,Consolas,monospace}</style>");
+  html += F("<style>.setup-card-save{display:flex;justify-content:flex-end;border-top:1px solid var(--setup-line);margin-top:18px;padding-top:14px}.setup-card-save .btn{min-width:160px}@media(max-width:760px){.setup-card-save .btn{width:100%}}</style>");
   html += F("<style>#setupForm>.setup-nav{flex-wrap:nowrap;overflow-x:auto;overscroll-behavior-inline:contain;scrollbar-width:thin;scroll-snap-type:x proximity}#setupForm>.setup-nav a{flex:0 0 auto;display:inline-flex;align-items:center;min-height:38px;white-space:nowrap;scroll-snap-align:start}.setup-nav a:focus-visible,.setup-more>summary:focus-visible{outline:2px solid var(--setup-blue);outline-offset:2px}#setupForm>.setup-actions-top{display:grid;grid-template-columns:auto auto 1fr;align-items:start}.setup-more{justify-self:end;min-width:0}.setup-more>summary{display:inline-flex;align-items:center;min-height:38px;cursor:pointer;list-style:none}.setup-more>summary::-webkit-details-marker{display:none}.setup-more>summary:after{content:' \\25BE';margin-left:8px}.setup-more[open]>summary:after{transform:rotate(180deg)}.setup-more-menu{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:6px;padding-top:7px}.setup-more-menu .btn,.setup-more-menu .btn-alt{white-space:normal;text-align:center}.setup-actions-top .save-confirm.show{grid-column:1/-1;margin:0}@media(max-width:600px){#setupForm>.setup-actions-top{grid-template-columns:repeat(2,minmax(0,1fr))}#setupForm>.setup-actions-top>.btn,#setupForm>.setup-actions-top>.btn-alt{width:100%;min-width:0;min-height:42px}.setup-more{grid-column:1/-1;justify-self:stretch}.setup-more>summary{display:flex;justify-content:center;width:100%}.setup-more-menu{display:grid;grid-template-columns:repeat(2,minmax(0,1fr))}.setup-more-menu .btn,.setup-more-menu .btn-alt{min-width:0;width:100%;min-height:42px}.setup-badges{grid-template-columns:repeat(2,minmax(0,1fr))}}@media(max-width:380px){.setup-more-menu{grid-template-columns:1fr}}</style>");
   html += F("<style>.setup-more{width:100%;max-width:100%}.setup-more>summary{width:max-content;margin-left:auto}@media(max-width:600px){.setup-more>summary{width:100%}}</style>");
   html += F("<style>#setupForm>.setup-actions-top{grid-template-columns:repeat(3,minmax(0,1fr));position:static;top:auto;margin-bottom:8px}#setupForm>.setup-actions-top>.btn,#setupForm>.setup-actions-top>.btn-alt,#setupForm .setup-more>summary{display:flex;align-items:center;justify-content:center;box-sizing:border-box;width:100%;min-width:0;min-height:42px;margin:0;padding:8px 10px;font-size:.82rem;line-height:1.2;text-align:center}.setup-more{position:relative;grid-column:auto;justify-self:stretch}.setup-more-menu{position:absolute;z-index:12;top:calc(100% + 6px);right:0;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));width:min(480px,calc(100vw - 32px));padding:10px;border:1px solid var(--setup-line);border-radius:8px;background:var(--setup-panel);box-shadow:0 12px 28px rgba(0,0,0,.2)}@media(max-width:420px){.setup-more-menu{grid-template-columns:1fr}}@media(max-width:360px){#setupForm>.setup-actions-top>.btn,#setupForm>.setup-actions-top>.btn-alt,#setupForm .setup-more>summary{padding:8px 5px;font-size:.74rem}}</style>");
   html += F("<form id='setupForm' action='/configure' method='POST' novalidate>");
-  html += F("<div class='setup-actions-top'><button class='btn' type='submit' id='btn-save-setup'>Save Changes</button><a class='btn-alt' href='/'>Home</a><details class='setup-more'><summary class='btn-alt'>More actions</summary><div class='setup-more-menu'><a class='btn-alt' href='https://numerik11.github.io/ESP32-Irrigation-Controller/web-flasher/?current=");
+  html += F("<div class='setup-actions-top'><button class='btn setup-save' type='submit' id='btn-save-setup'>Save Changes</button><a class='btn-alt' href='/'>Home</a><details class='setup-more'><summary class='btn-alt'>More actions</summary><div class='setup-more-menu'><a class='btn-alt' href='https://numerik11.github.io/ESP32-Irrigation-Controller/web-flasher/?current=");
   html += kFirmwareVersion;
   html += F("' target='_blank' rel='noopener'>Web Flasher</a><a class='btn-alt' href='/update'>Browser OTA</a><button class='btn-alt' type='button' id='btn-clear-cooldown'>Clear After-Rain Delay</button><button class='btn btn-danger' type='button' onclick=\"if(confirm('Reboot controller now?'))fetch('/reboot',{method:'POST'})\">Reboot</button></div></details><span class='save-confirm' id='save-confirm'>Saved</span></div>");
 
@@ -8829,7 +8830,8 @@ void handleSetupPage() {
   // quick-actions + timezone JS
   html += F("<script>");
   // Merge related sections without changing control names, IDs or form ownership.
-  html += F("[['smart-card','Smart Watering And Weather Delays',['delays-card']],['tank-card','Tank and Rain Sensor Settings',['rain-card']],['weather-card','Set Forecast & Time',['timezone-card']],['pins-card','Set Pins(GPIO)',['i2c-card','buttons-card']],['display-card','Display & TFT Pins',['advanced-card']]].forEach(([id,title,children])=>{const parent=document.getElementById(id);if(!parent)return;parent.querySelector('summary').textContent=title;const body=parent.querySelector('.collapse-body');children.forEach(childId=>{const child=document.getElementById(childId);if(!child)return;const heading=document.createElement('h3');heading.textContent=child.querySelector('summary').textContent;const content=child.querySelector('.collapse-body');const section=document.createElement('section');section.id=childId;section.className='setup-merged';if(child.hasAttribute('data-tft-only'))section.setAttribute('data-tft-only','');section.append(heading);while(content.firstChild)section.append(content.firstChild);body.append(section);child.remove();document.querySelector('.setup-nav a[href=\\\"#'+childId+'\\\"]')?.remove();});const link=document.querySelector('.setup-nav a[href=\\\"#'+id+'\\\"]');if(link)link.textContent=title;});");
+  html += F("[['smart-card','Smart Watering And Weather Delays',['delays-card']],['tank-card','Tank and Rain Sensor Settings',['rain-card']],['weather-card','Set Forecast & Timezone',['timezone-card']],['pins-card','Set Pins(GPIO)',['i2c-card','buttons-card']],['display-card','Display & TFT Pins',['advanced-card']]].forEach(([id,title,children])=>{const parent=document.getElementById(id);if(!parent)return;parent.querySelector('summary').textContent=title;const body=parent.querySelector('.collapse-body');children.forEach(childId=>{const child=document.getElementById(childId);if(!child)return;const heading=document.createElement('h3');heading.textContent=child.querySelector('summary').textContent;const content=child.querySelector('.collapse-body');const section=document.createElement('section');section.id=childId;section.className='setup-merged';if(child.hasAttribute('data-tft-only'))section.setAttribute('data-tft-only','');section.append(heading);while(content.firstChild)section.append(content.firstChild);body.append(section);child.remove();document.querySelector('.setup-nav a[href=\\\"#'+childId+'\\\"]')?.remove();});const link=document.querySelector('.setup-nav a[href=\\\"#'+id+'\\\"]');if(link)link.textContent=title;});");
+  html += F("document.querySelectorAll('#setupForm>.card.narrow').forEach(card=>{const body=card.querySelector('.collapse-body');if(!body)return;const actions=document.createElement('div');actions.className='setup-card-save';const button=document.createElement('button');button.className='btn setup-save';button.type='submit';button.textContent='Save Changes';actions.append(button);body.append(actions);});");
   html += F("function revealSetupSection(){const id=location.hash.slice(1);const target=document.getElementById(id);if(!target||!target.closest('#setupForm'))return;let node=target;while(node){if(node.tagName==='DETAILS')node.open=true;node=node.parentElement;}const details=target.querySelector('details');if(details)details.open=true;target.scrollIntoView({block:'start'});}window.addEventListener('hashchange',revealSetupSection);if(location.hash)revealSetupSection();");
   html += F("async function post(path, body){try{await fetch(path,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body});}catch(e){console.error(e)}}");
   html += F("const g=id=>document.getElementById(id);");
@@ -8867,7 +8869,7 @@ void handleSetupPage() {
   html += F("setTimeout(()=>{r.remove();},520);}");
   html += F("document.querySelectorAll('.btn,.btn-alt').forEach(el=>{el.addEventListener('pointerdown',addRipple);});");
   html += F("const savedUrl=new URL(location.href);if(savedUrl.searchParams.get('saved')==='1'){savedUrl.searchParams.delete('saved');history.replaceState(null,'',savedUrl);const c=g('save-confirm');if(c){c.classList.add('show');setTimeout(()=>c.classList.remove('show'),3500);}}");
-  html += F("g('setupForm')?.addEventListener('submit',()=>{setupSaving=true;clearTimeout(setupStatusTimer);if(setupStatusController)setupStatusController.abort();const b=g('btn-save-setup');if(b){b.textContent='Saving...';setTimeout(()=>{b.disabled=true;},0);}});");
+  html += F("g('setupForm')?.addEventListener('submit',()=>{setupSaving=true;clearTimeout(setupStatusTimer);if(setupStatusController)setupStatusController.abort();document.querySelectorAll('#setupForm .setup-save').forEach(b=>{b.textContent='Saving...';setTimeout(()=>{b.disabled=true;},0);});});");
   html += F("g('btn-toggle-backlight')?.addEventListener('click',()=>post('/toggleBacklight','x=1'));");
   html += F("g('btn-clear-cooldown')?.addEventListener('click',async()=>{const b=g('btn-clear-cooldown');const old=b?b.textContent:'';if(b){b.disabled=true;b.textContent='Clearing...';}try{await post('/clear_cooldown','x=1');if(b)b.textContent='After-Rain Delay Cleared';setTimeout(()=>location.reload(),350);}catch(e){console.error(e);if(b){b.disabled=false;b.textContent='Clear Failed';setTimeout(()=>{b.textContent=old;},1500);}}});");
   html += F("g('btn-pause-24')?.addEventListener('click',()=>post('/pause','sec=86400'));");
@@ -8900,7 +8902,7 @@ async function refreshSetupStatus(){
   if(!setupSaving) setupStatusTimer=setTimeout(refreshSetupStatus,5000);
 }
 window.addEventListener('pagehide',()=>{setupSaving=true;clearTimeout(setupStatusTimer);setupStatusController?.abort();});
-window.addEventListener('pageshow',e=>{if(e.persisted){setupSaving=false;const b=g('btn-save-setup');if(b){b.disabled=false;b.textContent='Save Changes';}refreshSetupStatus();}});
+window.addEventListener('pageshow',e=>{if(e.persisted){setupSaving=false;document.querySelectorAll('#setupForm .setup-save').forEach(b=>{b.disabled=false;b.textContent='Save Changes';});refreshSetupStatus();}});
 )SETUPSTATUS");
 
   html += F("async function loadTftStatus(){");
