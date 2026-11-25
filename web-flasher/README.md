@@ -11,7 +11,14 @@ Goto: https://numerik11.github.io/ESP32-Irrigation-Controller/web-flasher/
 
 ## Use
 
-### Latest 3.3.3 build: Setup section Save buttons
+### Version 3.3.4: Run Time 2 temperature rule
+
+Smart Watering can now skip the second scheduled run unless the selected
+temperature is above a set threshold. The first scheduled run and manual
+watering are unchanged. The Home schedule editor is named Program Watering
+Times.
+
+### Version 3.3.3 build: Setup section Save buttons
 
 Each Setup section now has a Save Changes button at the bottom. The Home page
 no longer shows the four redundant section headings, and Setup uses Timezone in

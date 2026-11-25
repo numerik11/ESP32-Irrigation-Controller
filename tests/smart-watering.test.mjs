@@ -43,7 +43,8 @@ test('runtime floor, cap, skips, and disabled schedules',()=>{
 });
 
 function firmware(overrides={}){
-  const state={smartWateringEnabled:true,MAX_ZONES:16,smartTempBasis:1,curTempC:12,todayMin_C:20,todayMax_C:34.2,
+  const state={smartWateringEnabled:true,smartRunTime2TempEnabled:false,smartRunTime2AboveTempC:30,
+    MAX_ZONES:16,smartTempBasis:1,curTempC:12,todayMin_C:20,todayMax_C:34.2,
     smartCoolTempC:15,smartHotTempC:30,smartVeryHotTempC:37,smartHysteresisC:1,smartRuleState:-1,
     smartCoolAdjustPct:-50,smartHotAdjustPct:25,smartVeryHotAdjustPct:50,
     smartSeasonalPct:100,smartMaximumIncreasePct:100,smartMinimumMin:5,
@@ -51,7 +52,7 @@ function firmware(overrides={}){
     rainNext24h_mm:0,smartActualRainSkipMm:5,smartForecastRainSkipMm:5,
     last24hActualRain:()=>0,moisturePercent:()=>-1,moistureSkipThresholdPct:70,durationForSlot:()=>1800,
     constrain:(v,a,b)=>Math.min(b,Math.max(a,v)),...overrides};
-  return compileFirmwareFunctions(source,['smartWateringReferenceTempC','smartRuleForTemperature','smartCurrentRule',
+  return compileFirmwareFunctions(source,['smartWateringReferenceTempC','smartRunTime2Allowed','smartRuleForTemperature','smartCurrentRule',
     'smartRuleAdjustment','smartActualRainReductionPct','smartFactorForZone','smartWateringFactor','smartLimitRuntime','smartWateringDurationForSlot'],state);
 }
 
@@ -93,9 +94,20 @@ test('selected temperature source, explicit missing forecast, and legacy fallbac
   assert.equal(firmware({todayMax_C:NaN}).smartWateringFactor(),1);
 });
 
+test('Run Time 2 requires temperature above its threshold only while Smart Watering is enabled',()=>{
+  const enabled={smartRunTime2TempEnabled:true};
+  assert.equal(firmware({...enabled,todayMax_C:30}).smartRunTime2Allowed(2),false);
+  assert.equal(firmware({...enabled,todayMax_C:29.9}).smartWateringDurationForSlot(0,2),0);
+  assert.ok(firmware({...enabled,todayMax_C:30.1}).smartWateringDurationForSlot(0,2)>0);
+  assert.equal(firmware({...enabled,todayMax_C:NaN}).smartWateringDurationForSlot(0,2),0);
+  assert.ok(firmware({...enabled,todayMax_C:29.9}).smartWateringDurationForSlot(0,1)>0);
+  assert.ok(firmware({...enabled,smartWateringEnabled:false,todayMax_C:29.9}).smartWateringDurationForSlot(0,2)>0);
+  assert.ok(firmware({todayMax_C:29.9}).smartWateringDurationForSlot(0,2)>0);
+});
+
 test('configuration tail includes all sixteen zones and preserves legacy defaults',()=>{
   const load=extractFunction(source,'loadConfig'),save=extractFunction(source,'saveConfig');
-  assert.match(load,/String tail\[64 \+ 5 \+ 4 \* MAX_ZONES\]/,'reserve room beyond the legacy tail');
+  assert.match(load,/String tail\[64 \+ 7 \+ 4 \* MAX_ZONES\]/,'reserve room beyond the legacy tail');
   assert.match(load,/smartTempBasis=0; smartMinimumMin=0; smartMaximumIncreasePct=1500; smartHysteresisC=0; smartSeasonalPct=100;/);
   const fields=['smartTempBasis','smartMinimumMin','smartMaximumIncreasePct','smartHysteresisC','smartSeasonalPct',
     'smartZoneMode','smartZoneCoolPct','smartZoneHotPct','smartZoneVeryHotPct'];

@@ -51,15 +51,25 @@ Review watering activity and find out why a run was delayed or skipped. You can 
 
 ## Watering schedules
 
-Each zone supports selected watering days and **two start times**, each with its own duration.
+Open **Program Watering Times** on the Home page to set each zone's watering days and **two start times**, each with its own duration.
 
 <img width="777" height="846" alt="image" src="https://github.com/user-attachments/assets/b39b3732-15fb-40ca-a5df-2bc8986acbe2" />
 
 ### Smart Watering
 
-Smart Watering adjusts watering duration using your temperature settings and optional moisture sensor.
+Enable **Smart Watering** in **Setup** to adjust scheduled and manual run times using weather and optional ground moisture. With it off, the programmed durations run unchanged by these rules.
 
-To let watering shorten without a minimum limit, set **Minimum Adjusted Runtime** to **0**. A higher value prevents watering from shortening below that setting.
+**Temperature:** Choose the Temperature Basis: current temperature (with today's forecast maximum as a fallback), today's forecast maximum, or the midpoint of today's forecast minimum and maximum. Set the Cool, Hot and Very Hot thresholds and the percentage adjustment for each band. The Normal band has no temperature adjustment. If the selected temperature is unavailable, no temperature adjustment is applied. Temperature thresholds follow the Celsius or Fahrenheit unit selected in Setup.
+
+**Rain:** Actual rainfall from the last 24 hours reduces the adjusted duration by 25% at 1 mm, 50% at 3 mm and 75% at 5 mm. A run is skipped when actual rainfall or the next 24-hour forecast is *above* its configured skip threshold. The forecast does not otherwise shorten the duration.
+
+**Ground moisture:** Enable the moisture input and choose a physical probe or Open-Meteo surface soil moisture. A valid reading below the configured skip level scales the duration by the dry fraction; for example, 36% wet keeps 64% of the duration calculated from temperature and rain. A reading at or above the skip level cancels the run. An unavailable reading does not adjust or skip it.
+
+For example, a 10-minute run with a 20% Hot increase, 3 mm of actual rain, and 36% wet soil becomes about 3 minutes 50 seconds before the minimum runtime is applied.
+
+**Zone adjustments:** Each zone can use the global temperature percentages, opt out of runtime adjustments, or set custom Cool, Hot and Very Hot percentages. The rain and wet-soil skip limits still protect zones that opt out. **Minimum Adjusted Runtime** prevents shortening below the selected number of minutes, without lengthening a shorter programmed run. Set it to **0** to allow the full reduction. A skipped run stays skipped regardless of the minimum.
+
+**Run Time 2 temperature rule (v3.3.4):** Turn on this option in Smart Watering and set a threshold to allow the second scheduled start only when the selected Temperature Basis is *above* it. An unavailable temperature skips that second start. The rule applies to every zone with Start 2 enabled. The first scheduled start and manual watering are unaffected. Turning Smart Watering off also disables this temperature rule.
 
 ### Weather delays
 

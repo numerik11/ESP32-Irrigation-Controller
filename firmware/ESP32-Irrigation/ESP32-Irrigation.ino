@@ -57,7 +57,7 @@ extern "C" {
 // ---------- Hardware ----------
 static const char kFirmwareSignature[] __attribute__((used)) =
   "Original author: Beau Kaczmarek - https://github.com/numerik11/ESP32-Irrigation-Controller";
-static const char kFirmwareVersion[] = "3.3.3";
+static const char kFirmwareVersion[] = "3.3.4";
 static const char kFirmwareBuildDate[] = __DATE__ " " __TIME__;
 static const char kUpdateReportUrl[] =
   "https://irrigation-update-counter.beaukacz86.workers.dev/v1/report";
@@ -403,6 +403,8 @@ uint32_t rainCooldownUntilEpoch = 0;     // when > now => block starts
 int      rainCooldownMin = 60;           // minutes to wait after rain clears
 int      rainThreshold24h_mm = 5;        // forecast/actual 24h total triggers delay
 bool     smartWateringEnabled = false;   // adjust scheduled/manual runtimes from temp/rain
+bool     smartRunTime2TempEnabled = false;
+float    smartRunTime2AboveTempC = 30.0f;
 float    smartCoolTempC = 18.0f;
 int      smartCoolAdjustPct = -20;
 float    smartHotTempC = 28.0f;
@@ -1974,6 +1976,12 @@ static float smartWateringReferenceTempC() {
   return NAN;
 }
 
+static bool smartRunTime2Allowed(int slot) {
+  if (slot != 2 || !smartWateringEnabled || !smartRunTime2TempEnabled) return true;
+  const float tempC = smartWateringReferenceTempC();
+  return isfinite(tempC) && tempC > smartRunTime2AboveTempC;
+}
+
 static float temperatureForDisplay(float tempC) {
   if (!isfinite(tempC) || !tempUseFahrenheit) return tempC;
   return tempC * 9.0f / 5.0f + 32.0f;
@@ -2056,6 +2064,7 @@ static unsigned long smartLimitRuntime(unsigned long base, float factor, int min
 }
 
 static unsigned long smartWateringDurationForSlot(int z, int slot) {
+  if (!smartRunTime2Allowed(slot)) return 0;
   unsigned long base = durationForSlot(z, slot);
   if (!smartWateringEnabled || base == 0) return base;
 
@@ -6599,13 +6608,17 @@ bool shouldStartZone(int zone) {
 
   if (match1 || match2) {
     lastCheckedMinute[zone] = mn;
-    lastStartSlot[zone] = match2 ? 2 : 1;
+    lastStartSlot[zone] = match1 ? 1 : 2;
     if (noWaterPeriodActiveNow()) {
       cancelStart(zone, "NO WATERING", false);
       return false;
     }
     unsigned long base = durationForSlot(zone, lastStartSlot[zone]);
     if (base == 0) return false;
+    if (!smartRunTime2Allowed(lastStartSlot[zone])) {
+      logEvent(zone, "CANCELLED", "TEMP", true);
+      return false;
+    }
     unsigned long adjusted = smartWateringDurationForSlot(zone, lastStartSlot[zone]);
     if (adjusted == 0) {
       logEvent(zone, "CANCELLED", "SMART", true);
@@ -6633,6 +6646,7 @@ void turnOnZone(int z) {
   if (noWaterPeriodActiveNow()) { cancelStart(z, "NO WATERING", false); return; }
   if (isBlockedNow())  { cancelStart(z, "BLOCKED", false); return; }
   if (rainActive)      { cancelStart(z, "RAIN",    true ); return; }
+  if (!smartRunTime2Allowed(lastStartSlot[z])) { cancelStart(z, "TEMP", true); return; }
   if (windBlocksZone(z)) { pendingStart[z] = true; logEvent(z, "QUEUED", "WIND", false); return; }
 
   const bool usePcf = useExpanderForZone(z);
@@ -6656,7 +6670,7 @@ void turnOnZone(int z) {
   }
 
   unsigned long total = smartWateringDurationForSlot(z, lastStartSlot[z]);
-  if (total == 0) total = smartWateringDurationForSlot(z, 1);
+  if (total == 0 && lastStartSlot[z] != 2) total = smartWateringDurationForSlot(z, 1);
   if (total == 0) { cancelStart(z, "SMART", true); return; }
   zoneStartMs[z] = millis();
   zoneActive[z] = true;
@@ -7539,7 +7553,7 @@ void handleRoot() {
   };
   html += F("<div class='wrap section-block' id='schedules-section'><div class='section-head'><div><div class='section-kicker'>Scheduling</div></div>");
   html += F("<p class='section-note'></p></div>");
-  html += F("<div class='card sched sched-shell'><div class='sched-top'><div class='sched-top-copy'><div class='section-kicker'>Planner</div><h3>Weekly schedule editor</h3><p>Set watering days, start times and run duration for each zone.</p></div>");
+  html += F("<div class='card sched sched-shell'><div class='sched-top'><div class='sched-top-copy'><div class='section-kicker'>Planner</div><h3>Program Watering Times</h3><p>Set watering days, start times and run duration for each zone.</p></div>");
   html += F("<div class='sched-tools'><button class='btn btn-secondary collapse-toggle' type='button' id='schedToggle' aria-controls='schedBody' aria-expanded='false'>Show Schedules</button><button class='btn' id='btn-save-all' title='Save all zone schedules'>Save All</button></div></div>");
   html += F("<div id='schedBody' class='sched-ctr sched-body' style='display:none'>");
   html += F("<div class='sched-grid'>");
@@ -8363,6 +8377,14 @@ void handleSetupPage() {
 
   }
   html += F("</select><small>Forecast maximum is recommended for early-morning watering. If the selected forecast is unavailable, no temperature adjustment is applied.</small></div>");
+  html += F("<div class='row switchline'><label for='smartRunTime2TempEnabled'>Run Time 2 temperature rule</label><input id='smartRunTime2TempEnabled' type='checkbox' name='smartRunTime2TempEnabled' ");
+  html += (smartRunTime2TempEnabled ? "checked" : "");
+  html += F("><small>Only start the second scheduled run when the selected Temperature Basis is above the threshold. A missing temperature skips Run Time 2.</small></div>");
+  html += F("<div class='row'><label for='smartRunTime2AboveTemp'>Run Time 2 above (<span data-temp-unit>");
+  html += temperatureUnitChar();
+  html += F("</span>)</label><input id='smartRunTime2AboveTemp' class='in-sm' required data-smart-temp type='number' step='0.1' name='smartRunTime2AboveTemp' value='");
+  html += String(temperatureForDisplay(smartRunTime2AboveTempC), 1);
+  html += F("'><small>Applies to all zones with Start 2 enabled when Smart Watering is on. The first run and manual watering are unaffected.</small></div>");
   html += F("<style>#smart-card .panel-split>div{min-width:0}.smart-scroll{overflow-x:auto}.smart-table{width:100%;border-collapse:collapse}.smart-table th,.smart-table td{padding:8px 6px;text-align:left;border-bottom:1px solid var(--border,#ddd)}.smart-table input{width:82px;min-width:65px}</style>");
   html += F("<div class='smart-scroll'><table class='smart-table'><thead><tr><th>Condition</th><th>Temperature (<span data-temp-unit>");
   html += temperatureUnitChar();
@@ -9169,6 +9191,7 @@ static String scheduleTimeRange(int zone, int slot, const struct tm& today) {
   char clock[16];
   strftime(clock, sizeof(clock), "%H:%M", &start);
   String result(clock);
+  if (!smartRunTime2Allowed(slot)) return result + F(" &mdash; skipped (temperature threshold)");
   const unsigned long duration = smartWateringDurationForSlot(zone, slot);
   if (duration == 0) return result + F(" &mdash; skipped (Smart Watering)");
   const time_t finish = begin + duration;
@@ -9824,7 +9847,7 @@ void loadConfig() {
   tankGpioActiveLow  = gpioActiveLow;
 
   // Read the rest of the file so older configs can safely skip the new per-pin polarity block.
-  String tail[64 + 5 + 4 * MAX_ZONES]; // legacy tail plus v2.9 global and per-zone settings
+  String tail[64 + 7 + 4 * MAX_ZONES]; // legacy tail plus v2.9 and Run Time 2 settings
   int tailCount = 0;
   while (f.available() && tailCount < (int)(sizeof(tail) / sizeof(tail[0]))) {
     tail[tailCount++] = _safeReadLine(f);
@@ -9984,6 +10007,11 @@ void loadConfig() {
         (enabled == 0 || enabled == 1) && mask >= 0 && mask <= 127 && start >= 0 && start < 1440 && end >= 0 && end < 1440) {
       noWaterEnabled[i] = enabled; noWaterDays[i] = mask; noWaterStart[i] = start; noWaterEnd[i] = end;
     }
+  }
+  if (nextTail(s) && s.length()) smartRunTime2TempEnabled = (s.toInt() == 1);
+  if (nextTail(s) && s.length()) {
+    float v = s.toFloat();
+    if (v >= -30.0f && v <= 60.0f) smartRunTime2AboveTempC = v;
   }
   smartRuleState=-1;
 
@@ -10153,6 +10181,8 @@ void saveConfig() {
   for (int i = 0; i < NO_WATER_PERIODS; ++i) {
     f.printf("nw:%d,%d,%d,%d\n", noWaterEnabled[i] ? 1 : 0, noWaterDays[i], noWaterStart[i], noWaterEnd[i]);
   }
+  f.println(smartRunTime2TempEnabled ? 1 : 0);
+  f.println(String(smartRunTime2AboveTempC, 2));
 
   f.close();
 }
@@ -10229,6 +10259,7 @@ void handleConfigure() {
   const char* pctFields[]={"smartCoolPct","smartHotPct","smartVeryHotPct"};
   for (const char* name : pctFields) smartValid &= validSmartNumber(name,-100,300,true);
   smartValid &= validSmartNumber("smartTempBasis",0,2,true);
+  smartValid &= validSmartNumber("smartRunTime2AboveTemp",smartF ? -22 : -30,smartF ? 140 : 60,false);
   smartValid &= validSmartNumber("smartMinimumMin",0,1440,true);
   smartValid &= validSmartNumber("smartMaximumIncreasePct",0,1500,true);
   smartValid &= validSmartNumber("smartSeasonalPct",0,200,true);
@@ -10367,6 +10398,7 @@ void handleConfigure() {
   // Run mode (sequential vs concurrent)
   runZonesConcurrent = server.hasArg("runConcurrent");
   smartWateringEnabled = server.hasArg("smartWatering");
+  smartRunTime2TempEnabled = server.hasArg("smartRunTime2TempEnabled");
   if (server.hasArg("smartTempBasis")) smartTempBasis=server.arg("smartTempBasis").toInt();
   if (server.hasArg("smartMinimumMin")) smartMinimumMin=server.arg("smartMinimumMin").toInt();
   if (server.hasArg("smartMaximumIncreasePct")) smartMaximumIncreasePct=server.arg("smartMaximumIncreasePct").toInt();
@@ -10388,6 +10420,8 @@ void handleConfigure() {
   auto submittedTempToC = [&](float value) -> float {
     return submittedFahrenheit ? (value - 32.0f) * 5.0f / 9.0f : value;
   };
+  if (server.hasArg("smartRunTime2AboveTemp"))
+    smartRunTime2AboveTempC = submittedTempToC(server.arg("smartRunTime2AboveTemp").toFloat());
   float coolTemp = server.hasArg("smartCoolTemp") ? submittedTempToC(server.arg("smartCoolTemp").toFloat()) : smartCoolTempC;
   float hotTemp = server.hasArg("smartHotTemp") ? submittedTempToC(server.arg("smartHotTemp").toFloat()) : smartHotTempC;
   float veryHotTemp = server.hasArg("smartVeryHotTemp") ? submittedTempToC(server.arg("smartVeryHotTemp").toFloat()) : smartVeryHotTempC;

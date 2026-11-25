@@ -7,7 +7,7 @@ function page(overrides={}){
   const state={MAX_ZONES:3,zonesCount:3,days:[[false,false,false,true,false,false,false],[false,false,false,true,false,false,false],[true,false,false,false,false,false,false]],
     zoneNames:['Audrey <II> & herbs','Tomatoes','Other day'],startHour:[17,23,10],startMin:[30,50,0],startHour2:[11,0,0],startMin2:[30,0,0],enableStartTime2:[true,false,false],
     scheduleHtmlCustomCss:'',
-    durationForSlot:()=>1800,smartWateringDurationForSlot:()=>1800,
+    durationForSlot:()=>1800,smartWateringDurationForSlot:()=>1800,smartRunTime2Allowed:()=>true,
     CONTENT_LENGTH_UNKNOWN:-1, time:()=>Date.UTC(2026,8,9,18)/1000,F:v=>v,String,sizeof:()=>40,
     server:{setContentLength:()=>{},sendContent:chunk=>{response.html=(response.html||'')+chunk;},sendHeader:(k,v)=>response.headers[k]=v,send:(code,type,html)=>Object.assign(response,{code,type,html})},
     localtime_r:(epoch,out)=>{const d=new Date(epoch*1000);Object.assign(out,{tm_year:d.getUTCFullYear()-1900,tm_mon:d.getUTCMonth(),tm_mday:d.getUTCDate(),tm_hour:d.getUTCHours(),tm_min:d.getUTCMinutes(),tm_sec:d.getUTCSeconds(),tm_wday:d.getUTCDay(),tm_yday:Math.floor((d-Date.UTC(d.getUTCFullYear(),0,1))/86400000)});return out;},
@@ -33,6 +33,7 @@ test('iframe schedule renders named zones, both starts in time order, past start
 test('schedule handles disabled slots, seconds, skipped runs, unnamed zones and empty days',()=>{
   assert.match(page({smartWateringDurationForSlot:()=>75}).response.html,/11:31:15/);
   assert.match(page({smartWateringDurationForSlot:()=>0}).response.html,/skipped \(Smart Watering\)/);
+  assert.match(page({smartRunTime2Allowed:slot=>slot!==2}).response.html,/skipped \(temperature threshold\)/);
   assert.match(page({zoneNames:['  ','Tomatoes','Other']}).response.html,/>Zone 1</);
   assert.match(page({durationForSlot:()=>0}).response.html,/No watering scheduled today/);
   const {funcs}=page();
