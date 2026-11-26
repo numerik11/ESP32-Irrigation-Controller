@@ -11,6 +11,15 @@ Goto: https://numerik11.github.io/ESP32-Irrigation-Controller/web-flasher/
 
 ## Use
 
+### Version 3.3.5: calibrated moisture and gentler dry-soil boost
+
+Open-Meteo 0-1 cm water volume is converted to wetness using the points
+8% volume = 5% wet, 18% = 25%, 23% = 50%, and 36% = 100%. The default
+wet-soil skip level becomes 60% wet, keeping the former trigger at about
+26% volume. Dry soil can add runtime, with the default bonus reduced to 30%
+after 100% proved too strong at low moisture. The bonus and hot adjustments
+combine, with the final runtime capped at twice the programmed duration.
+
 ### Version 3.3.4: Run Time 2 temperature rule
 
 Smart Watering can now skip the second scheduled run unless the selected

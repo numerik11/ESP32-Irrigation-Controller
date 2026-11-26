@@ -15,15 +15,17 @@ test("Open-Meteo moisture converts volume fractions and rejects invalid values",
   for (const value of [NaN, Infinity, -0.01, 1.01]) assert.equal(meteoSoilPercent(value), -1);
 });
 
-test("Moisture skip uses selected source, threshold, enable state and reading age", () => {
+test("Open-Meteo wetness calibration drives the skip threshold without changing probe readings", () => {
   function reading(overrides = {}) {
-    return compileFirmwareFunctions(source, ["moisturePercent", "isSoilWetForSmartSkip"], {
+    return compileFirmwareFunctions(source, ["meteoMoistureVolumePercent", "moisturePercent", "isSoilWetForSmartSkip"], {
       moistureProbeEnabled: true,
       moistureUseMeteo: true,
-      meteoMoisturePct: 30,
+      meteoMoisturePct: 26,
       meteoMoistureFetchedMs: 1000,
       millis: () => 2000,
-      moistureSkipThresholdPct: 30,
+      moistureSkipThresholdPct: 60,
+      METEO_DRY_VOLUME_PCT: 1,
+      METEO_WET_VOLUME_PCT: 36,
       moistureRaw: () => { throw new Error("Meteo must not read ADC"); },
       moistureDryRaw: 3000,
       moistureWetRaw: 1200,
@@ -33,7 +35,10 @@ test("Moisture skip uses selected source, threshold, enable state and reading ag
     });
   }
   assert.equal(reading().isSoilWetForSmartSkip(), true);
-  assert.equal(reading({ meteoMoisturePct: 29 }).isSoilWetForSmartSkip(), false);
+  assert.equal(reading({ meteoMoisturePct: 25 }).isSoilWetForSmartSkip(), false);
+  for (const [volume, wet] of [[1, 0], [8, 5], [18, 25], [23, 50], [36, 100]]) {
+    assert.equal(reading({ meteoMoisturePct: volume }).moisturePercent(), wet);
+  }
   assert.equal(reading({ meteoMoisturePct: -1, moistureSkipThresholdPct: 0 }).isSoilWetForSmartSkip(), false);
   assert.equal(reading({ moistureProbeEnabled: false }).moisturePercent(), -1);
   assert.equal(reading({ moistureProbeEnabled: false }).isSoilWetForSmartSkip(), false);
