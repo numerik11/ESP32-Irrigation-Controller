@@ -186,13 +186,13 @@
       <div class="update-count" id="updateCount" aria-live="polite">Loading successful updates...</div>
     </section>
 
-    <p>Version 3.3.4 adds a temperature threshold for the second scheduled watering run and renames the Home schedule editor to Program Watering Times.</p>
+    <p>Version 3.3.4 adds a temperature threshold for the second scheduled watering run and renames the Home schedule editor to Program Watering Times. If an earlier v3.3.4 USB install on an ESP32 Dev Module shows "wrong chip id 0x0009", refresh this page and reinstall the ESP32 Dev Module image.</p>
 
     <div class="installer">
       <esp-web-install-button id="installer"></esp-web-install-button>
     </div>
 
-    <p><a id="firmwareDownload" href="esp32-dev/firmware.bin?v=3.3.4-watering-times-temp-rule" download>Download application .bin for Browser OTA</a></p>
+    <p><a id="firmwareDownload" href="esp32-dev/firmware.bin?v=3.3.4-esp32-bootloader-fix" download>Download application .bin for Browser OTA</a></p>
     <label for="firmwareLink">GitHub URL for Browser OTA</label>
     <input id="firmwareLink" type="url" readonly style="width:100%;padding:10px" aria-label="GitHub firmware URL for selected board">
     <p>Copy this URL into the controller's Browser OTA page, or download the .bin and upload it there.</p>
@@ -207,7 +207,7 @@
 
   <script>
     const updaterVersion = "3.3.4";
-    const updaterBuild = "3.3.4-watering-times-temp-rule";
+    const updaterBuild = "3.3.4-esp32-bootloader-fix";
     const counterUrl = "https://irrigation-update-counter.beaukacz86.workers.dev";
     const board = document.getElementById("board");
     const installer = document.getElementById("installer");

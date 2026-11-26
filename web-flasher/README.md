@@ -18,6 +18,11 @@ temperature is above a set threshold. The first scheduled run and manual
 watering are unchanged. The Home schedule editor is named Program Watering
 Times.
 
+The first v3.3.4 ESP32 Dev Module USB package accidentally contained an ESP32-S3
+bootloader and could show `wrong chip id 0x0009` in the serial monitor. Refresh
+the web flasher page and reinstall the ESP32 Dev Module image to recover. The
+corrected package retains firmware version 3.3.4.
+
 ### Version 3.3.3 build: Setup section Save buttons
 
 Each Setup section now has a Save Changes button at the bottom. The Home page

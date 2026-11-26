@@ -12,6 +12,7 @@ const targets = [
   {
     name: "esp32-dev",
     chipFamily: "ESP32",
+    chipId: 0,
     offsets: {
       "bootloader.bin": 0x1000,
       "partitions.bin": 0x8000,
@@ -22,6 +23,7 @@ const targets = [
   {
     name: "esp32-s3-devkitc-1",
     chipFamily: "ESP32-S3",
+    chipId: 9,
     offsets: {
       "bootloader.bin": 0,
       "partitions.bin": 0x8000,
@@ -56,6 +58,12 @@ for (const target of targets) {
 
       const file = await stat(path.join(webFlasherDirectory, target.name, localPath));
       assert.ok(file.isFile(), `${part.path} references a local file`);
+      if (localPath === "bootloader.bin" || localPath === "firmware.bin") {
+        const image = await readFile(path.join(webFlasherDirectory, target.name, localPath));
+        assert.equal(image[0], 0xe9, `${localPath} has an ESP image header`);
+        assert.equal(image.readUInt16LE(12), target.chipId,
+          `${target.name} ${localPath} targets ${target.chipFamily}`);
+      }
     }
   });
 }
